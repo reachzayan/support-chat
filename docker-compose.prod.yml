@@ -1,0 +1,75 @@
+# EC2 overlay (inbox-triage pattern).
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml up --build -d
+#
+# Secrets (nothing committed):
+#   - repo-root .env            → POSTGRES_*, REDIS_PASSWORD, frontend build args
+#   - backend/.env.prod         → all app settings (see backend/.env.prod.example)
+#
+# Host nginx (+ sslip.io / certbot) terminates TLS and proxies to loopback.
+# Use APP_ENV=dev unless Redis TLS (rediss://) is configured.
+
+services:
+  postgres:
+    restart: unless-stopped
+    ports: !reset []
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:?POSTGRES_USER is required}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      POSTGRES_DB: ${POSTGRES_DB:?POSTGRES_DB is required}
+
+  redis:
+    restart: unless-stopped
+    ports: !reset []
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD is required}
+    command:
+      [
+        "redis-server",
+        "--requirepass",
+        "${REDIS_PASSWORD}",
+        "--appendonly",
+        "yes",
+        "--rename-command",
+        "FLUSHALL",
+        "",
+        "--rename-command",
+        "FLUSHDB",
+        "",
+        "--rename-command",
+        "DEBUG",
+        "",
+        "--rename-command",
+        "KEYS",
+        "",
+      ]
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "redis-cli -a \"$$REDIS_PASSWORD\" --no-auth-warning ping | grep PONG",
+        ]
+
+  backend:
+    restart: unless-stopped
+    env_file: !override
+      - ./backend/.env.prod
+    environment: !reset {}
+    ports: !override
+      - "127.0.0.1:${BACKEND_PORT:-8000}:8000"
+
+  frontend:
+    restart: unless-stopped
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        API_ORIGIN: ${FRONTEND_API_ORIGIN:-http://backend:8000}
+        NEXT_PUBLIC_API_ORIGIN: ${NEXT_PUBLIC_API_ORIGIN:-}
+        NEXT_PUBLIC_WIDGET_ORIGIN: ${NEXT_PUBLIC_WIDGET_ORIGIN:?NEXT_PUBLIC_WIDGET_ORIGIN is required}
+        NEXT_PUBLIC_STAFF_APP_ORIGIN: ${NEXT_PUBLIC_STAFF_APP_ORIGIN:?NEXT_PUBLIC_STAFF_APP_ORIGIN is required}
+        NEXT_PUBLIC_MARKETING_HOST_ORIGIN: ${NEXT_PUBLIC_MARKETING_HOST_ORIGIN:?NEXT_PUBLIC_MARKETING_HOST_ORIGIN is required}
+        NEXT_PUBLIC_DEMO_SITE_KEY: ${NEXT_PUBLIC_DEMO_SITE_KEY:-demo}
+        NEXT_PUBLIC_DEMO_PUBLIC_KEY: ${NEXT_PUBLIC_DEMO_PUBLIC_KEY:-}
+        WIDGET_FRAME_ANCESTORS: ${WIDGET_FRAME_ANCESTORS:?WIDGET_FRAME_ANCESTORS is required}
+    ports: !override
+      - "127.0.0.1:${FRONTEND_PORT:-3000}:3000"

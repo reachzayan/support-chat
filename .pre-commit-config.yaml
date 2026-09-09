@@ -1,0 +1,34 @@
+fail_fast: false
+default_install_hook_types: [pre-commit]
+
+repos:
+  - repo: local
+    hooks:
+      - id: ruff
+        name: ruff
+        language: system
+        types: [python]
+        files: ^backend/
+        exclude: ^backend/\.venv/
+        entry: uv run --project backend ruff check --fix --config backend/pyproject.toml --
+      - id: ruff-format
+        name: ruff format
+        language: system
+        types: [python]
+        files: ^backend/
+        exclude: ^backend/\.venv/
+        entry: uv run --project backend ruff format --config backend/pyproject.toml --
+      - id: oxfmt
+        name: oxfmt
+        language: system
+        pass_filenames: true
+        files: ^frontend/.*\.(js|mjs|cjs|ts|tsx|json|css)$
+        exclude: ^(frontend/\.next/|frontend/node_modules/)
+        entry: npm --prefix frontend exec -- oxfmt --write --
+      - id: oxlint
+        name: oxlint
+        language: system
+        pass_filenames: true
+        files: ^frontend/.*\.(js|mjs|cjs|ts|tsx)$
+        exclude: ^(frontend/\.next/|frontend/node_modules/)
+        entry: npm --prefix frontend exec -- oxlint --fix --deny-warnings --threads=1 --

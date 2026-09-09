@@ -1,0 +1,130 @@
+# Local full stack (and base for EC2 prod overlay).
+#   docker compose up --build
+#
+# Services: postgres, redis, backend (API + KB ingest), frontend
+# Public URL on EC2: host nginx → 127.0.0.1:{3000,8000} (see docker-compose.prod.yml)
+
+name: ai-webchat
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-chat}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-chat}
+      POSTGRES_DB: ${POSTGRES_DB:-support_chat}
+    ports:
+      - "${POSTGRES_PORT:-55432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB",
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
+
+  redis:
+    image: redis:7-alpine
+    command:
+      [
+        "redis-server",
+        "--requirepass",
+        "${REDIS_PASSWORD:-local-dev-redis}",
+        "--appendonly",
+        "yes",
+      ]
+    ports:
+      - "${REDIS_PORT:-56379}:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "redis-cli -a \"$$REDIS_PASSWORD\" --no-auth-warning ping | grep PONG",
+        ]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 5s
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-local-dev-redis}
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    ports:
+      - "${BACKEND_PORT:-8000}:8000"
+    env_file:
+      - path: ./backend/.env
+        required: false
+    environment:
+      # Compose DNS overrides host-local URLs from backend/.env.
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-chat}:${POSTGRES_PASSWORD:-chat}@postgres:5432/${POSTGRES_DB:-support_chat}
+      REDIS_URL: redis://:${REDIS_PASSWORD:-local-dev-redis}@redis:6379/0
+      APP_ENV: ${APP_ENV:-local}
+      COOKIE_SECURE: ${COOKIE_SECURE:-false}
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required}
+      WIDGET_TOKEN_SECRET: ${WIDGET_TOKEN_SECRET:?WIDGET_TOKEN_SECRET is required}
+      RATE_KEY_SECRET: ${RATE_KEY_SECRET:?RATE_KEY_SECRET is required}
+      STAFF_APP_ORIGIN: ${STAFF_APP_ORIGIN:-http://localhost:3000}
+      WIDGET_ORIGIN: ${WIDGET_ORIGIN:-http://widget.localhost:3000}
+      MARKETING_HOST_ORIGIN: ${MARKETING_HOST_ORIGIN:-http://host.localhost:3000}
+      WIDGET_FRAME_ANCESTORS: ${WIDGET_FRAME_ANCESTORS:-http://localhost:3000,http://host.localhost:3000}
+      TRUSTED_PROXY_CIDRS: ${TRUSTED_PROXY_CIDRS:-}
+      CHAT_RETENTION_DAYS: ${CHAT_RETENTION_DAYS:-30}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      ANTHROPIC_MODEL: ${ANTHROPIC_MODEL:-claude-haiku-4-5-20251001}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_EMBED_MODEL: ${OPENAI_EMBED_MODEL:-text-embedding-3-small}
+      OPENAI_EMBED_DIM: ${OPENAI_EMBED_DIM:-1536}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health')",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 40s
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        API_ORIGIN: ${FRONTEND_API_ORIGIN:-http://backend:8000}
+        NEXT_PUBLIC_API_ORIGIN: ${NEXT_PUBLIC_API_ORIGIN:-}
+        NEXT_PUBLIC_WIDGET_ORIGIN: ${NEXT_PUBLIC_WIDGET_ORIGIN:-http://localhost:3000}
+        NEXT_PUBLIC_STAFF_APP_ORIGIN: ${NEXT_PUBLIC_STAFF_APP_ORIGIN:-http://localhost:3000}
+        NEXT_PUBLIC_MARKETING_HOST_ORIGIN: ${NEXT_PUBLIC_MARKETING_HOST_ORIGIN:-http://localhost:3000}
+        NEXT_PUBLIC_DEMO_SITE_KEY: ${NEXT_PUBLIC_DEMO_SITE_KEY:-demo}
+        NEXT_PUBLIC_DEMO_PUBLIC_KEY: ${NEXT_PUBLIC_DEMO_PUBLIC_KEY:-}
+        WIDGET_FRAME_ANCESTORS: ${WIDGET_FRAME_ANCESTORS:-http://localhost:3000}
+    environment:
+      API_ORIGIN: ${FRONTEND_API_ORIGIN:-http://backend:8000}
+      PORT: "3000"
+      HOSTNAME: 0.0.0.0
+    ports:
+      - "${FRONTEND_PORT:-3000}:3000"
+    depends_on:
+      backend:
+        condition: service_healthy
+
+volumes:
+  postgres_data:
+  redis_data:
