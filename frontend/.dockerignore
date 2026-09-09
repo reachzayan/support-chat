@@ -1,0 +1,16 @@
+node_modules
+.next
+.git
+.gitignore
+*.md
+.env
+.env.*
+!.env.example
+.husky
+coverage
+vitest.config.*
+**/*.test.ts
+**/*.test.tsx
+**/__tests__
+.DS_Store
+tsconfig.tsbuildinfo

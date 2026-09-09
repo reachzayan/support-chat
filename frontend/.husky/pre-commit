@@ -1,0 +1,3 @@
+root="$(git rev-parse --show-toplevel)"
+cd "$root"
+npm --prefix frontend exec -- lint-staged --config frontend/.lintstagedrc.mjs
