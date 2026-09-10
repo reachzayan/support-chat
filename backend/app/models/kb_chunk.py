@@ -1,0 +1,71 @@
+from uuid import UUID, uuid4
+
+from pgvector.sqlalchemy import Vector
+from sqlalchemy import (
+    Boolean,
+    CheckConstraint,
+    Computed,
+    ForeignKey,
+    ForeignKeyConstraint,
+    Index,
+    Integer,
+    String,
+    Text,
+    text,
+)
+from sqlalchemy.dialects.postgresql import JSONB, TSVECTOR
+from sqlalchemy.orm import Mapped, mapped_column
+
+from app.models.base import Base
+
+EMBEDDING_DIM = 1536
+
+SEARCH_DOCUMENT_SQL = (
+    "setweight(to_tsvector('english', coalesce(canonical_question, '')), 'A') || "
+    "setweight(to_tsvector('english', kb_aliases_as_text(aliases)), 'A') || "
+    "setweight(to_tsvector('english', coalesce(heading, '')), 'B') || "
+    "setweight(to_tsvector('english', coalesce(body, '')), 'C')"
+)
+
+
+class KbChunk(Base):
+    __tablename__ = "kb_chunks"
+    __table_args__ = (
+        Index("ix_kb_chunks_site_enabled", "site_id", "enabled"),
+        CheckConstraint(
+            "kind IN ('faq','section','table','definition','prose','refusal','fact')",
+            name="ck_kb_chunks_kind",
+        ),
+        ForeignKeyConstraint(
+            ["snapshot_id", "site_id"],
+            ["kb_snapshots.id", "kb_snapshots.site_id"],
+            name="fk_kb_chunks_snapshot_site",
+            ondelete="CASCADE",
+        ),
+    )
+
+    id: Mapped[UUID] = mapped_column(
+        primary_key=True, default=uuid4, server_default=text("gen_random_uuid()")
+    )
+    page_id: Mapped[UUID] = mapped_column(ForeignKey("kb_pages.id", ondelete="CASCADE"))
+    site_id: Mapped[UUID] = mapped_column(ForeignKey("sites.id"))
+    snapshot_id: Mapped[UUID] = mapped_column(ForeignKey("kb_snapshots.id", ondelete="CASCADE"))
+    ordinal: Mapped[int] = mapped_column(Integer)
+    kind: Mapped[str] = mapped_column(String, server_default=text("'prose'"))
+    heading: Mapped[str] = mapped_column(String)
+    canonical_question: Mapped[str | None] = mapped_column(Text, nullable=True)
+    answer_verbatim: Mapped[str] = mapped_column(Text)
+    aliases: Mapped[list] = mapped_column(JSONB, server_default=text("'[]'::jsonb"))
+    topic: Mapped[str | None] = mapped_column(String, nullable=True)
+    approved: Mapped[bool] = mapped_column(Boolean, server_default=text("true"))
+    requires_human: Mapped[bool] = mapped_column(Boolean, server_default=text("false"))
+    legal_sensitive: Mapped[bool] = mapped_column(Boolean, server_default=text("false"))
+    display_locator: Mapped[str | None] = mapped_column(String, nullable=True)
+    body: Mapped[str] = mapped_column(Text)
+    context_prefix: Mapped[str] = mapped_column(Text, server_default=text("''"))
+    search_document: Mapped[str] = mapped_column(
+        TSVECTOR,
+        Computed(SEARCH_DOCUMENT_SQL, persisted=True),
+    )
+    embedding: Mapped[list[float] | None] = mapped_column(Vector(EMBEDDING_DIM), nullable=True)
+    enabled: Mapped[bool] = mapped_column(Boolean, server_default=text("true"))
