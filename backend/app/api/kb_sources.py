@@ -1,0 +1,439 @@
+from typing import Annotated
+from uuid import UUID
+
+from fastapi import APIRouter, HTTPException, Query, status
+from pydantic import BaseModel, ConfigDict
+
+from app.db import SessionDep
+from app.models.kb_chunk import KbChunk
+from app.models.kb_page import KbPage
+from app.models.kb_page_job import KbPageJob
+from app.models.kb_source import KbSource
+from app.security.deps import CurrentAdmin, CurrentUser
+from app.services.kb_source_admin import KbSourceService
+from app.services.site_admin import AdminError
+
+router = APIRouter()
+
+
+class SourceIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    mode: str
+    start_url: str
+    seed_urls: list[str] = []
+
+
+class SourcePatchIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool | None = None
+
+
+class PagePatchIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool
+
+
+class SourceOut(BaseModel):
+    id: UUID
+    site_id: UUID
+    start_url: str
+    mode: str
+    status: str
+    stage: str = "idle"
+    error_code: str | None
+    page_count: int
+    pages_discovered: int = 0
+    pages_fetched: int = 0
+    pages_extracted: int = 0
+    pages_embedded: int = 0
+    pages_failed: int = 0
+    pages_skipped_unchanged: int = 0
+    last_run_started_at: str | None = None
+    last_run_finished_at: str | None = None
+    enabled: bool
+    snapshot_state: str | None = None
+    snapshot_error_code: str | None = None
+
+
+class SourceListOut(BaseModel):
+    items: list[SourceOut]
+
+
+class SnapshotOut(BaseModel):
+    id: UUID
+    state: str
+    created_at: str | None
+    promoted_at: str | None
+    token_estimate: int
+    validation_errors: list[str]
+    error_code: str | None
+
+
+class SnapshotListOut(BaseModel):
+    items: list[SnapshotOut]
+
+
+class EvidenceUnitOut(BaseModel):
+    kind: str
+    canonical_question: str | None
+    heading: str
+    answer_verbatim: str
+    display_locator: str | None
+
+
+class DiffChangeOut(BaseModel):
+    before: EvidenceUnitOut
+    after: EvidenceUnitOut
+
+
+class DiffOut(BaseModel):
+    added: list[EvidenceUnitOut]
+    changed: list[DiffChangeOut]
+    removed: list[EvidenceUnitOut]
+
+
+class PageOut(BaseModel):
+    id: UUID
+    source_id: UUID
+    url: str
+    title: str
+    enabled: bool
+    processing_status: str = "pending"
+    failure_reason: str | None = None
+    last_success_at: str | None = None
+
+
+class ChunkOut(BaseModel):
+    ordinal: int
+    heading: str
+    body: str
+    enabled: bool
+
+
+class PageDetailOut(BaseModel):
+    id: UUID
+    source_id: UUID
+    url: str
+    title: str
+    enabled: bool
+    skip_reason: str | None
+    content_text: str
+    chunks: list[ChunkOut]
+    processing_status: str = "pending"
+    failure_reason: str | None = None
+    last_success_at: str | None = None
+
+
+class ProgressEventOut(BaseModel):
+    timestamp: str | None
+    stage: str
+    state: str
+    page_url: str
+    duration_ms: int | None = None
+
+
+class ProgressJobOut(BaseModel):
+    page_url: str
+    stage: str
+    attempt: int
+    started_at: str | None
+
+
+class ProgressOut(BaseModel):
+    source: SourceOut
+    recent_events: list[ProgressEventOut]
+    current_jobs: list[ProgressJobOut]
+
+
+class PageListOut(BaseModel):
+    items: list[PageOut]
+
+
+def _http_error(exc: AdminError) -> HTTPException:
+    if exc.code == "not_found":
+        return HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
+    if exc.code == "invalid_origin":
+        return HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail="Invalid origin"
+        )
+    if exc.code == "too_large":
+        return HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail="Too large")
+    return HTTPException(
+        status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail="Invalid request"
+    )
+
+
+async def _source_out(session, source: KbSource) -> SourceOut:
+    snap = await KbSourceService(session).status_snapshot(source.id)
+    return SourceOut(
+        id=source.id,
+        site_id=source.site_id,
+        start_url=source.start_url,
+        mode=source.mode,
+        status=source.status,
+        stage=source.stage or "idle",
+        error_code=source.error_code,
+        page_count=source.page_count,
+        pages_discovered=source.pages_discovered,
+        pages_fetched=source.pages_fetched,
+        pages_extracted=source.pages_extracted,
+        pages_embedded=source.pages_embedded,
+        pages_failed=source.pages_failed,
+        pages_skipped_unchanged=source.pages_skipped_unchanged,
+        last_run_started_at=_iso(source.last_run_started_at),
+        last_run_finished_at=_iso(source.last_run_finished_at),
+        enabled=source.enabled,
+        snapshot_state=snap.state if snap is not None else None,
+        snapshot_error_code=snap.error_code if snap is not None else None,
+    )
+
+
+def _page_out(page: KbPage) -> PageOut:
+    return PageOut(
+        id=page.id,
+        source_id=page.source_id,
+        url=page.url,
+        title=page.title,
+        enabled=page.enabled,
+        processing_status=page.processing_status,
+        failure_reason=page.failure_reason,
+        last_success_at=_iso(page.last_success_at),
+    )
+
+
+def _page_detail_out(page: KbPage, chunks: list[KbChunk]) -> PageDetailOut:
+    return PageDetailOut(
+        id=page.id,
+        source_id=page.source_id,
+        url=page.url,
+        title=page.title,
+        enabled=page.enabled,
+        skip_reason=page.skip_reason,
+        content_text=page.content_text,
+        chunks=[
+            ChunkOut(
+                ordinal=chunk.ordinal,
+                heading=chunk.heading,
+                body=chunk.body,
+                enabled=chunk.enabled,
+            )
+            for chunk in chunks
+        ],
+        processing_status=page.processing_status,
+        failure_reason=page.failure_reason,
+        last_success_at=_iso(page.last_success_at),
+    )
+
+
+@router.get("/api/sites/{site_id}/kb-sources", response_model=SourceListOut)
+async def list_sources(site_id: UUID, session: SessionDep, _staff: CurrentUser) -> SourceListOut:
+    try:
+        rows = await KbSourceService(session).list_sources(site_id)
+    except AdminError as exc:
+        raise _http_error(exc) from exc
+    items = [await _source_out(session, row) for row in rows]
+    return SourceListOut(items=items)
+
+
+@router.post(
+    "/api/sites/{site_id}/kb-sources",
+    response_model=SourceOut,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_source(
+    site_id: UUID, payload: SourceIn, session: SessionDep, admin: CurrentAdmin
+) -> SourceOut:
+    try:
+        source = await KbSourceService(session).create_source(
+            site_id,
+            admin,
+            mode=payload.mode,
+            start_url=payload.start_url,
+            seed_urls=payload.seed_urls,
+        )
+    except AdminError as exc:
+        raise _http_error(exc) from exc
+    return await _source_out(session, source)
+
+
+@router.patch("/api/kb-sources/{source_id}", response_model=SourceOut)
+async def patch_source(
+    source_id: UUID, payload: SourcePatchIn, session: SessionDep, admin: CurrentAdmin
+) -> SourceOut:
+    try:
+        source = await KbSourceService(session).patch_source(source_id, enabled=payload.enabled)
+    except AdminError as exc:
+        raise _http_error(exc) from exc
+    return await _source_out(session, source)
+
+
+@router.post("/api/kb-sources/{source_id}/sync", response_model=SourceOut)
+async def sync_source(source_id: UUID, session: SessionDep, admin: CurrentAdmin) -> SourceOut:
+    try:
+        source = await KbSourceService(session).sync_source(source_id)
+    except AdminError as exc:
+        raise _http_error(exc) from exc
+    return await _source_out(session, source)
+
+
+@router.delete("/api/kb-sources/{source_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_source(source_id: UUID, session: SessionDep, admin: CurrentAdmin) -> None:
+    try:
+        await KbSourceService(session).delete_source(source_id)
+    except AdminError as exc:
+        raise _http_error(exc) from exc
+
+
+@router.get("/api/kb-sources/{source_id}/pages", response_model=PageListOut)
+async def list_pages(source_id: UUID, session: SessionDep, _staff: CurrentUser) -> PageListOut:
+    try:
+        rows = await KbSourceService(session).list_pages(source_id)
+    except AdminError as exc:
+        raise _http_error(exc) from exc
+    return PageListOut(items=[_page_out(row) for row in rows])
+
+
+@router.get("/api/kb-sources/{source_id}/progress", response_model=ProgressOut)
+async def source_progress(source_id: UUID, session: SessionDep, _staff: CurrentUser) -> ProgressOut:
+    source = await session.get(KbSource, source_id)
+    if source is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
+    from sqlalchemy import select
+
+    result = await session.execute(
+        select(KbPageJob, KbPage)
+        .join(KbPage, KbPage.id == KbPageJob.page_id)
+        .where(KbPageJob.source_id == source_id)
+        .order_by(KbPageJob.finished_at.desc().nullslast(), KbPageJob.created_at.desc())
+    )
+    rows = list(result.all())
+    recent: list[ProgressEventOut] = []
+    current: list[ProgressJobOut] = []
+    for job, page in rows:
+        duration = None
+        if job.started_at is not None and job.finished_at is not None:
+            duration = round((job.finished_at - job.started_at).total_seconds() * 1000)
+        if job.finished_at is not None and len(recent) < 10:
+            recent.append(
+                ProgressEventOut(
+                    timestamp=_iso(job.finished_at),
+                    stage=job.stage,
+                    state=job.state,
+                    page_url=page.url,
+                    duration_ms=duration,
+                )
+            )
+        if job.state == "running":
+            current.append(
+                ProgressJobOut(
+                    page_url=page.url,
+                    stage=job.stage,
+                    attempt=job.attempts,
+                    started_at=_iso(job.started_at),
+                )
+            )
+    return ProgressOut(
+        source=await _source_out(session, source),
+        recent_events=recent,
+        current_jobs=current,
+    )
+
+
+def _iso(value) -> str | None:
+    return value.isoformat() if value is not None else None
+
+
+def _unit_out(item: dict) -> EvidenceUnitOut:
+    return EvidenceUnitOut(
+        kind=item["kind"],
+        canonical_question=item["canonical_question"],
+        heading=item["heading"],
+        answer_verbatim=item["answer_verbatim"],
+        display_locator=item["display_locator"],
+    )
+
+
+@router.get("/api/kb-sources/{source_id}/snapshots", response_model=SnapshotListOut)
+async def list_snapshots(
+    source_id: UUID, session: SessionDep, _staff: CurrentUser
+) -> SnapshotListOut:
+    try:
+        rows = await KbSourceService(session).list_snapshots(source_id)
+    except AdminError as exc:
+        raise _http_error(exc) from exc
+    return SnapshotListOut(
+        items=[
+            SnapshotOut(
+                id=row.id,
+                state=row.state,
+                created_at=_iso(row.created_at),
+                promoted_at=_iso(row.promoted_at),
+                token_estimate=row.token_estimate,
+                validation_errors=list(row.validation_errors or []),
+                error_code=row.error_code,
+            )
+            for row in rows
+        ]
+    )
+
+
+@router.get("/api/kb-sources/{source_id}/diff", response_model=DiffOut)
+async def snapshot_diff(
+    source_id: UUID,
+    session: SessionDep,
+    _staff: CurrentUser,
+    from_id: Annotated[UUID | None, Query(alias="from")] = None,
+    to_id: Annotated[UUID | None, Query(alias="to")] = None,
+) -> DiffOut:
+    try:
+        payload = await KbSourceService(session).diff_snapshots(source_id, from_id, to_id)
+    except AdminError as exc:
+        raise _http_error(exc) from exc
+    return DiffOut(
+        added=[_unit_out(item) for item in payload["added"]],
+        changed=[
+            DiffChangeOut(before=_unit_out(item["before"]), after=_unit_out(item["after"]))
+            for item in payload["changed"]
+        ],
+        removed=[_unit_out(item) for item in payload["removed"]],
+    )
+
+
+@router.post("/api/kb-sources/{source_id}/rollback", response_model=SnapshotOut)
+async def rollback_source(source_id: UUID, session: SessionDep, admin: CurrentAdmin) -> SnapshotOut:
+    try:
+        row = await KbSourceService(session).rollback_source(source_id)
+    except AdminError as exc:
+        raise _http_error(exc) from exc
+    return SnapshotOut(
+        id=row.id,
+        state=row.state,
+        created_at=_iso(row.created_at),
+        promoted_at=_iso(row.promoted_at),
+        token_estimate=row.token_estimate,
+        validation_errors=list(row.validation_errors or []),
+        error_code=row.error_code,
+    )
+
+
+@router.get("/api/kb-pages/{page_id}", response_model=PageDetailOut)
+async def get_page(page_id: UUID, session: SessionDep, _staff: CurrentUser) -> PageDetailOut:
+    try:
+        page, chunks = await KbSourceService(session).get_page(page_id)
+    except AdminError as exc:
+        raise _http_error(exc) from exc
+    return _page_detail_out(page, chunks)
+
+
+@router.patch("/api/kb-pages/{page_id}", response_model=PageOut)
+async def patch_page(
+    page_id: UUID, payload: PagePatchIn, session: SessionDep, admin: CurrentAdmin
+) -> PageOut:
+    try:
+        page = await KbSourceService(session).patch_page(page_id, enabled=payload.enabled)
+    except AdminError as exc:
+        raise _http_error(exc) from exc
+    return _page_out(page)
