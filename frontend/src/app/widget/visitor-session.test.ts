@@ -41,7 +41,18 @@ describe("visitor session view", () => {
       body: "still there?",
     })
 
-    expect(view.lines).toEqual([{ id: 12, role: "visitor", body: "still there?" }])
+    expect(view.lines).toEqual([
+      {
+        id: 12,
+        role: "visitor",
+        body: "still there?",
+        source_chunk_ids: null,
+        source_urls: null,
+        display_locator: null,
+        source_title: null,
+        system_reason: null,
+      },
+    ])
     expect(view.lastEventId).toBe(12)
   })
 

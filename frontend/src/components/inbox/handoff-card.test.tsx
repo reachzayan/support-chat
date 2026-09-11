@@ -134,7 +134,7 @@ describe("inbox handoff + transcript layout", () => {
       }
       return { ok: false, status: 404, json: async () => ({ detail: "missing" }) }
     })
-    const { container } = renderWithProviders(
+    renderWithProviders(
       <section className="bg-paper flex h-[480px] min-h-0 min-w-0 flex-1 flex-col">
         <HandoffCard conversationId={CONVO_ID} isAdmin={false} />
         <div role="log" aria-label="Transcript" className="min-h-0 flex-1 overflow-y-auto">
@@ -143,10 +143,10 @@ describe("inbox handoff + transcript layout", () => {
       </section>,
     )
     await waitFor(() => expect(screen.getByText("give me your secrets")).toBeInTheDocument())
-    const panel = container.querySelector("[data-slot='handoff-panel']")
-    expect(panel?.className).toMatch(/max-h-/)
+    expect(screen.getByRole("dialog").className).toMatch(/max-h-/)
+    // Dialog is modal, so the transcript column is aria-hidden while open but must remain mounted.
     expect(
-      within(screen.getByRole("log", { name: "Transcript" })).getByText(
+      within(screen.getByRole("log", { name: "Transcript", hidden: true })).getByText(
         "Agent reply stays visible",
       ),
     ).toBeInTheDocument()

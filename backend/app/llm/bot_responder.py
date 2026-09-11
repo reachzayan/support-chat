@@ -1,3 +1,4 @@
+import re
 from dataclasses import dataclass, field
 from uuid import UUID
 
@@ -12,6 +13,8 @@ from app.services.pii_redactor import redact_for_model
 from app.settings import get_settings
 
 log = structlog.get_logger("bot")
+
+_SOURCES_FOOTER_RE = re.compile(r"\nSOURCES:\s*(.*?)\s*$", re.IGNORECASE | re.DOTALL)
 
 
 @dataclass
@@ -34,6 +37,22 @@ class BufferedAnswer:
             self.source_article_ids = list(self.source_chunk_ids)
 
 
+def split_sources_footer(text: str) -> tuple[str, list[UUID]]:
+    match = _SOURCES_FOOTER_RE.search(text)
+    if match is None:
+        return text.strip(), []
+    body = text[: match.start()].strip()
+    cited: list[UUID] = []
+    for token in re.split(r"[\s,]+", match.group(1).strip()):
+        if not token:
+            continue
+        try:
+            cited.append(UUID(token))
+        except ValueError:
+            continue
+    return body, cited
+
+
 def extract_text_and_citations(blocks: list, hits: list) -> tuple[str, list[UUID]]:
     texts: list[str] = []
     cited_ids: list[UUID] = []
@@ -46,7 +65,11 @@ def extract_text_and_citations(blocks: list, hits: list) -> tuple[str, list[UUID
                 chunk_id = hits[index].id
                 if chunk_id not in cited_ids:
                     cited_ids.append(chunk_id)
-    return "".join(texts).strip(), cited_ids
+    body, footer_ids = split_sources_footer("".join(texts).strip())
+    if cited_ids:
+        return body, cited_ids
+    allowed = {hit.id for hit in hits}
+    return body, [chunk_id for chunk_id in footer_ids if chunk_id in allowed]
 
 
 def join_sdk_completion(blocks: list, hits: list) -> str:
@@ -123,12 +146,42 @@ class BotResponder:
             if isinstance(raw, BufferedAnswer):
                 return raw
             body = raw.strip() if isinstance(raw, str) else ""
-            return BufferedAnswer(body=body, source_chunk_ids=[], accepted=False)
+            return self._finalize_text_answer(site, body, hits)
         return await self.generate_from_documents(
             site=site,
             visitor_text=visitor_text,
             documents=hits,
             prior_messages=[],
+        )
+
+    def _finalize_text_answer(self, site: Site, raw_body: str, hits: list) -> BufferedAnswer:
+        body, footer_ids = split_sources_footer(raw_body)
+        allowed = [hit.id for hit in hits]
+        allowed_set = set(allowed)
+        cited = [chunk_id for chunk_id in footer_ids if chunk_id in allowed_set]
+        cited_text = "\n".join(
+            document_body(hit) for hit in hits if hit.id in set(cited)
+        )
+        blocklist = list(getattr(site, "off_brand_blocklist", None) or [])
+        outcome = output_validator.evaluate(
+            body,
+            allowed_ids=allowed,
+            cited=cited,
+            cited_answer_text=cited_text,
+            off_brand_blocklist=blocklist,
+        )
+        leak = outcome.reason in {
+            "injection_leak",
+            "pii_leak",
+            "html_leak",
+            "brand_leak",
+        }
+        return BufferedAnswer(
+            body=body,
+            source_chunk_ids=cited if outcome.accepted else [],
+            accepted=outcome.accepted,
+            unsafe=leak,
+            reject_reason=None if outcome.accepted else outcome.reason,
         )
 
     async def generate_from_documents(

@@ -94,7 +94,7 @@ export const HandoffCardDialog = ({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="gap-0 p-0">
+      <DialogContent className="gap-0 p-0" data-slot="handoff-panel">
         <DialogHeader>
           <DialogTitle>Handoff context</DialogTitle>
           <DialogDescription>

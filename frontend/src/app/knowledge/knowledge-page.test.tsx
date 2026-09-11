@@ -34,7 +34,7 @@ describe("knowledge console", () => {
     if (pageRow === null) {
       throw new Error("expected page row")
     }
-    await user.click(within(pageRow).getByRole("button", { name: "Disable" }))
+    await user.click(within(pageRow).getByRole("button", { name: "Disable page" }))
     await waitFor(() => expect(screen.getByText("Disabled")).toBeInTheDocument())
     const disable = vi
       .mocked(fetch)
@@ -51,14 +51,15 @@ describe("knowledge console", () => {
     const user = userEvent.setup()
     renderWithProviders(<KnowledgeConsole isAdmin={true} displayName="Riley Chen" />)
     const pageRow = await screen.findByRole("button", { name: PAGE_TITLE })
-    await user.click(within(pageRow.closest("tr")!).getByRole("button", { name: "Disable" }))
+    await user.click(within(pageRow.closest("tr")!).getByRole("button", { name: "Disable page" }))
     await waitFor(() => expect(screen.getByText("Disabled")).toBeInTheDocument())
-    await user.click(within(pageRow.closest("tr")!).getByRole("button", { name: "Enable" }))
+    await user.click(within(pageRow.closest("tr")!).getByRole("button", { name: "Enable page" }))
     const enable = vi
       .mocked(fetch)
       .mock.calls.find(
         (call) =>
           String(call[0]) === `/api/kb-pages/${PAGE_ID}` &&
+          (call[1] as RequestInit)?.method === "PATCH" &&
           JSON.parse(String((call[1] as RequestInit).body)).enabled === true,
       )
     expect(enable).toBeDefined()

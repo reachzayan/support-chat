@@ -114,9 +114,11 @@ jobs:
       - name: Build
         env:
           API_ORIGIN: http://backend:8000
-          NEXT_PUBLIC_WIDGET_ORIGIN: https://placeholder.invalid
-          NEXT_PUBLIC_STAFF_APP_ORIGIN: https://placeholder.invalid
-          NEXT_PUBLIC_MARKETING_HOST_ORIGIN: https://placeholder.invalid
+          NEXT_PUBLIC_WIDGET_ORIGIN: https://widget.placeholder.invalid
+          NEXT_PUBLIC_STAFF_APP_ORIGIN: https://staff.placeholder.invalid
+          NEXT_PUBLIC_MARKETING_HOST_ORIGIN: https://host.placeholder.invalid
+          NEXT_PUBLIC_DEMO_SITE_KEY: demo
+          NEXT_PUBLIC_DEMO_PUBLIC_KEY: dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
         run: npm run build
 
   deploy-dev:

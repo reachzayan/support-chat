@@ -54,15 +54,11 @@ describe("inbox layout", () => {
     })
     await waitFor(() => expect(screen.getByText("I can help with that.")).toBeInTheDocument())
     const transcript = screen.getByRole("log", { name: "Transcript" })
-    expect(within(transcript).getByText("How fast are DOT results?").closest("p")).toHaveClass(
-      "rounded-2xl",
-      "mr-auto",
-      "bg-paper",
-    )
-    expect(within(transcript).getByText("I can help with that.").closest("p")).toHaveClass(
-      "rounded-2xl",
-      "ml-auto",
-      "bg-navy",
-    )
+    expect(
+      within(transcript).getByText("How fast are DOT results?").closest(".widget-bubble"),
+    ).toHaveClass("rounded-[8px]", "mr-auto", "bg-paper")
+    expect(
+      within(transcript).getByText("I can help with that.").closest(".widget-bubble"),
+    ).toHaveClass("rounded-[8px]", "ml-auto", "bg-navy")
   })
 })

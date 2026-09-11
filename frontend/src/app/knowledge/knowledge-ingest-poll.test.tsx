@@ -93,6 +93,6 @@ describe("knowledge ingest progress", () => {
     expect(bar).toHaveAttribute("aria-valuenow", "7")
     expect(bar).toHaveAttribute("aria-valuemax", "12")
     expect(screen.getByText("2 pages need review")).toBeInTheDocument()
-    expect(screen.getByText("Embedding")).toBeInTheDocument()
+    await waitFor(() => expect(screen.getByText("Embedding")).toBeInTheDocument())
   })
 })
