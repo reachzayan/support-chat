@@ -72,6 +72,7 @@ def test_production_startup_accepts_https_origins_and_secure_cookies() -> None:
         widget_origin="https://widget.sample-site.example.com",
         marketing_host_origin="https://sample-site.example.com",
         redis_url="rediss://:prod-redis-secret@127.0.0.1:6379/0",
+        openai_api_key="sk-test-not-a-real-key",
     )
     assert settings.cookie_secure is True
     assert settings.staff_app_origin == "https://admin.sample-site.example.com"

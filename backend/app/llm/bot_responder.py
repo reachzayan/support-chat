@@ -75,9 +75,9 @@ def extract_text_and_citations(blocks: list, hits: list) -> tuple[str, list[UUID
 def join_sdk_completion(blocks: list, hits: list) -> str:
     """Compatibility shim for callers that still expect a single string."""
     body, cited = extract_text_and_citations(blocks, hits)
-    if cited:
+    if not cited:
         return body
-    return body
+    return f"{body}\nSOURCES: {', '.join(str(chunk_id) for chunk_id in cited)}"
 
 
 def output_is_safe(

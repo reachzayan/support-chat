@@ -75,9 +75,9 @@ jobs:
           APP_ENV: local
           DATABASE_URL: postgresql+asyncpg://chat:chat@localhost:5432/support_chat_test
           REDIS_URL: redis://localhost:6379/15
-          JWT_SECRET: ci-test-jwt-secret-do-not-use-in-production-aaaaaaaaaaaaaaaaaaaa
-          WIDGET_TOKEN_SECRET: ci-test-widget-secret-do-not-use-in-production-bbbbbbbbbbbbbbbbb
-          RATE_KEY_SECRET: ci-test-rate-secret-do-not-use-in-production-ccccccccccccccccccc
+          JWT_SECRET: "tttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttt"
+          WIDGET_TOKEN_SECRET: "wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww"
+          RATE_KEY_SECRET: "rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr"
           COOKIE_SECURE: "false"
           STAFF_APP_ORIGIN: http://localhost:3000
           WIDGET_ORIGIN: http://widget.localhost:3000

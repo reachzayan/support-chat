@@ -243,7 +243,9 @@ def post_bootstrap(
 def decode_widget_token(token: str) -> dict[str, Any]:
     import jwt
 
-    return jwt.decode(token, "w" * 64, algorithms=["HS256"])
+    from app.settings import get_settings
+
+    return jwt.decode(token, get_settings().widget_token_secret, algorithms=["HS256"])
 
 
 def login_staff(client: TestClient, email: str = ALEX_EMAIL, password: str = ALEX_PASSWORD) -> str:

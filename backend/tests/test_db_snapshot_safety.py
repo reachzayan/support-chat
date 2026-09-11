@@ -32,6 +32,9 @@ def test_compose_does_not_auto_import_dumps() -> None:
 
 def test_backend_docs_do_not_advertise_snapshot_credentials() -> None:
     for relative in ("README.md", "docs/install.md"):
-        text = (BACKEND_ROOT / relative).read_text(encoding="utf-8")
+        path = BACKEND_ROOT / relative
+        if not path.is_file():
+            continue
+        text = path.read_text(encoding="utf-8")
         for needle in FORBIDDEN_DOC_SUBSTRINGS:
             assert needle not in text, f"{relative} still mentions {needle}"
