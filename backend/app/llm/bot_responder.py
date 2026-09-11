@@ -159,9 +159,7 @@ class BotResponder:
         allowed = [hit.id for hit in hits]
         allowed_set = set(allowed)
         cited = [chunk_id for chunk_id in footer_ids if chunk_id in allowed_set]
-        cited_text = "\n".join(
-            document_body(hit) for hit in hits if hit.id in set(cited)
-        )
+        cited_text = "\n".join(document_body(hit) for hit in hits if hit.id in set(cited))
         blocklist = list(getattr(site, "off_brand_blocklist", None) or [])
         outcome = output_validator.evaluate(
             body,
