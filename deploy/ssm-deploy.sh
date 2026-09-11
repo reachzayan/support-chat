@@ -18,10 +18,22 @@ COMPOSE_PROD_FILE="${COMPOSE_PROD_FILE:-docker-compose.prod.yml}"
 COMPOSE_APP_SERVICES="${COMPOSE_APP_SERVICES:-backend frontend}"
 POSTGRES_VOLUME_FILTER="${POSTGRES_VOLUME_FILTER:-postgres_data}"
 
+AUTH_FETCH_URL="https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPO}.git"
+
+# First deploy: Actions token clones the private repo so operators need not.
+if [ ! -d "${REPO_DIR}/.git" ]; then
+  if [ -e "${REPO_DIR}" ]; then
+    echo "REPO_DIR exists without .git — refusing to overwrite: ${REPO_DIR}" >&2
+    exit 1
+  fi
+  echo "REPO_DIR missing — cloning ${GITHUB_REPO} (${BRANCH}) into ${REPO_DIR}"
+  mkdir -p "$(dirname "${REPO_DIR}")"
+  git -c "safe.directory=${REPO_DIR}" clone --branch "${BRANCH}" "${AUTH_FETCH_URL}" "${REPO_DIR}"
+fi
+
 GIT=(git -c "safe.directory=${REPO_DIR}")
 cd "$REPO_DIR"
 
-AUTH_FETCH_URL="https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPO}.git"
 "${GIT[@]}" fetch "$AUTH_FETCH_URL" "+refs/heads/${BRANCH}:refs/remotes/origin/${BRANCH}"
 if ! "${GIT[@]}" merge-base --is-ancestor "$SHA" "origin/$BRANCH"; then
   echo "DEPLOY_SHA $SHA is not an ancestor of origin/$BRANCH" >&2
