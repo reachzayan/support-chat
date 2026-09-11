@@ -1,0 +1,50 @@
+# Manual deploy (same OIDC → SSM path as CI/CD deploy-dev).
+# Requires the canonical CI/CD workflow to have succeeded for this commit.
+name: Deploy Dev
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-dev
+  cancel-in-progress: false
+
+env:
+  AWS_REGION: us-east-2
+  AWS_ROLE_ARN: ${{ vars.AWS_ROLE_ARN }}
+  EC2_INSTANCE_ID: ${{ vars.EC2_INSTANCE_ID }}
+  DEPLOY_BRANCH: dev
+  REPO_DIR: /home/ssm-user/support-chat
+  CANONICAL_WORKFLOW: .github/workflows/ci-cd.yml
+
+jobs:
+  deploy:
+    name: Deploy to EC2 (via SSM)
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+      checks: read
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Verify CI checks passed
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CANONICAL_WORKFLOW: ${{ env.CANONICAL_WORKFLOW }}
+        run: bash deploy/verify-ci-checks.sh "${{ github.sha }}" "${{ github.repository }}"
+
+      - uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4.3.1
+        with:
+          role-to-assume: ${{ env.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Send deploy command over SSM
+        env:
+          INSTANCE_ID: ${{ env.EC2_INSTANCE_ID }}
+          DEPLOY_SHA: ${{ github.sha }}
+          BRANCH: ${{ env.DEPLOY_BRANCH }}
+          GITHUB_TOKEN: ${{ github.token }}
+          REPO_DIR: /home/ssm-user/support-chat
+          GITHUB_REPO: ${{ github.repository }}
+        run: bash deploy/github-actions-ssm-deploy.sh

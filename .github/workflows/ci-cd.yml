@@ -1,0 +1,149 @@
+# Values here are read by GitHub Actions / deploy scripts via env — not hardcoded
+# in shell scripts. Override per-environment with GitHub Environment variables
+# or workflow `env:` if the AWS role/instance changes.
+
+name: CI/CD
+
+on:
+  push:
+    branches: [dev]
+  pull_request:
+    branches: [dev]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  AWS_REGION: us-east-2
+  AWS_ROLE_ARN: ${{ vars.AWS_ROLE_ARN }}
+  EC2_INSTANCE_ID: ${{ vars.EC2_INSTANCE_ID }}
+  DEPLOY_BRANCH: dev
+  REPO_DIR: /home/ssm-user/support-chat
+  # Must match the GitHub repo this workflow runs in.
+  # GITHUB_REPOSITORY is set automatically; ssm deploy receives it as GITHUB_REPO.
+
+jobs:
+  backend-ci:
+    name: Backend (lint + test)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: chat
+          POSTGRES_PASSWORD: chat
+          POSTGRES_DB: support_chat_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U chat -d support_chat_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Install uv
+        run: curl -LsSf https://astral.sh/uv/install.sh | sh
+
+      - name: Sync dependencies
+        run: |
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          uv sync --frozen
+
+      - name: Ruff check
+        run: uv run ruff check .
+
+      - name: Ruff format
+        run: uv run ruff format --check .
+
+      - name: Pytest
+        env:
+          APP_ENV: local
+          DATABASE_URL: postgresql+asyncpg://chat:chat@localhost:5432/support_chat_test
+          REDIS_URL: redis://localhost:6379/15
+          JWT_SECRET: ci-test-jwt-secret-do-not-use-in-production-aaaaaaaaaaaaaaaa
+          WIDGET_TOKEN_SECRET: ci-test-widget-secret-do-not-use-in-production-bbbbbbbb
+          RATE_KEY_SECRET: ci-test-rate-secret-do-not-use-in-production-cccccccccc
+          COOKIE_SECURE: "false"
+          STAFF_APP_ORIGIN: http://localhost:3000
+          WIDGET_ORIGIN: http://widget.localhost:3000
+          MARKETING_HOST_ORIGIN: http://host.localhost:3000
+        run: uv run pytest
+
+  frontend-ci:
+    name: Frontend (lint + typecheck + test + build)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Test
+        run: npm test
+
+      - name: Build
+        env:
+          API_ORIGIN: http://backend:8000
+          NEXT_PUBLIC_WIDGET_ORIGIN: https://placeholder.invalid
+          NEXT_PUBLIC_STAFF_APP_ORIGIN: https://placeholder.invalid
+          NEXT_PUBLIC_MARKETING_HOST_ORIGIN: https://placeholder.invalid
+        run: npm run build
+
+  deploy-dev:
+    name: Deploy to EC2 (via SSM)
+    needs: [backend-ci, frontend-ci]
+    if: vars.ENABLE_DEPLOYMENT == 'true' && (github.event_name == 'push' && github.ref == 'refs/heads/dev')
+    runs-on: ubuntu-latest
+    concurrency:
+      group: deploy-dev
+      cancel-in-progress: false
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4.3.1
+        with:
+          role-to-assume: ${{ env.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Send deploy command over SSM
+        env:
+          INSTANCE_ID: ${{ env.EC2_INSTANCE_ID }}
+          DEPLOY_SHA: ${{ github.sha }}
+          BRANCH: ${{ env.DEPLOY_BRANCH }}
+          GITHUB_TOKEN: ${{ github.token }}
+          REPO_DIR: /home/ssm-user/support-chat
+          GITHUB_REPO: ${{ github.repository }}
+        run: bash deploy/github-actions-ssm-deploy.sh
