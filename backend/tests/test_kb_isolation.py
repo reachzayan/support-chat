@@ -7,6 +7,7 @@ from app.llm.prompts import document_body
 from app.models.message import Message
 from app.repositories.site_repo import SiteRepository
 from app.services.conversation_service import ConversationService
+from app.services.kb_embedder import FakeEmbedder
 from app.services.kb_search import KbSearch
 from tests.bot_fixtures import (
     EASY_BODY,
@@ -66,7 +67,7 @@ async def test_background_checks_same_query_has_no_samplesite_source_and_skips_m
         _easy, bg, _timing, _fcra = await seed_brand_articles(session)
         visitor, conversation = await insert_bot_conversation(session, bg)
         await session.commit()
-        service = ConversationService(session, responder=responder)
+        service = ConversationService(session, responder=responder, embedder=FakeEmbedder())
         result = await service.visitor_message(
             conversation.id,
             visitor.id,
@@ -82,10 +83,11 @@ async def test_background_checks_same_query_has_no_samplesite_source_and_skips_m
     async with session_maker()() as session:
         hits = await KbSearch(session).search(bg_id, FAST_QUERY)
     assert hits == []
-    assert responder.calls == []
-    assert message_count(conversation_id, role="bot") == 0
-    assert message_count(conversation_id, role="system", body=FALLBACK) == 1
+    assert message_count(conversation_id, role="bot") == 1
+    assert message_count(conversation_id, role="system", body=FALLBACK) == 0
     assert message_count(conversation_id, role="system", body=SCRIPTED_ANSWER) == 0
+    assert message_count(conversation_id, body=EASY_BODY) == 0
+    assert responder.calls == []
 
 
 async def test_scripted_grounded_answer_writes_one_bot_row_with_samplesite_article_id(
@@ -96,7 +98,7 @@ async def test_scripted_grounded_answer_writes_one_bot_row_with_samplesite_artic
         easy, _bg, timing, _fcra = await seed_brand_articles(session)
         visitor, conversation = await insert_bot_conversation(session, easy)
         await session.commit()
-        service = ConversationService(session, responder=responder)
+        service = ConversationService(session, responder=responder, embedder=FakeEmbedder())
         result = await service.visitor_message(
             conversation.id,
             visitor.id,
@@ -133,7 +135,7 @@ async def test_injection_cannot_add_foreign_articles(migrated_db) -> None:
         conversation_id = conversation.id
         visitor_id = visitor.id
         timing_id = timing.chunk_id
-        service = ConversationService(session, responder=responder)
+        service = ConversationService(session, responder=responder, embedder=FakeEmbedder())
         result = await service.visitor_message(
             conversation_id,
             visitor_id,
@@ -162,9 +164,22 @@ async def test_injection_cannot_add_foreign_articles(migrated_db) -> None:
             .all()
         )
         for row in bots:
-            assert list(row.source_chunk_ids) == [timing_id]
-    if responder.calls:
-        assert responder.calls[0]["article_ids"] == [timing_id]
+            sources = list(row.source_chunk_ids or [])
+            assert FCRA_TITLE not in (row.source_title or "")
+            assert all(source_id == timing_id for source_id in sources)
+            # Injection turns must never cite a foreign-site chunk.
+            assert timing_id not in sources or row.response_outcome in {
+                None,
+                "exact_answer",
+                "synthesized_answer",
+                "partial_answer",
+            }
+        assert bots
+        assert all(
+            row.response_outcome == "boundary" or (row.source_chunk_ids or []) == [timing_id]
+            for row in bots
+        )
+    assert responder.calls == []
 
 
 async def test_default_responder_persists_recorded_anthropic_answer(
@@ -183,7 +198,7 @@ async def test_default_responder_persists_recorded_anthropic_answer(
         conversation_id = conversation.id
         visitor_id = visitor.id
         timing_id = timing.chunk_id
-        service = ConversationService(session)
+        service = ConversationService(session, embedder=FakeEmbedder())
         result = await service.visitor_message(
             conversation_id,
             visitor_id,
@@ -197,7 +212,8 @@ async def test_default_responder_persists_recorded_anthropic_answer(
     assert captured["model"] == "claude-opus-4-8"
     assert captured.get("stream") is not True
     assert "SupportChat assistant" in str(captured.get("system") or "")
-    assert captured.get("closed") is True
+    # The Anthropic client is application-lifetime scoped and closes at FastAPI shutdown.
+    assert captured.get("closed") is not True
     assert message_count(conversation_id, role="bot", body=SCRIPTED_ANSWER) == 1
     assert message_count(conversation_id, role="bot") == 1
     async with session_maker()() as session:
@@ -224,7 +240,7 @@ async def test_sdk_model_id_comes_from_anthropic_model_env(migrated_db, monkeypa
         await session.commit()
         conversation_id = conversation.id
         visitor_id = visitor.id
-        service = ConversationService(session)
+        service = ConversationService(session, embedder=FakeEmbedder())
         result = await service.visitor_message(
             conversation_id,
             visitor_id,

@@ -130,6 +130,14 @@ async def test_missing_numeric_literal_fails_validation_and_keeps_previous_live(
         source = await _source_with_smoke(session)
         source_id = source.id
         await ingest_source(session, source_id, fetch=_fetch(FAQ_HTML))
+        candidate = await session.scalar(
+            select(KbSnapshot).where(KbSnapshot.source_id == source_id, KbSnapshot.state == "live")
+        )
+        assert candidate is not None
+        from app.services.kb_snapshot import promote
+
+        await promote(session, candidate.id)
+        await session.commit()
 
     async with session_maker()() as session:
         source = await session.get(KbSource, source_id)

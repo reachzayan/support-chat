@@ -64,7 +64,18 @@ class RecordingResponder:
         source_ids = (
             list(self.selected_ids) if self.selected_ids is not None else [item.id for item in hits]
         )
-        return BufferedAnswer(body=self.answer, source_chunk_ids=source_ids, accepted=True)
+        body = (self.answer or "").strip()
+        if not body:
+            return BufferedAnswer(body="", source_chunk_ids=[], accepted=False)
+        from app.services.output_validator import is_clarifying_question
+
+        accepted = bool(source_ids) or is_clarifying_question(body)
+        return BufferedAnswer(
+            body=body,
+            source_chunk_ids=source_ids if accepted else [],
+            accepted=accepted,
+            reject_reason=None if accepted else "no_citation",
+        )
 
     async def generate_from_documents(
         self, site, visitor_text, documents, prior_messages=None, **_kwargs

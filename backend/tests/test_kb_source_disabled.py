@@ -1,8 +1,11 @@
 from uuid import uuid4
 
+from sqlalchemy import select
+
 from app.db import session_maker
+from app.models.kb_snapshot import KbSnapshot
 from app.models.kb_source import KbSource
-from app.services.full_context import clear_units_cache, load_approved_units
+from app.services.full_context import clear_units_cache, load_live_units
 from app.services.kb_embedder import FakeEmbedder, configured_embedder_id
 from app.services.kb_ingest import ingest_source
 from app.services.kb_source_admin import KbSourceService
@@ -45,12 +48,20 @@ async def test_disabled_source_excluded_from_live_snapshots_and_cache(migrated_d
         source_id = source.id
         site_id = source.site_id
         await ingest_source(session, source_id, embedder=FakeEmbedder(), fetch=_fetch)
+        candidate = await session.scalar(
+            select(KbSnapshot).where(KbSnapshot.source_id == source_id, KbSnapshot.state == "live")
+        )
+        assert candidate is not None
+        from app.services.kb_snapshot import promote
+
+        await promote(session, candidate.id)
+        await session.commit()
 
     async with session_maker()() as session:
         live_before = await live_snapshots_for_site(session, site_id)
         assert len(live_before) == 1
         snapshot_id = live_before[0].id
-        warmed = await load_approved_units(session, [snapshot_id])
+        warmed = await load_live_units(session, [snapshot_id])
         assert len(warmed) == 1
 
         service = KbSourceService(session)
@@ -59,5 +70,5 @@ async def test_disabled_source_excluded_from_live_snapshots_and_cache(migrated_d
     async with session_maker()() as session:
         live_after = await live_snapshots_for_site(session, site_id)
         assert live_after == []
-        cached = await load_approved_units(session, [snapshot_id])
+        cached = await load_live_units(session, [snapshot_id])
         assert cached == []

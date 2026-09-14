@@ -1,10 +1,8 @@
 import uuid
 
-from app.chat.outcome_copy import KEEP_HELPING_LINE
 from app.db import session_maker
 from app.services.conversation_service import ConversationService
 from tests.bot_fixtures import (
-    FALLBACK,
     FAST_QUERY,
     SCRIPTED_ANSWER,
     WAITING_LINE,
@@ -18,7 +16,7 @@ from tests.ws_helpers import HOST_ORIGIN, conversation_state, message_count
 async def test_no_source_fallback_resets_after_grounded_answer_then_miss_is_count_one(
     migrated_db,
 ) -> None:
-    empty = RecordingResponder()
+    empty = RecordingResponder(answer="")
     grounded = RecordingResponder(answer=SCRIPTED_ANSWER)
     async with session_maker()() as session:
         easy, bg, _timing, _fcra = await seed_brand_articles(session)
@@ -35,7 +33,7 @@ async def test_no_source_fallback_resets_after_grounded_answer_then_miss_is_coun
         await session.refresh(conversation)
         assert conversation_state(bg_conversation_id) == "bot"
         assert conversation.fallback_count == 1
-        assert message_count(bg_conversation_id, role="system", body=FALLBACK) == 1
+        assert message_count(bg_conversation_id, role="bot") == 1
 
         service_easy = ConversationService(session, responder=grounded)
         visitor_es, convo_es = await insert_bot_conversation(session, easy)
@@ -95,9 +93,8 @@ async def test_two_consecutive_misses_ask_again_without_queuing(migrated_db) -> 
             await service.run_bot_turn(conversation_id, second.generation_id)
 
     assert conversation_state(conversation_id) == "bot"
-    assert message_count(conversation_id, role="system", body=FALLBACK) == 2
+    assert message_count(conversation_id, role="bot") == 2
     assert message_count(conversation_id, role="system", body=WAITING_LINE) == 0
-    assert message_count(conversation_id, role="bot") == 0
 
 
 async def test_yes_after_miss_offer_queues_with_waiting_line(migrated_db) -> None:
@@ -125,13 +122,11 @@ async def test_yes_after_miss_offer_queues_with_waiting_line(migrated_db) -> Non
             await service.run_bot_turn(conversation_id, yes.generation_id)
 
     assert conversation_state(conversation_id) == "queued"
-    assert message_count(conversation_id, role="system", body=FALLBACK) == 1
+    assert message_count(conversation_id, role="bot") == 1
     assert message_count(conversation_id, role="system", body=WAITING_LINE) == 1
 
 
-async def test_explicit_person_request_stays_with_bot_and_does_not_queue(
-    migrated_db,
-) -> None:
+async def test_explicit_person_request_queues_with_waiting_line(migrated_db) -> None:
     responder = RecordingResponder()
     async with session_maker()() as session:
         easy, _bg, _timing, _fcra = await seed_brand_articles(session)
@@ -150,7 +145,5 @@ async def test_explicit_person_request_stays_with_bot_and_does_not_queue(
         conversation_id = conversation.id
 
     assert responder.calls == []
-    assert conversation_state(conversation_id) == "bot"
-    assert message_count(conversation_id, role="bot") == 0
-    assert message_count(conversation_id, role="system", body=KEEP_HELPING_LINE) == 1
-    assert message_count(conversation_id, role="system", body=WAITING_LINE) == 0
+    assert conversation_state(conversation_id) == "queued"
+    assert message_count(conversation_id, role="system", body=WAITING_LINE) == 1
