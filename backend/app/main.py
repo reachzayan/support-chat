@@ -21,6 +21,7 @@ from app.chat.fanout import start_fanout, stop_fanout
 from app.chat.ws_agent import router as agent_ws_router
 from app.chat.ws_visitor import router as visitor_ws_router
 from app.db import dispose_engine, session_maker
+from app.llm.bot_responder import BotResponder
 from app.logging import configure_logging
 from app.models import (
     AppLog,
@@ -62,6 +63,7 @@ async def lifespan(application: FastAPI):
     await stop_kb_workers()
     await stop_fanout()
     await close_redis()
+    await BotResponder.close_shared_client()
     await dispose_engine()
 
 

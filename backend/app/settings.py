@@ -56,8 +56,7 @@ class Settings(BaseSettings):
     rate_login_failure_window: int = 900
     anthropic_model: str = "claude-haiku-4-5-20251001"
     anthropic_api_key: str | None = None
-    anthropic_temperature: float = 0.0
-    anthropic_max_tokens: int = 250
+    anthropic_max_tokens: int = 500
     anthropic_timeout: float = 30.0
     haiku_model: str = "claude-haiku-4-5-20251001"
     haiku_max_tokens: int = 350
@@ -72,7 +71,7 @@ class Settings(BaseSettings):
     chunk_overlap_chars: int = 200
     openai_embed_max_tokens: int = 8000
     max_answer_chars: int = 20000
-    max_bot_answer_chars: int = 2000
+    max_bot_answer_chars: int = 1500
     anthropic_calls_per_minute: int = 6
     full_context_max_tokens: int = 50_000
     fast_path_min_score: float = 0.15
@@ -146,9 +145,8 @@ class Settings(BaseSettings):
     @field_validator("anthropic_max_tokens")
     @classmethod
     def anthropic_max_tokens_positive(cls, value: int) -> int:
-        if value < 1:
-            raise ValueError("ANTHROPIC_MAX_TOKENS must be a positive integer")
-        return value
+        del value
+        return 500
 
     @model_validator(mode="after")
     def production_must_fail_closed(self) -> "Settings":

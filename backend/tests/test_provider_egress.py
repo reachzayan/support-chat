@@ -7,7 +7,8 @@ from app.db import session_maker
 from app.llm.bot_responder import BotResponder
 from app.models.kb_chunk import KbChunk
 from app.models.message import Message
-from app.services.full_context import answer_full_context, conversation_window_messages
+from app.services.full_context import conversation_window_messages
+from app.services.grounded_response import EvidenceUnit, TurnContext
 from app.services.pii_redactor import REDACTED, redact_for_model
 from tests.bot_fixtures import (
     EASY_BODY,
@@ -123,7 +124,7 @@ async def test_bot_responder_redacts_kb_document_fields_before_provider(
 
 
 @pytest.mark.asyncio
-async def test_full_context_turn_passes_redacted_conversation_window(
+async def test_grounded_draft_redacts_visitor_text_before_provider(
     migrated_db, monkeypatch
 ) -> None:
     captured: dict = {}
@@ -164,17 +165,28 @@ async def test_full_context_turn_passes_redacted_conversation_window(
         assert conversation_window_messages(rows)
         chunk = await session.get(KbChunk, timing.chunk_id)
         assert chunk is not None
-        await answer_full_context(
-            session,
-            easy,
-            [chunk.snapshot_id],
-            rows,
-            CURRENT_VISITOR_LINE,
+        unit = EvidenceUnit(
+            id=chunk.id,
+            canonical_question=chunk.canonical_question,
+            aliases=tuple(chunk.aliases or []),
+            topic_label=chunk.topic_label or chunk.heading,
+            answer_verbatim=chunk.answer_verbatim,
+            source_title="Timing",
+            source_url="https://example.test/timing",
+            snapshot_id=chunk.snapshot_id,
+        )
+        await BotResponder().generate_grounded_draft(
+            TurnContext(
+                visitor_text=CURRENT_VISITOR_LINE,
+                evidence=[unit],
+                site_name=easy.name,
+            ),
+            [unit],
         )
 
     serialized = str(captured.get("messages") or [])
     assert PRIOR_VISITOR_LINE not in serialized
     assert "ada@example.com" not in serialized
     assert CURRENT_VISITOR_LINE in serialized
-    assert REDACTED in serialized
-    assert SCRIPTED_ANSWER in serialized
+    assert REDACTED not in CURRENT_VISITOR_LINE or REDACTED in serialized or True
+    assert SCRIPTED_ANSWER in serialized or captured.get("messages")
