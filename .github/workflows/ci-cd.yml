@@ -132,6 +132,10 @@ jobs:
     permissions:
       id-token: write
       contents: read
+    env:
+      AWS_REGION: us-east-2
+      AWS_ROLE_ARN: ${{ vars.AWS_ROLE_ARN }}
+      EC2_INSTANCE_ID: ${{ vars.EC2_INSTANCE_ID }}
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
@@ -144,7 +148,7 @@ jobs:
         env:
           INSTANCE_ID: ${{ env.EC2_INSTANCE_ID }}
           DEPLOY_SHA: ${{ github.sha }}
-          BRANCH: ${{ env.DEPLOY_BRANCH }}
+          BRANCH: dev
           GITHUB_TOKEN: ${{ github.token }}
           REPO_DIR: /home/ssm-user/support-chat
           GITHUB_REPO: ${{ github.repository }}
