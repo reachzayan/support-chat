@@ -1,23 +1,29 @@
 import asyncio
+import unicodedata
 from dataclasses import dataclass
 from uuid import UUID
 
-from sqlalchemy import func, select, text
+import structlog
+from sqlalchemy import String, cast, func, or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import session_maker
+from app.llm.safety_markers import contains_injection_marker
 from app.models.kb_chunk import KbChunk
 from app.models.kb_page import KbPage
 from app.models.kb_snapshot import KbSnapshot
 from app.models.kb_source import KbSource
+from app.services.faq_fastpath import is_marketing_cta
 from app.services.kb_embedder import rrf_merge
 from app.services.kb_tokens import is_overview_query, search_tokens
+
+log = structlog.get_logger("kb_hybrid")
 
 COSINE_FLOOR = 0.55
 FTS_LIMIT = 8
 DENSE_LIMIT = 8
 PER_PAGE = 2
-KEEP = 4
+KEEP = 5
 
 
 @dataclass(frozen=True)
@@ -36,6 +42,16 @@ class ChunkHit:
     snapshot_id: UUID | None = None
     canonical_question: str | None = None
     legal_sensitive: bool = False
+    aliases: tuple[str, ...] = ()
+    topic_label: str | None = None
+    risk_class: str = "general"
+    answer_mode: str = "paraphrase_allowed"
+    enabled: bool = True
+
+
+def _normalized(value: str) -> str:
+    text_value = unicodedata.normalize("NFKC", value or "").casefold()
+    return " ".join(text_value.split())
 
 
 class HybridKbSearch:
@@ -45,21 +61,94 @@ class HybridKbSearch:
     async def search(
         self, site_id: UUID, visitor_text: str, query_vector: list[float] | None = None
     ) -> list[ChunkHit]:
+        exact = await self._exact_match(site_id, visitor_text)
+        if exact is not None:
+            log.info(
+                "grounded_retrieve",
+                hit_ids=[str(exact.id)],
+                exact_match=True,
+                overview_merged=False,
+                dense_used=query_vector is not None,
+            )
+            return [exact]
+
         fts_ids, dense_ids, cosine_by_id = await self._retrieve_arms(
             site_id, visitor_text, query_vector
         )
-        ranked = rrf_merge(fts_ids, dense_ids)
+        overview_ids: list[UUID] = []
+        overview_merged = False
+        if is_overview_query(visitor_text):
+            overview_hits = await self._overview(site_id)
+            overview_ids = [hit.id for hit in overview_hits]
+            overview_merged = bool(overview_ids)
+        ranked = rrf_merge(fts_ids, dense_ids, overview_ids)
         if not ranked:
-            if is_overview_query(visitor_text):
-                return await self._overview(site_id)
+            if overview_ids:
+                hits = await self._load(site_id, overview_ids[:KEEP])
+                log.info(
+                    "grounded_retrieve",
+                    hit_ids=[str(hit.id) for hit in hits],
+                    exact_match=False,
+                    overview_merged=True,
+                    dense_used=bool(dense_ids),
+                )
+                return hits
             return []
         hits = await self._load(site_id, [chunk_id for chunk_id, _score in ranked])
         diversified = self._diversify(ranked, hits, fts_ids, cosine_by_id)
         if diversified:
+            log.info(
+                "grounded_retrieve",
+                hit_ids=[str(hit.id) for hit in diversified],
+                exact_match=False,
+                overview_merged=overview_merged,
+                dense_used=bool(dense_ids),
+            )
             return diversified
         if is_overview_query(visitor_text):
             return await self._overview(site_id)
         return []
+
+    async def _exact_match(self, site_id: UUID, visitor_text: str) -> ChunkHit | None:
+        query = _normalized(visitor_text)
+        if len(query) < 3:
+            return None
+        result = await self._session.execute(
+            select(KbChunk, KbPage)
+            .join(KbPage, KbPage.id == KbChunk.page_id)
+            .join(KbSnapshot, KbSnapshot.id == KbChunk.snapshot_id)
+            .join(KbSource, KbSource.id == KbPage.source_id)
+            .where(
+                KbChunk.site_id == site_id,
+                KbChunk.enabled.is_(True),
+                KbChunk.kind != "refusal",
+                KbPage.enabled.is_(True),
+                KbSource.enabled.is_(True),
+                KbSnapshot.state == "live",
+                or_(
+                    func.lower(func.coalesce(KbChunk.canonical_question, "")) == query,
+                    cast(KbChunk.aliases, String).ilike(f'%"{query}"%'),
+                ),
+            )
+            .order_by(KbChunk.id)
+            .limit(8)
+        )
+        matches: list[ChunkHit] = []
+        for chunk, page in result.all():
+            if contains_injection_marker(chunk.answer_verbatim) or contains_injection_marker(
+                chunk.heading or ""
+            ):
+                continue
+            if is_marketing_cta(chunk.answer_verbatim):
+                continue
+            aliases = tuple(chunk.aliases or [])
+            candidates = [chunk.canonical_question or "", *aliases]
+            if query not in {_normalized(item) for item in candidates if item}:
+                continue
+            matches.append(self._to_hit(chunk, page, rrf=1.0))
+        if len(matches) == 1:
+            return matches[0]
+        return None
 
     async def _retrieve_arms(
         self,
@@ -114,6 +203,11 @@ class HybridKbSearch:
                     snapshot_id=hit.snapshot_id,
                     canonical_question=hit.canonical_question,
                     legal_sensitive=hit.legal_sensitive,
+                    aliases=hit.aliases,
+                    topic_label=hit.topic_label,
+                    risk_class=hit.risk_class,
+                    answer_mode=hit.answer_mode,
+                    enabled=hit.enabled,
                 )
             )
             if len(diversified) >= KEEP:
@@ -127,7 +221,7 @@ class HybridKbSearch:
         query = " OR ".join(tokens)
         ts = func.websearch_to_tsquery("english", query)
         result = await self._session.execute(
-            select(KbChunk.id)
+            select(KbChunk.id, KbChunk.heading, KbChunk.answer_verbatim, KbChunk.aliases)
             .join(KbPage, KbPage.id == KbChunk.page_id)
             .join(KbSnapshot, KbSnapshot.id == KbChunk.snapshot_id)
             .join(KbSource, KbSource.id == KbPage.source_id)
@@ -143,7 +237,13 @@ class HybridKbSearch:
             .order_by(func.ts_rank(KbChunk.search_document, ts).desc(), KbChunk.id)
             .limit(FTS_LIMIT)
         )
-        return list(result.scalars().all())
+        ids: list[UUID] = []
+        for chunk_id, heading, answer, aliases in result.all():
+            blob = f"{heading or ''} {answer or ''} {' '.join(aliases or [])}"
+            if contains_injection_marker(blob) or is_marketing_cta(answer or ""):
+                continue
+            ids.append(chunk_id)
+        return ids
 
     async def _dense(
         self, site_id: UUID, query_vector: list[float]
@@ -151,7 +251,13 @@ class HybridKbSearch:
         await self._session.execute(text("SET LOCAL hnsw.iterative_scan = strict_order"))
         distance = KbChunk.embedding.cosine_distance(query_vector)
         result = await self._session.execute(
-            select(KbChunk.id, KbChunk.site_id, (1 - distance).label("cosine"))
+            select(
+                KbChunk.id,
+                KbChunk.site_id,
+                KbChunk.heading,
+                KbChunk.answer_verbatim,
+                (1 - distance).label("cosine"),
+            )
             .join(KbPage, KbPage.id == KbChunk.page_id)
             .join(KbSnapshot, KbSnapshot.id == KbChunk.snapshot_id)
             .join(KbSource, KbSource.id == KbPage.source_id)
@@ -169,9 +275,13 @@ class HybridKbSearch:
         )
         ids: list[UUID] = []
         scores: dict[UUID, float] = {}
-        for chunk_id, row_site, cosine in result.all():
+        for chunk_id, row_site, heading, answer, cosine in result.all():
             if row_site != site_id:
                 return [], {}
+            if contains_injection_marker(f"{heading or ''} {answer or ''}"):
+                continue
+            if is_marketing_cta(answer or ""):
+                continue
             ids.append(chunk_id)
             scores[chunk_id] = float(cosine)
         return ids, scores
@@ -216,22 +326,35 @@ class HybridKbSearch:
         for chunk, page in result.all():
             if chunk.site_id != site_id:
                 return []
-            hits.append(
-                ChunkHit(
-                    id=chunk.id,
-                    page_id=chunk.page_id,
-                    site_id=chunk.site_id,
-                    heading=chunk.heading,
-                    body=chunk.body,
-                    url=page.url,
-                    title=page.title,
-                    rrf=0.0,
-                    cosine=None,
-                    answer_verbatim=chunk.answer_verbatim,
-                    display_locator=chunk.display_locator or page.display_locator,
-                    snapshot_id=chunk.snapshot_id,
-                    canonical_question=chunk.canonical_question,
-                    legal_sensitive=bool(chunk.legal_sensitive),
-                )
-            )
+            if contains_injection_marker(chunk.answer_verbatim) or contains_injection_marker(
+                chunk.heading or ""
+            ):
+                continue
+            if is_marketing_cta(chunk.answer_verbatim):
+                continue
+            hits.append(self._to_hit(chunk, page, rrf=0.0))
         return hits
+
+    @staticmethod
+    def _to_hit(chunk: KbChunk, page: KbPage, *, rrf: float) -> ChunkHit:
+        return ChunkHit(
+            id=chunk.id,
+            page_id=chunk.page_id,
+            site_id=chunk.site_id,
+            heading=chunk.heading,
+            body=chunk.body,
+            url=page.url,
+            title=page.title,
+            rrf=rrf,
+            cosine=None,
+            answer_verbatim=chunk.answer_verbatim,
+            display_locator=chunk.display_locator or page.display_locator,
+            snapshot_id=chunk.snapshot_id,
+            canonical_question=chunk.canonical_question,
+            legal_sensitive=bool(chunk.legal_sensitive),
+            aliases=tuple(chunk.aliases or []),
+            topic_label=chunk.topic_label or chunk.heading,
+            risk_class=chunk.risk_class or "general",
+            answer_mode=chunk.answer_mode or "paraphrase_allowed",
+            enabled=bool(chunk.enabled),
+        )

@@ -40,6 +40,21 @@ STOP_WORDS = frozenset(
         "i",
         "we",
         "you",
+        "provide",
+        "provides",
+        "providing",
+        "help",
+        "need",
+        "please",
+        "tell",
+        "give",
+        "list",
+        "looking",
+        "can",
+        "me",
+        "offer",
+        "offering",
+        "offers",
     }
 )
 ALIASES = {
@@ -97,7 +112,12 @@ def normalize_query(value: str) -> str:
 
 
 def tokenize(value: str) -> list[str]:
-    text = normalize_query(value).replace("how long", "turnaround")
+    text = (
+        normalize_query(value)
+        .replace("how long", "turnaround")
+        .replace("set up", "setup")
+        .replace("sign up", "setup")
+    )
     tokens: list[str] = []
     for raw in TOKEN_RE.findall(text):
         if raw in STOP_WORDS or len(raw) < 2:
@@ -107,7 +127,12 @@ def tokenize(value: str) -> list[str]:
 
 
 def search_tokens(value: str) -> list[str]:
-    text = normalize_query(value).replace("how long", "turnaround")
+    text = (
+        normalize_query(value)
+        .replace("how long", "turnaround")
+        .replace("set up", "setup")
+        .replace("sign up", "setup")
+    )
     tokens: list[str] = []
     seen: set[str] = set()
     for raw in TOKEN_RE.findall(text):
