@@ -3,6 +3,8 @@
 import type { ChangeEvent } from "react"
 
 import type { SiteRecord } from "@/components/admin/staff-api"
+import { Input } from "@/components/ui/input"
+import { Textarea } from "@/components/ui/textarea"
 
 import { Field } from "./sites-form"
 import { FIELD, LABEL } from "./sites-shared"
@@ -12,24 +14,36 @@ const ManageSiteOrigins = ({
   isAdmin,
   originsText,
   onOrigins,
+  errors,
+  onOriginsBlur,
 }: {
   site: SiteRecord
   isAdmin: boolean
   originsText: string
   onOrigins: (event: ChangeEvent<HTMLTextAreaElement>) => void
+  errors: Record<string, string>
+  onOriginsBlur: () => void
 }) => (
   <div>
     <label className={LABEL} htmlFor={`manage-origins-${site.id}`}>
       Approved origins
     </label>
-    <textarea
+    <Textarea
       id={`manage-origins-${site.id}`}
       value={originsText}
       disabled={!isAdmin}
       onChange={onOrigins}
       className={`${FIELD} font-mono text-xs leading-6`}
       rows={3}
+      aria-invalid={errors.origins ? "true" : undefined}
+      aria-describedby={errors.origins ? `manage-origins-${site.id}-error` : undefined}
+      onBlur={onOriginsBlur}
     />
+    {errors.origins ? (
+      <p id={`manage-origins-${site.id}-error`} className="text-ember mt-1 text-xs" role="alert">
+        {errors.origins}
+      </p>
+    ) : null}
     {site.origins_missing_from_frame_ancestors ? (
       <p className="border-ember/20 bg-ember/10 text-ember mt-2 rounded-[8px] border px-3 py-2.5 text-xs leading-5">
         This origin is missing from the widget frame-ancestors header.
@@ -55,8 +69,10 @@ const ManageSiteCallbackWindow = ({
       <label className={LABEL} htmlFor={`manage-window-${site.id}`}>
         Callback window (hours)
       </label>
-      <input
+      <Input
         id={`manage-window-${site.id}`}
+        name="callbackWindow"
+        autoComplete="off"
         type="number"
         min={1}
         max={168}
@@ -85,6 +101,10 @@ export const ManageSiteFields = ({
   onPrivacy,
   onOrigins,
   onWindow,
+  errors,
+  onNameBlur,
+  onPrivacyBlur,
+  onOriginsBlur,
 }: {
   site: SiteRecord
   isAdmin: boolean
@@ -98,30 +118,31 @@ export const ManageSiteFields = ({
   onPrivacy: (event: ChangeEvent<HTMLInputElement>) => void
   onOrigins: (event: ChangeEvent<HTMLTextAreaElement>) => void
   onWindow: (event: ChangeEvent<HTMLInputElement>) => void
+  errors: Record<string, string>
+  onNameBlur: () => void
+  onPrivacyBlur: () => void
+  onOriginsBlur: () => void
 }) => (
   <>
-    <div className="grid gap-4 md:grid-cols-2">
-      <Field
-        id={`manage-name-${site.id}`}
-        label="Name"
-        value={name}
-        disabled={!isAdmin}
-        onChange={onName}
-      />
-      <Field
-        id={`manage-privacy-${site.id}`}
-        label="Privacy URL"
-        value={privacyUrl}
-        disabled={!isAdmin}
-        onChange={onPrivacy}
-      />
-    </div>
+    <ManageSiteIdentity
+      site={site}
+      isAdmin={isAdmin}
+      name={name}
+      privacyUrl={privacyUrl}
+      onName={onName}
+      onPrivacy={onPrivacy}
+      errors={errors}
+      onNameBlur={onNameBlur}
+      onPrivacyBlur={onPrivacyBlur}
+    />
     <div>
       <label className={LABEL} htmlFor={`manage-greeting-${site.id}`}>
         Greeting
       </label>
-      <textarea
+      <Textarea
         id={`manage-greeting-${site.id}`}
+        name="greeting"
+        autoComplete="off"
         value={greeting}
         disabled={!isAdmin}
         onChange={onGreeting}
@@ -134,6 +155,8 @@ export const ManageSiteFields = ({
       isAdmin={isAdmin}
       originsText={originsText}
       onOrigins={onOrigins}
+      errors={errors}
+      onOriginsBlur={onOriginsBlur}
     />
     <ManageSiteCallbackWindow
       site={site}
@@ -142,6 +165,49 @@ export const ManageSiteFields = ({
       onWindow={onWindow}
     />
   </>
+)
+
+const ManageSiteIdentity = ({
+  site,
+  isAdmin,
+  name,
+  privacyUrl,
+  onName,
+  onPrivacy,
+  errors,
+  onNameBlur,
+  onPrivacyBlur,
+}: {
+  site: SiteRecord
+  isAdmin: boolean
+  name: string
+  privacyUrl: string
+  onName: (event: ChangeEvent<HTMLInputElement>) => void
+  onPrivacy: (event: ChangeEvent<HTMLInputElement>) => void
+  errors: Record<string, string>
+  onNameBlur: () => void
+  onPrivacyBlur: () => void
+}) => (
+  <div className="grid gap-4 md:grid-cols-2">
+    <Field
+      id={`manage-name-${site.id}`}
+      label="Name"
+      value={name}
+      disabled={!isAdmin}
+      onChange={onName}
+      error={errors.name}
+      onBlur={onNameBlur}
+    />
+    <Field
+      id={`manage-privacy-${site.id}`}
+      label="Privacy URL"
+      value={privacyUrl}
+      disabled={!isAdmin}
+      onChange={onPrivacy}
+      error={errors.privacyUrl}
+      onBlur={onPrivacyBlur}
+    />
+  </div>
 )
 
 export const ManageSiteSnippet = ({
@@ -157,11 +223,11 @@ export const ManageSiteSnippet = ({
     <label className={LABEL} htmlFor={`manage-snippet-${site.id}`}>
       Embed snippet
     </label>
-    <textarea
+    <Textarea
       id={`manage-snippet-${site.id}`}
       readOnly
       value={site.snippet}
-      className="border-navy-mid bg-navy-deep text-paper mt-1.5 w-full rounded-[8px] border p-3 font-mono text-[11px] leading-5"
+      className="border-navy-mid bg-navy-deep mt-1.5 w-full rounded-[8px] border p-3 font-mono text-[11px] leading-5 text-white"
       rows={6}
     />
     <p className="text-mute mt-2 text-xs leading-5">

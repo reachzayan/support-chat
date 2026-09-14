@@ -7,7 +7,7 @@ import { getAccessToken, refreshSession } from "@/lib/auth-client"
 import { createReconnectScheduler } from "@/lib/ws-reconnect"
 
 import { fetchInboxDetail, fetchInboxList } from "./inbox-api"
-import { applyAgentFrame, maxMessageId, type InboxLive } from "./inbox-session"
+import { applyAgentFrame, emptyLive, maxMessageId, type InboxLive } from "./inbox-session"
 import {
   INBOX_LIST_POLL_MS,
   type CannedReply,
@@ -25,7 +25,9 @@ export type InboxRefs = {
   filterRef: { current: InboxFilter }
   userRef: { current: string }
   liveRef: { current: InboxLive }
-  markSelected: (id: string) => void
+  markSelected: (id: string | null) => void
+  markFilter: (filter: InboxFilter) => void
+  resetLive: (live: InboxLive) => void
 }
 
 export const useInboxSyncRefs = (
@@ -39,12 +41,27 @@ export const useInboxSyncRefs = (
   const filterRef = useRef(filter)
   const userRef = useRef(userId)
   const liveRef = useRef(live)
-  const markSelected = useCallback((id: string) => {
+  const markSelected = useCallback((id: string | null) => {
     selectedRef.current = id
   }, [])
+  const markFilter = useCallback((nextFilter: InboxFilter) => {
+    filterRef.current = nextFilter
+  }, [])
+  const resetLive = useCallback((nextLive: InboxLive) => {
+    liveRef.current = nextLive
+  }, [])
   const refs = useMemo(
-    () => ({ selectedRef, lastIdRef, filterRef, userRef, liveRef, markSelected }),
-    [selectedRef, lastIdRef, filterRef, userRef, liveRef, markSelected],
+    () => ({
+      selectedRef,
+      lastIdRef,
+      filterRef,
+      userRef,
+      liveRef,
+      markSelected,
+      markFilter,
+      resetLive,
+    }),
+    [selectedRef, lastIdRef, filterRef, userRef, liveRef, markSelected, markFilter, resetLive],
   )
   useEffect(() => {
     selectedRef.current = selectedId
@@ -174,6 +191,90 @@ const mergeInboxPages = async (filter: InboxFilter, extraCursors: string[]) => {
   return { items, nextCursor, counts }
 }
 
+type InboxListReloadRefs = {
+  listGenerationRef: { current: number }
+  extraCursorsRef: { current: string[] }
+  loadedCursorsRef: { current: Set<string> }
+  filterRef: { current: InboxFilter }
+}
+
+const runInboxListReload = async (
+  nextFilter: InboxFilter,
+  cursor: string | null | undefined,
+  reloadRefs: InboxListReloadRefs,
+  setItems: Dispatch<SetStateAction<InboxListItem[]>>,
+  setNextCursor: Dispatch<SetStateAction<string | null>>,
+  setCounts: Dispatch<SetStateAction<InboxCounts>>,
+) => {
+  const generation = reloadRefs.listGenerationRef.current
+  if (cursor) {
+    if (reloadRefs.loadedCursorsRef.current.has(cursor)) {
+      return
+    }
+    reloadRefs.loadedCursorsRef.current.add(cursor)
+    reloadRefs.extraCursorsRef.current.push(cursor)
+    const next = await fetchInboxList(nextFilter, cursor)
+    if (
+      next === null ||
+      generation !== reloadRefs.listGenerationRef.current ||
+      reloadRefs.filterRef.current !== nextFilter
+    ) {
+      reloadRefs.loadedCursorsRef.current.delete(cursor)
+      return
+    }
+    setItems((current) => {
+      const seen = new Set(current.map((item) => item.id))
+      const fresh = next.items.filter((item) => !seen.has(item.id))
+      return [...current, ...fresh]
+    })
+    setNextCursor(next.next_cursor)
+    setCounts(next.counts)
+    return
+  }
+  const merged = await mergeInboxPages(nextFilter, reloadRefs.extraCursorsRef.current)
+  if (
+    merged === null ||
+    generation !== reloadRefs.listGenerationRef.current ||
+    reloadRefs.filterRef.current !== nextFilter
+  ) {
+    return
+  }
+  const unique = merged.items.filter(
+    (item, index, items) => items.findIndex((row) => row.id === item.id) === index,
+  )
+  setItems(unique)
+  setNextCursor(merged.nextCursor)
+  setCounts(merged.counts)
+}
+
+const loadInboxDetail = async (
+  conversationId: string,
+  request: number,
+  detailRequestRef: { current: number },
+  refs: InboxRefs,
+  socketRef: { current: SocketApi | null },
+  setCanned: Dispatch<SetStateAction<CannedReply[]>>,
+  setLive: Dispatch<SetStateAction<InboxLive>>,
+) => {
+  const next = await fetchInboxDetail(conversationId)
+  if (
+    next === null ||
+    request !== detailRequestRef.current ||
+    refs.selectedRef.current !== conversationId
+  ) {
+    return
+  }
+  applyFetchedDetail(
+    conversationId,
+    next,
+    refs.userRef.current,
+    refs.lastIdRef,
+    socketRef,
+    setCanned,
+    setLive,
+  )
+}
+
 export const useInboxLoaders = (
   refs: InboxRefs,
   socketRef: { current: SocketApi | null },
@@ -186,70 +287,46 @@ export const useInboxLoaders = (
   const extraCursorsRef = useRef<string[]>([])
   const loadedCursorsRef = useRef<Set<string>>(new Set())
   const listGenerationRef = useRef(0)
+  const detailRequestRef = useRef(0)
   const clearLoadedCursors = useCallback(() => {
     extraCursorsRef.current = []
     loadedCursorsRef.current = new Set()
     listGenerationRef.current += 1
+    detailRequestRef.current += 1
   }, [])
   const reloadList = useCallback(
     (nextFilter: InboxFilter, cursor?: string | null) => {
-      const load = async () => {
-        if (cursor) {
-          if (loadedCursorsRef.current.has(cursor)) {
-            return
-          }
-          loadedCursorsRef.current.add(cursor)
-          extraCursorsRef.current.push(cursor)
-          const next = await fetchInboxList(nextFilter, cursor)
-          if (next === null) {
-            loadedCursorsRef.current.delete(cursor)
-            return
-          }
-          setItems((current) => {
-            const seen = new Set(current.map((item) => item.id))
-            const fresh = next.items.filter((item) => !seen.has(item.id))
-            return [...current, ...fresh]
-          })
-          setNextCursor(next.next_cursor)
-          setCounts(next.counts)
-          return
-        }
-        const generation = listGenerationRef.current
-        const merged = await mergeInboxPages(nextFilter, extraCursorsRef.current)
-        if (merged === null || generation !== listGenerationRef.current) {
-          return
-        }
-        const unique = merged.items.filter(
-          (item, index, items) => items.findIndex((row) => row.id === item.id) === index,
-        )
-        setItems(unique)
-        setNextCursor(merged.nextCursor)
-        setCounts(merged.counts)
-      }
-      void load()
+      void runInboxListReload(
+        nextFilter,
+        cursor,
+        {
+          listGenerationRef,
+          extraCursorsRef,
+          loadedCursorsRef,
+          filterRef: refs.filterRef,
+        },
+        setItems,
+        setNextCursor,
+        setCounts,
+      )
     },
-    [setCounts, setItems, setNextCursor],
+    [refs.filterRef, setCounts, setItems, setNextCursor],
   )
 
   const reloadDetail = useCallback(
     (conversationId: string) => {
-      const load = async () => {
-        const next = await fetchInboxDetail(conversationId)
-        if (next !== null && refs.selectedRef.current === conversationId) {
-          applyFetchedDetail(
-            conversationId,
-            next,
-            refs.userRef.current,
-            refs.lastIdRef,
-            socketRef,
-            setCanned,
-            setLive,
-          )
-        }
-      }
-      void load()
+      const request = ++detailRequestRef.current
+      void loadInboxDetail(
+        conversationId,
+        request,
+        detailRequestRef,
+        refs,
+        socketRef,
+        setCanned,
+        setLive,
+      )
     },
-    [refs.lastIdRef, refs.selectedRef, refs.userRef, setCanned, setLive, socketRef],
+    [refs, setCanned, setLive, socketRef],
   )
 
   return { reloadList, reloadDetail, clearLoadedCursors }
@@ -272,7 +349,7 @@ export const useInboxSideEffects = (
     clearLoadedCursors()
     const load = async () => {
       const next = await fetchInboxList(filter)
-      if (!cancelled && next !== null) {
+      if (!cancelled && next !== null && refs.filterRef.current === filter) {
         setItems(next.items)
         setNextCursor(next.next_cursor)
         setCounts(next.counts)
@@ -282,7 +359,7 @@ export const useInboxSideEffects = (
     return () => {
       cancelled = true
     }
-  }, [clearLoadedCursors, filter, setCounts, setItems, setNextCursor])
+  }, [clearLoadedCursors, filter, refs.filterRef, setCounts, setItems, setNextCursor])
 
   useEffect(() => {
     const timer = window.setInterval(() => {
@@ -340,11 +417,17 @@ export const useInboxActions = (
 ) => {
   const handleSelect = useCallback(
     (id: string) => {
+      if (refs.selectedRef.current === id && refs.liveRef.current.detail?.id === id) {
+        return
+      }
       refs.markSelected(id)
       setSelectedId(id)
+      const nextLive = emptyLive()
+      refs.resetLive(nextLive)
+      setLive(nextLive)
       reloadDetail(id)
     },
-    [refs, reloadDetail, setSelectedId],
+    [refs, reloadDetail, setLive, setSelectedId],
   )
   const handleJoin = useCallback(() => {
     if (refs.selectedRef.current === null) {

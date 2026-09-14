@@ -31,6 +31,7 @@ const patchRouting = async (
   onSaved((await response.json()) as SiteRecord)
 }
 
+// oxlint-disable-next-line max-lines-per-function
 export const ManageSiteRouting = ({
   site,
   isAdmin,

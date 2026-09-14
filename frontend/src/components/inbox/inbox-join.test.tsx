@@ -84,7 +84,7 @@ describe("inbox join race", () => {
         <InboxConsole user={JORDAN} />
       </div>,
     )
-    const queuedButtons = screen.getAllByRole("button", { name: "Queued" })
+    const queuedButtons = screen.getAllByRole("button", { name: "Needs Attention" })
     await user.click(queuedButtons[0] as HTMLElement)
     await user.click(queuedButtons[1] as HTMLElement)
     const adaButtons = await screen.findAllByRole("button", { name: /Ada Lopez/ })

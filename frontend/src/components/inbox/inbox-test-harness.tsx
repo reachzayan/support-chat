@@ -224,7 +224,7 @@ export const resetInboxHarness = () => {
 export const openQueuedAda = async () => {
   const user = userEvent.setup()
   renderWithProviders(<InboxConsole user={ALEX} />)
-  await user.click(screen.getByRole("button", { name: "Queued" }))
+  await user.click(screen.getByRole("button", { name: "Needs Attention" }))
   await waitFor(() => expect(screen.getByText("Ada Lopez")).toBeInTheDocument())
   await user.click(screen.getByRole("button", { name: /Ada Lopez/ }))
   await waitFor(() => expect(screen.getByText("ada@example.com")).toBeInTheDocument())

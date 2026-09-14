@@ -32,7 +32,7 @@ describe("inbox scheduled poll", () => {
     try {
       const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
       renderWithProviders(<InboxConsole user={ALEX} />)
-      await user.click(screen.getByRole("button", { name: "Queued" }))
+      await user.click(screen.getByRole("button", { name: "Needs Attention" }))
       expect(screen.queryByText("Ada Lopez")).not.toBeInTheDocument()
       setListItems([adaQueued])
       await vi.advanceTimersByTimeAsync(15_000)
@@ -53,7 +53,7 @@ describe("inbox load more", () => {
     setListCursor("page-2")
     const user = userEvent.setup()
     renderWithProviders(<InboxConsole user={ALEX} />)
-    await user.click(screen.getByRole("button", { name: "Queued" }))
+    await user.click(screen.getByRole("button", { name: "Needs Attention" }))
     await waitFor(() => expect(screen.getByText("Ada Lopez")).toBeInTheDocument())
     await user.click(screen.getByRole("button", { name: "Load more" }))
     await waitFor(() => expect(screen.getByText("Third Visitor")).toBeInTheDocument())
@@ -64,7 +64,7 @@ describe("inbox load more", () => {
     setListCursor("page-2")
     const user = userEvent.setup()
     renderWithProviders(<InboxConsole user={ALEX} />)
-    await user.click(screen.getByRole("button", { name: "Queued" }))
+    await user.click(screen.getByRole("button", { name: "Needs Attention" }))
     await waitFor(() => expect(screen.getByText("Ada Lopez")).toBeInTheDocument())
     const loadMore = screen.getByRole("button", { name: "Load more" })
     await user.click(loadMore)
@@ -79,7 +79,7 @@ describe("inbox load more", () => {
     try {
       const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
       renderWithProviders(<InboxConsole user={ALEX} />)
-      await user.click(screen.getByRole("button", { name: "Queued" }))
+      await user.click(screen.getByRole("button", { name: "Needs Attention" }))
       await waitFor(() => expect(screen.getByText("Ada Lopez")).toBeInTheDocument())
       await user.click(screen.getByRole("button", { name: "Load more" }))
       await waitFor(() => expect(screen.getByText("Third Visitor")).toBeInTheDocument())
@@ -101,10 +101,10 @@ describe("inbox view counts", () => {
     resetInboxHarness()
   })
 
-  test("Live, Bot, Queued, and Closed show their counts without clicking a view", async () => {
+  test("Live, Bot, Needs Attention, and Closed show their counts without clicking a view", async () => {
     renderWithProviders(<InboxConsole user={ALEX} />)
     await waitFor(() =>
-      expect(screen.getByRole("button", { name: "Queued" })).toHaveTextContent("2"),
+      expect(screen.getByRole("button", { name: "Needs Attention" })).toHaveTextContent("2"),
     )
     expect(screen.getByRole("button", { name: "Live" })).toHaveTextContent("0")
     expect(screen.getByRole("button", { name: "Bot" })).toHaveTextContent("0")
@@ -114,7 +114,7 @@ describe("inbox view counts", () => {
   test("inbox_upsert refreshes an unselected view count", async () => {
     renderWithProviders(<InboxConsole user={ALEX} />)
     await waitFor(() =>
-      expect(screen.getByRole("button", { name: "Queued" })).toHaveTextContent("2"),
+      expect(screen.getByRole("button", { name: "Needs Attention" })).toHaveTextContent("2"),
     )
     await waitFor(() => expect(FakeSocket.instances.length).toBe(1))
     setListItems([
@@ -138,7 +138,7 @@ describe("inbox view counts", () => {
       site_key: "samplesite",
     })
     await waitFor(() => expect(screen.getByRole("button", { name: "Bot" })).toHaveTextContent("1"))
-    expect(screen.getByRole("button", { name: "Queued" })).toHaveTextContent("2")
+    expect(screen.getByRole("button", { name: "Needs Attention" })).toHaveTextContent("2")
   })
 })
 
@@ -152,7 +152,7 @@ describe("inbox transcript poll", () => {
     try {
       const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
       renderWithProviders(<InboxConsole user={ALEX} />)
-      await user.click(screen.getByRole("button", { name: "Queued" }))
+      await user.click(screen.getByRole("button", { name: "Needs Attention" }))
       await waitFor(() => expect(screen.getByText("Ada Lopez")).toBeInTheDocument())
       await user.click(screen.getByRole("button", { name: /Ada Lopez/ }))
       await waitFor(() => expect(screen.getByText("ada@example.com")).toBeInTheDocument())

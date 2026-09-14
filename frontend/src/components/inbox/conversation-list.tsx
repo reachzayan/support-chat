@@ -1,7 +1,9 @@
 "use client"
 
 import { Search } from "lucide-react"
-import { useCallback, useMemo, useState, type ChangeEvent, type MouseEvent } from "react"
+import { useCallback, useMemo, useState, type ChangeEvent } from "react"
+
+import { Input } from "@/components/ui/input"
 
 import { INBOX_FILTERS, type InboxCounts, type InboxFilter, type InboxListItem } from "./types"
 
@@ -24,7 +26,7 @@ const stateLabel = (state: string) => {
     return "Assistant"
   }
   if (state === "queued") {
-    return "Queued"
+    return "Needs Attention"
   }
   if (state === "closed") {
     return "Closed"
@@ -38,7 +40,7 @@ const stateChipClass = (state: string) => {
     return `${base} bg-ember/10 text-ember`
   }
   if (state === "human") {
-    return `${base} bg-navy text-paper`
+    return `${base} bg-navy text-white dark:text-navy-deep`
   }
   if (state === "bot") {
     return `${base} bg-ice text-steel`
@@ -62,21 +64,21 @@ const formatTime = (iso: string) => {
 type RowProps = {
   item: InboxListItem
   selected: boolean
-  onSelectClick: (event: MouseEvent<HTMLButtonElement>) => void
+  onSelect: (id: string) => void
 }
 
-const ConversationRow = ({ item, selected, onSelectClick }: RowProps) => {
+const ConversationRow = ({ item, selected, onSelect }: RowProps) => {
+  const handleSelect = useCallback(() => onSelect(item.id), [item.id, onSelect])
   return (
-    <li className="border-line border-b last:border-b-0">
+    <li className="border-line/60 border-b last:border-b-0">
       <button
         type="button"
-        data-id={item.id}
-        onClick={onSelectClick}
+        onClick={handleSelect}
         aria-current={selected ? "true" : undefined}
         className={`flex w-full flex-col gap-1 px-3 py-3 text-left ${
           selected
-            ? "border-ember bg-ice-2 border-l-2"
-            : "hover:bg-ice bg-paper border-l-2 border-transparent"
+            ? "border-ember bg-navy-mid border-l-2"
+            : "hover:bg-ice-2 bg-paper border-l-2 border-transparent"
         }`}
       >
         <span className="flex items-baseline justify-between gap-2">
@@ -109,15 +111,6 @@ export const ConversationList = ({
   onLoadMore,
 }: ConversationListProps) => {
   const [query, setQuery] = useState("")
-  const handleSelectClick = useCallback(
-    (event: MouseEvent<HTMLButtonElement>) => {
-      const id = event.currentTarget.getAttribute("data-id")
-      if (id) {
-        onSelect(id)
-      }
-    },
-    [onSelect],
-  )
   const handleLoadMoreClick = useCallback(() => {
     if (nextCursor) {
       onLoadMore(nextCursor)
@@ -138,25 +131,31 @@ export const ConversationList = ({
     )
   }, [items, query])
   return (
-    <section className="border-line bg-paper flex min-h-0 w-full flex-col border-r lg:w-[300px] lg:shrink-0">
-      <div className="border-line flex items-center justify-between border-b px-5 py-4">
-        <div>
-          <h2 className="text-navy text-base font-extrabold tracking-[-0.02em]">Inbox</h2>
-          <p className="text-mute mt-1 text-xs">Visitor conversations</p>
-        </div>
-        <span className="bg-ice-2 text-mute rounded-full px-2 py-1 font-mono text-[10px]">
+    <section className="border-line/70 bg-paper flex min-h-0 w-full flex-col border-r lg:w-[300px] lg:shrink-0">
+      <div className="border-line/70 flex items-center justify-between border-b px-5 py-4">
+        <h2 className="text-navy text-sm font-extrabold tracking-[-0.02em]">Conversations</h2>
+        <span
+          className="bg-ice-2 text-mute rounded-full px-2 py-1 font-mono text-[10px]"
+          aria-label={`${items.length} conversations`}
+        >
           {items.length}
         </span>
       </div>
-      <label className="border-line relative mx-4 mt-4 block border-b pb-4">
+      <label
+        htmlFor="conversation-search"
+        className="border-line/70 relative mx-4 mt-4 block border-b pb-4"
+      >
         <span className="sr-only">Search chats</span>
         <Search aria-hidden="true" className="text-mute absolute top-2.5 left-3 size-4" />
-        <input
+        <Input
+          id="conversation-search"
+          name="query"
+          autoComplete="off"
           type="search"
           value={query}
           onChange={handleSearch}
           placeholder="Search chat"
-          className="border-line bg-ice text-ink placeholder:text-mute focus-visible:ring-steel h-10 w-full rounded-[8px] border pr-3 pl-9 text-sm outline-none focus-visible:ring-2"
+          className="border-line bg-ice text-ink placeholder:text-mute focus-visible:ring-steel dark:bg-ice h-10 rounded-[10px] border pr-3 pl-9 text-sm outline-none focus-visible:ring-2"
         />
       </label>
       <InboxFilterNav filter={filter} counts={counts} onFilter={onFilter} />
@@ -165,10 +164,43 @@ export const ConversationList = ({
         selectedId={selectedId}
         nextCursor={nextCursor}
         query={query}
-        onSelectClick={handleSelectClick}
+        onSelect={onSelect}
         onLoadMore={handleLoadMoreClick}
       />
     </section>
+  )
+}
+
+const InboxFilterButton = ({
+  item,
+  active,
+  count,
+  onFilter,
+}: {
+  item: (typeof INBOX_FILTERS)[number]
+  active: boolean
+  count: number
+  onFilter: (filter: InboxFilter) => void
+}) => {
+  const handleClick = useCallback(() => onFilter(item.id), [item.id, onFilter])
+  return (
+    <button
+      type="button"
+      aria-label={item.label}
+      aria-pressed={active}
+      onClick={handleClick}
+      className={`flex min-h-10 w-full items-center justify-between rounded-[8px] px-3 text-left text-xs font-bold ${
+        active ? "bg-navy-mid text-navy" : "text-mute hover:bg-ice-2 hover:text-ink"
+      }`}
+    >
+      <span className="flex items-center gap-2">
+        <span
+          className={`size-2 ${item.id === "human" ? "bg-[#29915E]" : item.id === "queued" ? "bg-ember" : item.id === "bot" ? "bg-steel" : "bg-mute/50"} rounded-full`}
+        />
+        {item.label}
+      </span>
+      <span className="font-mono text-[10px]">{count}</span>
+    </button>
   )
 }
 
@@ -181,39 +213,16 @@ const InboxFilterNav = ({
   counts: InboxCounts
   onFilter: (filter: InboxFilter) => void
 }) => {
-  const handleFilterClick = useCallback(
-    (event: MouseEvent<HTMLButtonElement>) => {
-      const value = event.currentTarget.getAttribute("data-filter")
-      if (value === "human" || value === "bot" || value === "queued" || value === "closed") {
-        onFilter(value)
-      }
-    },
-    [onFilter],
-  )
-
   return (
-    <nav aria-label="Inbox filters" className="border-line border-b px-4 py-4">
-      <p className="text-mute px-2 pb-2 text-[10px] font-bold tracking-[0.14em] uppercase">Views</p>
+    <nav aria-label="Inbox filters" className="border-line/70 border-b px-4 py-4">
       {INBOX_FILTERS.map((item) => (
-        <button
+        <InboxFilterButton
           key={item.id}
-          type="button"
-          data-filter={item.id}
-          aria-label={item.label}
-          aria-pressed={filter === item.id}
-          onClick={handleFilterClick}
-          className={`flex min-h-10 w-full items-center justify-between rounded-[8px] px-3 text-left text-xs font-bold ${
-            filter === item.id ? "bg-ice-2 text-navy" : "text-mute hover:bg-ice hover:text-ink"
-          }`}
-        >
-          <span className="flex items-center gap-2">
-            <span
-              className={`size-2 ${item.id === "human" ? "bg-[#29915E]" : item.id === "queued" ? "bg-ember" : item.id === "bot" ? "bg-steel" : "bg-mute/50"} rounded-full`}
-            />
-            {item.label}
-          </span>
-          <span className="font-mono text-[10px]">{counts[item.id]}</span>
-        </button>
+          item={item}
+          active={filter === item.id}
+          count={counts[item.id]}
+          onFilter={onFilter}
+        />
       ))}
     </nav>
   )
@@ -224,7 +233,7 @@ type RowsProps = {
   selectedId: string | null
   nextCursor: string | null
   query: string
-  onSelectClick: (event: MouseEvent<HTMLButtonElement>) => void
+  onSelect: (id: string) => void
   onLoadMore: () => void
 }
 
@@ -233,16 +242,13 @@ const ConversationRows = ({
   selectedId,
   nextCursor,
   query,
-  onSelectClick,
+  onSelect,
   onLoadMore,
 }: RowsProps) => {
   return (
     <ul aria-label="Conversations" className="min-h-0 flex-1 overflow-y-auto">
       {items.length === 0 ? (
         <li className="px-5 py-10 text-center">
-          <span className="border-line mx-auto mb-3 flex size-9 items-center justify-center rounded-full border">
-            <span className="bg-steel size-2 rounded-full" />
-          </span>
           <p className="text-ink text-sm font-bold">{query ? "No chats found" : "Inbox clear"}</p>
           <p className="text-mute mt-1 text-xs leading-5">
             {query
@@ -256,7 +262,7 @@ const ConversationRows = ({
           key={item.id}
           item={item}
           selected={selectedId === item.id}
-          onSelectClick={onSelectClick}
+          onSelect={onSelect}
         />
       ))}
       {nextCursor ? (

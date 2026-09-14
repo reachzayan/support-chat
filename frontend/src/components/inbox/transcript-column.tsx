@@ -94,7 +94,7 @@ const TranscriptActions = ({
         aria-busy={joinPending}
         disabled={joinPending}
         onClick={onJoin}
-        className="bg-ember text-paper hover:bg-ember-mid disabled:bg-ember-soft focus-visible:ring-steel rounded-[8px] px-4 py-2.5 text-sm font-bold focus-visible:ring-2 focus-visible:outline-none"
+        className="bg-ember hover:bg-ember-mid disabled:bg-ember-soft focus-visible:ring-steel dark:text-navy-deep rounded-[8px] px-4 py-2.5 text-sm font-bold text-white focus-visible:ring-2 focus-visible:outline-none"
       >
         Join this chat
       </button>
@@ -103,7 +103,7 @@ const TranscriptActions = ({
       <button
         type="button"
         onClick={onMarkContacted}
-        className="bg-steel text-paper hover:bg-navy focus-visible:ring-steel rounded-[8px] px-4 py-2.5 text-sm font-bold focus-visible:ring-2 focus-visible:outline-none"
+        className="bg-steel hover:bg-navy focus-visible:ring-steel dark:text-navy-deep rounded-[8px] px-4 py-2.5 text-sm font-bold text-white focus-visible:ring-2 focus-visible:outline-none"
       >
         Mark contacted
       </button>
@@ -146,13 +146,13 @@ export const TranscriptColumn = (props: TranscriptColumnProps) => {
   } = props
 
   return (
-    <section className="bg-paper flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
-      <div className="border-line bg-paper flex shrink-0 items-center justify-between gap-3 border-b px-5 py-4">
+    <section className="bg-ice flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+      <div className="border-line/70 bg-paper flex shrink-0 items-center justify-between gap-3 border-b px-5 py-4">
         <TranscriptHeader visitorName={visitorName} siteName={siteName} closed={closed} />
         <TranscriptActions {...props} />
       </div>
       {props.joinedBy ? (
-        <p className="border-line text-mute bg-ice shrink-0 border-b px-5 py-2.5 text-xs">
+        <p className="border-line/70 text-mute bg-ice-2 shrink-0 border-b px-5 py-2.5 text-xs">
           Joined by {props.joinedBy}
         </p>
       ) : null}

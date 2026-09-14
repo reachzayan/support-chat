@@ -16,7 +16,7 @@ export const SitesDirectory = ({
   onOpenAdd: () => void
   onOpenManage: (siteId: string) => void
 }) => (
-  <section className="border-line bg-paper overflow-hidden rounded-[8px] border">
+  <section className="border-line bg-paper min-w-0 overflow-hidden rounded-[8px] border">
     <div className="border-line flex flex-wrap items-center justify-between gap-3 border-b px-4 py-3 sm:px-5">
       <div>
         <p className={LABEL}>Directory</p>

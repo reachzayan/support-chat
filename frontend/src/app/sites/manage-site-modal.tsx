@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback } from "react"
+import { useCallback, useState } from "react"
 
 import type { SiteRecord } from "@/components/admin/staff-api"
 import {
@@ -15,35 +15,37 @@ import {
 import { ManageSiteFields, ManageSiteSnippet } from "./manage-site-fields"
 import { ManageSiteRouting } from "./manage-site-routing"
 import { OffBrandEditor } from "./off-brand-editor"
-import { LeaveGuard } from "./sites-form"
+import { LeaveGuard, useAnimatedDialogClose } from "./sites-form"
 import { BTN_DANGER, BTN_PRIMARY, BTN_SECONDARY } from "./sites-shared"
 import { useManageSiteForm } from "./use-manage-site-form"
 
+// oxlint-disable-next-line max-lines-per-function
 export const ManageSiteModal = ({
   site,
   isAdmin,
   onClose,
   onSaved,
-  onError,
   onRequestDelete,
 }: {
   site: SiteRecord
   isAdmin: boolean
   onClose: () => void
   onSaved: (site: SiteRecord) => void
-  onError: (message: string | null) => void
   onRequestDelete: (siteId: string) => void
 }) => {
-  const form = useManageSiteForm(site, onClose, onSaved, onError)
+  const [error, setError] = useState<string | null>(null)
+  const handleError = useCallback((message: string | null) => setError(message), [])
+  const { open, close } = useAnimatedDialogClose(onClose)
+  const form = useManageSiteForm(site, close, onSaved, handleError)
   const handleRequestDelete = useCallback(
-    () => onRequestDelete(site.id),
-    [onRequestDelete, site.id],
+    () => close(() => onRequestDelete(site.id)),
+    [close, onRequestDelete, site.id],
   )
   const publicPreview = `${site.public_key.slice(0, 8)}…${site.public_key.slice(-8)}`
 
   return (
     <>
-      <Dialog open onOpenChange={form.handleOpenChange}>
+      <Dialog open={open} onOpenChange={form.handleOpenChange}>
         <DialogContent className="max-h-[min(92vh,56rem)] max-w-4xl" showCloseButton={false}>
           <DialogHeader>
             <DialogTitle>Manage site</DialogTitle>
@@ -51,6 +53,14 @@ export const ManageSiteModal = ({
               Keys are issued by the server. Site key {site.key}. Public key {publicPreview}.
             </DialogDescription>
           </DialogHeader>
+          {error ? (
+            <p
+              className="border-ember/20 bg-ember/10 text-ember mx-5 mt-4 rounded-lg border px-3 py-2.5 text-xs leading-5"
+              role="alert"
+            >
+              {error}
+            </p>
+          ) : null}
           <div className="flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto px-5 py-4">
             <ManageSiteFields
               site={site}
@@ -65,9 +75,18 @@ export const ManageSiteModal = ({
               onPrivacy={form.handlePrivacy}
               onOrigins={form.handleOrigins}
               onWindow={form.handleWindow}
+              errors={form.errors}
+              onNameBlur={form.handleNameBlur}
+              onPrivacyBlur={form.handlePrivacyBlur}
+              onOriginsBlur={form.handleOriginsBlur}
             />
-            <ManageSiteRouting site={site} isAdmin={isAdmin} onSaved={onSaved} onError={onError} />
-            <OffBrandEditor site={site} isAdmin={isAdmin} onError={onError} onSaved={onSaved} />
+            <ManageSiteRouting
+              site={site}
+              isAdmin={isAdmin}
+              onSaved={onSaved}
+              onError={handleError}
+            />
+            <OffBrandEditor site={site} isAdmin={isAdmin} onError={handleError} onSaved={onSaved} />
             <ManageSiteSnippet site={site} copyNotice={form.copyNotice} onCopy={form.handleCopy} />
           </div>
           <DialogFooter className="flex-row justify-end gap-2">
