@@ -3,6 +3,7 @@
 import { useRouter } from "next/navigation"
 import { useEffect, useState } from "react"
 
+import { StaffPageSkeleton } from "@/components/admin/loading-skeleton"
 import { fetchMe, refreshSession, type StaffUser } from "@/lib/auth-client"
 
 import { SettingsConsole } from "./settings-console"
@@ -25,7 +26,7 @@ export default function SettingsPage() {
   }, [router])
 
   if (user === null) {
-    return null
+    return <StaffPageSkeleton />
   }
 
   return (

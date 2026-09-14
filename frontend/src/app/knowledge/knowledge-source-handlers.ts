@@ -24,9 +24,17 @@ export const useKnowledgeSourceHandlers = (
   setSourceId: Dispatch<SetStateAction<string | null>>,
   setPageDetail: Dispatch<SetStateAction<KbPageDetail | null>>,
 ) => {
+  const {
+    handleAdd,
+    error: addError,
+    clearError,
+  } = useKnowledgeAddHandler(isAdmin, siteId, urls, setUrls, setSources, setSourceId)
   const handleUrls = useCallback(
-    (event: ChangeEvent<HTMLTextAreaElement>) => setUrls(event.target.value),
-    [setUrls],
+    (event: ChangeEvent<HTMLTextAreaElement>) => {
+      setUrls(event.target.value)
+      clearError()
+    },
+    [clearError, setUrls],
   )
   const handleSelectSource = useCallback(
     (source: KbSourceRecord) => {
@@ -35,7 +43,6 @@ export const useKnowledgeSourceHandlers = (
     },
     [setPageDetail, setSourceId],
   )
-  const handleAdd = useKnowledgeAddHandler(isAdmin, siteId, urls, setUrls, setSources, setSourceId)
   const handleSync = useCallback(
     async (source: KbSourceRecord) => {
       const response = await syncSource(source)
@@ -74,6 +81,7 @@ export const useKnowledgeSourceHandlers = (
   return {
     handleUrls,
     handleAdd,
+    addError,
     handleSelectSource,
     handleSync,
     handleToggleSource,

@@ -28,6 +28,18 @@ describe("staff login", () => {
     expect(screen.getByRole("button", { name: "Sign in" })).toBeInTheDocument()
   })
 
+  test("shows inline validation before attempting sign in", async () => {
+    const user = userEvent.setup()
+    renderWithProviders(<LoginPage />)
+
+    await user.click(screen.getByRole("button", { name: "Sign in" }))
+
+    expect(screen.getByText("Email is required.")).toBeInTheDocument()
+    expect(screen.getByText("Password is required.")).toBeInTheDocument()
+    expect(screen.getByLabelText("Email")).toHaveAttribute("aria-invalid", "true")
+    expect(screen.getByLabelText("Password")).toHaveAttribute("aria-invalid", "true")
+  })
+
   test("never writes the access JWT to localStorage", async () => {
     const user = userEvent.setup()
     const setItem = vi.spyOn(Storage.prototype, "setItem")

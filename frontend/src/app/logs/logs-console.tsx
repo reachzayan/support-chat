@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react"
 
+import { LogTableSkeleton } from "@/components/admin/loading-skeleton"
 import { staffRead } from "@/components/admin/staff-api"
 import { StaffHeader } from "@/components/admin/staff-nav"
 
@@ -53,7 +54,7 @@ const DumpButton = ({ dumping, onDump }: { dumping: boolean; onDump: () => void 
     onClick={onDump}
     disabled={dumping}
     aria-label="Dump last 7 days"
-    className="bg-ember text-paper hover:bg-ember-mid focus-visible:ring-steel cursor-pointer rounded-[8px] px-4 py-2 text-sm font-bold focus-visible:ring-2 focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-60"
+    className="bg-ember hover:bg-ember-mid focus-visible:ring-steel dark:text-navy-deep cursor-pointer rounded-[8px] px-4 py-2 text-sm font-bold text-white focus-visible:ring-2 focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-60"
   >
     {dumping ? "Dumping…" : "Dump last 7 days"}
   </button>
@@ -113,7 +114,7 @@ const LogsBody = ({
 }) => (
   <div className="min-h-0 flex-1 overflow-y-auto px-5 py-5 lg:px-8">
     {error ? <p className="text-ember mb-3 text-sm font-semibold">{error}</p> : null}
-    {loading ? <p className="text-mute text-sm">Loading logs…</p> : null}
+    {loading ? <LogTableSkeleton /> : null}
     {!loading && items.length === 0 && !error ? (
       <p className="text-mute text-sm">No application logs in the last 7 days.</p>
     ) : null}
@@ -174,9 +175,8 @@ export const LogsConsole = ({ isAdmin, displayName }: LogsConsoleProps) => {
   )
 
   return (
-    <div className="bg-ice flex min-h-0 flex-1 flex-col">
+    <div className="view-transition-enter bg-ice flex min-h-0 flex-1 flex-col">
       <StaffHeader
-        eyebrow="Operations"
         title="Application logs"
         description={`Elaborative failure traces for the last 7 days. Signed in as ${displayName}. Transcript bodies and credentials are never stored.`}
         action={action}

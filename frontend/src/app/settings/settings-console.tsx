@@ -1,6 +1,7 @@
 "use client"
 
 import { StaffHeader } from "@/components/admin/staff-nav"
+import { Input } from "@/components/ui/input"
 
 type SettingsConsoleProps = {
   displayName: string
@@ -10,10 +11,9 @@ type SettingsConsoleProps = {
 
 export const SettingsConsole = ({ displayName, email, isAdmin }: SettingsConsoleProps) => {
   return (
-    <div className="bg-ice flex min-h-0 flex-1 flex-col">
+    <div className="view-transition-enter bg-ice flex min-h-0 flex-1 flex-col">
       <div className="flex min-h-0 min-w-0 flex-1 flex-col">
         <StaffHeader
-          eyebrow="Account"
           title="Settings"
           description="Manage your specialist profile and workspace details."
         />
@@ -61,7 +61,7 @@ const ProfileCard = ({
 const ProfileField = ({ id, label, value }: { id: string; label: string; value: string }) => (
   <label className="text-ink flex flex-col gap-1 text-xs font-bold" htmlFor={id}>
     {label}
-    <input
+    <Input
       id={id}
       readOnly
       value={value}
@@ -71,16 +71,20 @@ const ProfileField = ({ id, label, value }: { id: string; label: string; value: 
 )
 
 const WorkspaceCard = () => (
-  <section className="border-line bg-navy rounded-[8px] border border-transparent p-5 text-white lg:p-6">
-    <p className="text-[10px] font-bold tracking-[0.14em] text-white/55 uppercase">Workspace</p>
+  <section className="border-line bg-navy dark:text-navy-deep rounded-[8px] border border-transparent p-5 text-white lg:p-6">
+    <p className="dark:text-navy-deep/55 text-[10px] font-bold tracking-[0.14em] text-white/55 uppercase">
+      Workspace
+    </p>
     <div className="mt-2 flex flex-col justify-between gap-4 sm:flex-row sm:items-end">
       <div>
         <h2 className="text-lg font-extrabold tracking-[-0.03em]">SampleSite operations</h2>
-        <p className="mt-1 max-w-md text-xs leading-5 text-white/65">
-          Your inbox, approved knowledge, and site configuration live in this workspace.
+        <p className="dark:text-navy-deep/65 mt-1 max-w-md text-xs leading-5 text-white/65">
+          Your inbox, ingested knowledge, and site configuration live in this workspace.
         </p>
       </div>
-      <span className="font-mono text-xs text-white/45">supportchat / samplesite</span>
+      <span className="dark:text-navy-deep/45 font-mono text-xs text-white/45">
+        supportchat / samplesite
+      </span>
     </div>
   </section>
 )

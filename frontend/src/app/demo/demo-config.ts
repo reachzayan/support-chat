@@ -9,9 +9,6 @@ export const readDemoWidgetConfig = () => {
   if (widgetOrigin === staffOrigin) {
     throw new Error("SupportChat widget origin must differ from the staff app origin")
   }
-  if (siteKey !== "demo") {
-    throw new Error("SupportChat demo widget must use the demo site")
-  }
   return { widgetOrigin, staffOrigin, siteKey, publicKey }
 }
 

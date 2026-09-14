@@ -36,7 +36,7 @@ export type SubmissionRow = {
 export const STATE_LABEL: Record<string, string> = {
   prechat: "Prechat",
   bot: "Bot",
-  queued: "Queued",
+  queued: "Needs Attention",
   human: "Live",
   closed: "Closed",
 }

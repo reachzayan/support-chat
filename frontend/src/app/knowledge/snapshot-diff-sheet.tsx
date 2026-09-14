@@ -72,7 +72,7 @@ export const SnapshotDiffSheet = ({
               type="button"
               onClick={handleRollback}
               disabled={rollbackBusy}
-              className="bg-ember text-paper hover:bg-ember-mid focus-visible:ring-steel rounded-[8px] px-4 py-2.5 text-sm font-bold focus-visible:ring-2 focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-60"
+              className="bg-ember hover:bg-ember-mid focus-visible:ring-steel dark:text-navy-deep rounded-[8px] px-4 py-2.5 text-sm font-bold text-white focus-visible:ring-2 focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-60"
             >
               Roll back to previous snapshot
             </button>

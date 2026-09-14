@@ -1,18 +1,10 @@
-import {
-  BookOpen,
-  Globe2,
-  Inbox,
-  ScrollText,
-  Settings2,
-  Table2,
-  type LucideIcon,
-} from "lucide-react"
+import { BookOpen, Globe2, Inbox, ScrollText, Table2, type LucideIcon } from "lucide-react"
 import Link from "next/link"
 import type { ReactNode } from "react"
 
 export type StaffSection = "Inbox" | "Data" | "Knowledge base" | "Sites" | "Logs" | "Settings"
 
-type IconName = "inbox" | "data" | "book" | "globe" | "logs" | "settings"
+type IconName = "inbox" | "data" | "book" | "globe" | "logs"
 
 type StaffNavProps = {
   current: StaffSection
@@ -33,7 +25,6 @@ const ICONS: Record<IconName, LucideIcon> = {
   book: BookOpen,
   globe: Globe2,
   logs: ScrollText,
-  settings: Settings2,
 }
 
 const Icon = ({ name }: { name: IconName }) => {
@@ -51,7 +42,7 @@ const Initials = ({ displayName }: { displayName: string }) => {
     .toUpperCase()
 
   return (
-    <span className="bg-ember text-paper flex size-9 shrink-0 items-center justify-center rounded-[8px] text-xs font-bold">
+    <span className="bg-ember dark:text-navy-deep flex size-9 shrink-0 items-center justify-center rounded-[8px] text-xs font-bold text-white">
       {initials || "SP"}
     </span>
   )
@@ -75,10 +66,10 @@ const NavLink = ({
       aria-label={label}
       title={label}
       aria-current={active ? "page" : undefined}
-      className={`group focus-visible:ring-steel flex size-11 cursor-pointer items-center justify-center rounded-[8px] border-l-2 text-sm font-semibold transition-colors duration-150 focus-visible:ring-2 focus-visible:outline-none ${
+      className={`group focus-visible:ring-steel flex size-11 cursor-pointer items-center justify-center rounded-[8px] border-l-2 text-sm font-semibold no-underline transition-colors duration-150 focus-visible:ring-2 focus-visible:outline-none ${
         active
-          ? "border-ember bg-paper/10 text-paper"
-          : "text-paper/65 hover:bg-paper/6 hover:text-paper border-transparent"
+          ? "border-ember bg-paper/10 text-white"
+          : "hover:bg-paper/6 border-transparent text-white/65 hover:text-white"
       }`}
     >
       <Icon name={icon} />
@@ -89,7 +80,7 @@ const NavLink = ({
 
 export const StaffNav = ({ current, displayName }: StaffNavProps) => {
   return (
-    <aside className="bg-navy-deep text-paper flex w-full shrink-0 flex-row border-b border-[#18335C] lg:h-dvh lg:w-[68px] lg:flex-col lg:border-r lg:border-b-0">
+    <aside className="bg-navy-deep flex w-full shrink-0 flex-row border-b border-[#18335C] text-white lg:h-dvh lg:w-[68px] lg:flex-col lg:border-r lg:border-b-0">
       <a
         href="#main-content"
         className="bg-paper text-navy focus-visible:ring-steel sr-only absolute top-3 left-3 z-20 cursor-pointer rounded-[8px] px-3 py-2 text-xs font-bold focus:not-sr-only focus-visible:ring-2 focus-visible:outline-none"
@@ -97,7 +88,7 @@ export const StaffNav = ({ current, displayName }: StaffNavProps) => {
         Skip to content
       </a>
       <div className="border-navy-mid flex items-center justify-center border-r px-3 py-3 lg:border-r-0 lg:border-b lg:py-4">
-        <span className="bg-ember text-paper flex size-10 items-center justify-center rounded-[8px] text-xs font-extrabold tracking-[-0.08em]">
+        <span className="bg-ember dark:text-navy-deep flex size-10 items-center justify-center rounded-[8px] text-xs font-extrabold tracking-[-0.08em] text-white">
           Support
         </span>
         <span className="sr-only">SupportChat specialist console</span>
@@ -111,13 +102,15 @@ export const StaffNav = ({ current, displayName }: StaffNavProps) => {
         {LINKS.map((link) => (
           <NavLink key={link.href} {...link} current={current} />
         ))}
-        <div className="border-navy-mid mx-2 my-0 border-l lg:my-4 lg:border-t lg:border-l-0" />
-        <p className="sr-only">Account</p>
-        <NavLink href="/admin/settings" label="Settings" icon="settings" current={current} />
       </nav>
 
-      <div className="border-navy-mid flex items-center border-l p-2 lg:border-t lg:border-l-0 lg:p-3">
-        <div className="flex items-center justify-center rounded-[8px] p-1" title={displayName}>
+      <Link
+        href="/admin/settings"
+        aria-label={`${displayName} account`}
+        title="Account settings"
+        className="border-navy-mid focus-visible:ring-steel flex items-center border-l p-2 no-underline outline-none focus-visible:ring-2 lg:border-t lg:border-l-0 lg:p-3"
+      >
+        <div className="flex items-center justify-center rounded-[8px] p-1">
           <Initials displayName={displayName} />
           <span
             className="relative mt-6 -ml-2 size-2 rounded-full bg-[#67B587]"
@@ -126,7 +119,7 @@ export const StaffNav = ({ current, displayName }: StaffNavProps) => {
         </div>
         <span className="sr-only">{displayName}</span>
         <span className="sr-only">Operations workspace</span>
-      </div>
+      </Link>
     </aside>
   )
 }
@@ -137,7 +130,7 @@ export const StaffHeader = ({
   description,
   action,
 }: {
-  eyebrow: string
+  eyebrow?: string
   title: string
   description?: string
   action?: ReactNode
@@ -145,8 +138,14 @@ export const StaffHeader = ({
   return (
     <header className="border-line bg-paper flex min-h-[82px] items-center justify-between gap-4 border-b px-5 py-4 lg:px-8">
       <div className="min-w-0">
-        <p className="text-mute text-[10px] font-bold tracking-[0.16em] uppercase">{eyebrow}</p>
-        <h1 className="text-navy mt-1 text-xl font-extrabold tracking-[-0.035em]">{title}</h1>
+        {eyebrow ? (
+          <p className="text-mute text-[10px] font-bold tracking-[0.16em] uppercase">{eyebrow}</p>
+        ) : null}
+        <h1
+          className={`text-navy text-xl font-extrabold tracking-[-0.035em] ${eyebrow ? "mt-1" : ""}`}
+        >
+          {title}
+        </h1>
         {description ? <p className="text-mute mt-1 max-w-2xl text-xs">{description}</p> : null}
       </div>
       {action ? <div className="shrink-0">{action}</div> : null}

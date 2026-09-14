@@ -1,8 +1,9 @@
 "use client"
 
-import { useCallback, type Dispatch, type SetStateAction } from "react"
+import { useCallback, useState, type Dispatch, type SetStateAction } from "react"
 
 import { staffWrite, type KbSourceRecord } from "@/components/admin/staff-api"
+import { httpsUrlsError } from "@/lib/validation"
 
 export const useKnowledgeAddHandler = (
   isAdmin: boolean,
@@ -12,8 +13,15 @@ export const useKnowledgeAddHandler = (
   setSources: Dispatch<SetStateAction<KbSourceRecord[]>>,
   setSourceId: Dispatch<SetStateAction<string | null>>,
 ) => {
-  return useCallback(async () => {
+  const [error, setError] = useState<string | null>(null)
+  const clearError = useCallback(() => setError(null), [])
+  const handleAdd = useCallback(async () => {
     if (!siteId || !isAdmin) {
+      return
+    }
+    const validationError = httpsUrlsError(urls)
+    if (validationError) {
+      setError(validationError)
       return
     }
     const seed = urls
@@ -29,11 +37,14 @@ export const useKnowledgeAddHandler = (
       seed_urls: seed,
     })
     if (!response.ok) {
+      setError("Could not add this page. Check the URL and try again.")
       return
     }
     const created = (await response.json()) as KbSourceRecord
     setSources((current) => [...current, created])
     setSourceId(created.id)
     setUrls("")
+    setError(null)
   }, [isAdmin, setSourceId, setSources, setUrls, siteId, urls])
+  return { handleAdd, error, clearError }
 }

@@ -16,5 +16,6 @@ describe("settings console", () => {
     expect(screen.queryByRole("switch", { name: "Desktop notifications" })).not.toBeInTheDocument()
     expect(screen.getByDisplayValue("Alex Morgan")).toBeInTheDocument()
     expect(screen.getByDisplayValue("alex@example.local")).toBeInTheDocument()
+    expect(document.querySelector(".view-transition-enter")).toBeInTheDocument()
   })
 })

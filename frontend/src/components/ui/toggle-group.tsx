@@ -42,7 +42,7 @@ const ToggleGroup = ({
             className={cn(
               "focus-visible:ring-steel rounded-[8px] border px-3 py-1.5 text-xs font-bold focus-visible:ring-2 focus-visible:outline-none",
               selected
-                ? "border-navy bg-navy text-paper"
+                ? "border-navy bg-navy text-white dark:text-navy-deep"
                 : "border-line bg-paper text-ink hover:bg-ice-2",
             )}
           >

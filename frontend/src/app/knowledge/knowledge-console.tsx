@@ -9,6 +9,7 @@ import type {
   SiteRecord,
 } from "@/components/admin/staff-api"
 import { StaffHeader } from "@/components/admin/staff-nav"
+import { Button } from "@/components/ui/button"
 import {
   Select,
   SelectContent,
@@ -17,6 +18,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
+import { Textarea } from "@/components/ui/textarea"
+import { safeHttpUrl } from "@/lib/ua"
 
 import { useKnowledgeState } from "./knowledge-state"
 import { SnapshotDiffSheet } from "./snapshot-diff-sheet"
@@ -29,10 +32,9 @@ type KnowledgeConsoleProps = {
 export const KnowledgeConsole = ({ isAdmin, displayName: _displayName }: KnowledgeConsoleProps) => {
   const state = useKnowledgeState(isAdmin)
   return (
-    <div className="bg-ice flex min-h-0 flex-1 flex-col overflow-hidden">
+    <div className="view-transition-enter bg-ice flex min-h-0 flex-1 flex-col overflow-hidden">
       <div className="shrink-0">
         <StaffHeader
-          eyebrow="Workspace / Knowledge base"
           title="Knowledge base"
           description="Add the public pages this site should answer from."
         />
@@ -56,7 +58,12 @@ export const KnowledgeConsole = ({ isAdmin, displayName: _displayName }: Knowled
         </section>
         <div className="flex min-w-0 flex-col gap-5">
           {isAdmin ? (
-            <AddWebsite urls={state.urls} onUrls={state.handleUrls} onAdd={state.handleAdd} />
+            <AddWebsite
+              urls={state.urls}
+              onUrls={state.handleUrls}
+              onAdd={state.handleAdd}
+              error={state.addError}
+            />
           ) : null}
           <SourceTable
             isAdmin={isAdmin}
@@ -146,10 +153,12 @@ const AddWebsite = ({
   urls,
   onUrls,
   onAdd,
+  error,
 }: {
   urls: string
   onUrls: (event: ChangeEvent<HTMLTextAreaElement>) => void
   onAdd: () => void
+  error: string | null
 }) => {
   return (
     <section className="border-line bg-paper rounded-[8px] border p-5">
@@ -158,21 +167,30 @@ const AddWebsite = ({
       <label className="text-ink mt-4 block text-xs font-bold" htmlFor="knowledge-urls">
         Page URLs
       </label>
-      <textarea
+      <Textarea
         id="knowledge-urls"
+        name="pageUrls"
+        autoComplete="off"
         aria-label="Page URLs"
         value={urls}
         onChange={onUrls}
         className="border-line bg-ice text-ink focus-visible:ring-steel mt-2 w-full rounded-[8px] border px-3 py-3 font-mono text-xs leading-6 outline-none focus-visible:ring-2"
         rows={3}
+        aria-invalid={error ? "true" : undefined}
+        aria-describedby={error ? "knowledge-urls-error" : undefined}
       />
-      <button
+      {error ? (
+        <p id="knowledge-urls-error" className="text-ember mt-1 text-xs" role="alert">
+          {error}
+        </p>
+      ) : null}
+      <Button
         type="button"
         onClick={onAdd}
-        className="bg-ember text-paper hover:bg-ember-mid focus-visible:ring-steel mt-4 rounded-[8px] px-4 py-2.5 text-sm font-bold focus-visible:ring-2 focus-visible:outline-none"
+        className="bg-ember hover:bg-ember-mid focus-visible:ring-steel dark:text-navy-deep mt-4 rounded-[8px] px-4 py-2.5 text-sm font-bold text-white focus-visible:ring-2 focus-visible:outline-none"
       >
         Add website
-      </button>
+      </Button>
     </section>
   )
 }
@@ -257,34 +275,22 @@ const SourceRowActions = ({
   const handleViewChanges = useCallback(() => onViewChanges(source), [onViewChanges, source])
   return (
     <div className="flex flex-wrap gap-2">
-      <button
-        type="button"
-        onClick={handleViewChanges}
-        className="text-steel text-xs font-bold underline-offset-4 hover:underline"
-      >
+      <button type="button" onClick={handleViewChanges} className="text-steel text-xs font-bold">
         View changes
       </button>
       {isAdmin ? (
         <>
-          <button
-            type="button"
-            onClick={handleSync}
-            className="text-steel text-xs font-bold underline-offset-4 hover:underline"
-          >
+          <button type="button" onClick={handleSync} className="text-steel text-xs font-bold">
             Sync
           </button>
           <button
             type="button"
             onClick={handleToggle}
-            className={`${source.enabled ? "text-ember" : "text-steel"} text-xs font-bold underline-offset-4 hover:underline`}
+            className={`${source.enabled ? "text-ember" : "text-steel"} text-xs font-bold`}
           >
             {source.enabled ? "Disable" : "Enable"}
           </button>
-          <button
-            type="button"
-            onClick={handleDelete}
-            className="text-ember text-xs font-bold underline-offset-4 hover:underline"
-          >
+          <button type="button" onClick={handleDelete} className="text-ember text-xs font-bold">
             Delete
           </button>
         </>
@@ -318,7 +324,7 @@ const SourceRow = ({
         <button
           type="button"
           onClick={handleSelect}
-          className="text-steel focus-visible:ring-steel font-mono text-xs underline-offset-4 hover:underline focus-visible:ring-2 focus-visible:outline-none"
+          className="text-steel focus-visible:ring-steel font-mono text-xs focus-visible:ring-2 focus-visible:outline-none"
         >
           {source.start_url}
         </button>
@@ -396,7 +402,7 @@ const SourceProgress = ({ source }: { source: KbSourceRecord }) => {
       <span>{label}</span>
       {failed > 0 ? (
         <span className="bg-ice text-ember inline-flex w-fit rounded-[8px] px-2 py-0.5 text-[10px] font-bold">
-          {failed} pages need review
+          {failed} pages failed
         </span>
       ) : null}
     </div>
@@ -412,7 +418,7 @@ const snapshotPill = (source: KbSourceRecord) => {
     return "building"
   }
   if (state === "validated") {
-    return "validated (pending)"
+    return "validated"
   }
   if (state === "failed") {
     return source.snapshot_error_code ? `failed (${source.snapshot_error_code})` : "failed"
@@ -491,7 +497,7 @@ const PageRow = ({
         <button
           type="button"
           onClick={handleSelect}
-          className="text-steel focus-visible:ring-steel text-left text-sm font-semibold underline-offset-4 hover:underline focus-visible:ring-2 focus-visible:outline-none"
+          className="text-steel focus-visible:ring-steel text-left text-sm font-semibold focus-visible:ring-2 focus-visible:outline-none"
         >
           {page.title}
         </button>
@@ -500,7 +506,7 @@ const PageRow = ({
         <button
           type="button"
           onClick={handleSelect}
-          className="text-mute focus-visible:ring-steel font-mono text-xs underline-offset-4 hover:underline focus-visible:ring-2 focus-visible:outline-none"
+          className="text-steel focus-visible:ring-steel font-mono text-xs focus-visible:ring-2 focus-visible:outline-none"
         >
           {page.url}
         </button>
@@ -512,7 +518,7 @@ const PageRow = ({
             type="button"
             onClick={handleToggle}
             aria-label={page.enabled ? "Disable page" : "Enable page"}
-            className={`${page.enabled ? "text-ember" : "text-steel"} text-xs font-bold underline-offset-4 hover:underline`}
+            className={`${page.enabled ? "text-ember" : "text-steel"} text-xs font-bold`}
           >
             {page.enabled ? "Disable" : "Enable"}
           </button>
@@ -551,7 +557,18 @@ const IndexedCopy = ({ detail }: { detail: KbPageDetail | null }) => {
         What the assistant uses
       </p>
       <h2 className="text-navy mt-1 text-sm font-extrabold">Indexed copy</h2>
-      <p className="text-mute mt-1 font-mono text-xs">{detail.url}</p>
+      {safeHttpUrl(detail.url) ? (
+        <a
+          href={safeHttpUrl(detail.url) ?? undefined}
+          target="_blank"
+          rel="noreferrer noopener"
+          className="text-steel mt-1 block w-fit font-mono text-xs underline underline-offset-4"
+        >
+          {detail.url}
+        </a>
+      ) : (
+        <p className="text-mute mt-1 font-mono text-xs">{detail.url}</p>
+      )}
       {detail.skip_reason ? (
         <p className="text-ember mt-4 text-sm">Skipped: {detail.skip_reason}</p>
       ) : null}

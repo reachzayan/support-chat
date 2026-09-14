@@ -17,10 +17,9 @@ describe("staff navigation", () => {
     )
     expect(screen.getByRole("link", { name: "Sites" })).toHaveAttribute("href", "/admin/sites")
     expect(screen.getByRole("link", { name: "Logs" })).toHaveAttribute("href", "/admin/logs")
-    expect(screen.getByRole("link", { name: "Settings" })).toHaveAttribute(
-      "href",
-      "/admin/settings",
-    )
+    const accountLink = screen.getByRole("link", { name: "Alex Morgan account" })
+    expect(accountLink).toHaveAttribute("href", "/admin/settings")
+    expect(screen.queryByRole("link", { name: "Settings" })).not.toBeInTheDocument()
     expect(screen.getByText("Operations workspace")).toBeInTheDocument()
     expect(screen.getByText("Alex Morgan")).toBeInTheDocument()
   })

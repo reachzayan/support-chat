@@ -36,10 +36,18 @@ describe("public support stand-in", () => {
     process.env = original
   })
 
-  test("rejects an unsupported demo site pair", () => {
+  test("embeds the configured demo site key", () => {
     const original = { ...process.env }
-    process.env.NEXT_PUBLIC_DEMO_SITE_KEY = "sampleglobal"
-    expect(() => readDemoWidgetConfig()).toThrow(/demo site/)
+    process.env.NEXT_PUBLIC_WIDGET_ORIGIN = "http://widget.localhost:3000"
+    process.env.NEXT_PUBLIC_STAFF_APP_ORIGIN = "http://localhost:3000"
+    process.env.NEXT_PUBLIC_DEMO_SITE_KEY = "website-demo"
+    process.env.NEXT_PUBLIC_DEMO_PUBLIC_KEY = "ab".repeat(32)
+    expect(readDemoWidgetConfig()).toEqual({
+      widgetOrigin: "http://widget.localhost:3000",
+      staffOrigin: "http://localhost:3000",
+      siteKey: "website-demo",
+      publicKey: "ab".repeat(32),
+    })
     process.env = original
   })
 })
