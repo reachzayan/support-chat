@@ -56,7 +56,6 @@ async def lookup_refusal(
             KbChunk.site_id == site_id,
             KbChunk.kind == "refusal",
             KbChunk.topic == category.value,
-            KbChunk.approved.is_(True),
             KbChunk.enabled.is_(True),
             KbPage.enabled.is_(True),
             KbSnapshot.state == "live",

@@ -8,15 +8,18 @@ TRANSFER_OFFER = (
     "Sorry, I can't answer this question, may I transfer you to one of our representatives?"
 )
 CONTACT_OFFER = (
-    "Sorry, I don't have that information. "
+    "I want to get you an accurate answer. "
     "Would you like to be contacted by one of our representatives?"
 )
 KEEP_HELPING_LINE = "I can help with screening and compliance questions here. What do you need?"
+GREET_LINE = "Hi. I can help with screening and compliance questions. What do you need?"
+THANKS_LINE = "You're welcome. Anything else on screening or compliance?"
+BYE_LINE = "Take care. Come back if you have screening or compliance questions."
 DISENGAGE_LINE = "Sorry, I can't engage in this. If you don't have anymore questions I am going to close this chat now"
 OFF_TOPIC_LINE = "I can't help with that here."
 
-INSUFFICIENT_HUMAN = "I don't have that in our knowledge base yet. A specialist can pick up here."
-INSUFFICIENT_SOLO = "I don't have that in our knowledge base yet."
+INSUFFICIENT_HUMAN = "I want to get you an accurate answer. A specialist can pick up here."
+INSUFFICIENT_SOLO = "I want to get you an accurate answer."
 TECH_FAIL_HUMAN = "Sorry, I hit a temporary issue. A specialist can take it from here."
 TECH_FAIL_SOLO = "Sorry, I hit a temporary issue. We'll follow up shortly."
 POLICY_BOUNDARY = (
@@ -37,6 +40,37 @@ RATE_CEILING_HUMAN = "I've hit a temporary limit. A specialist can take over now
 OFF_TOPIC_HUMAN = OUT_OF_SCOPE
 
 _LEGACY_OUTCOMES = frozenset({"insufficient", "tech_fail", "policy_boundary", "out_of_scope"})
+_GREET_TOKENS = frozenset(
+    {
+        "hi",
+        "hello",
+        "hey",
+        "yo",
+        "hiya",
+        "howdy",
+        "morning",
+        "afternoon",
+        "evening",
+        "welcome",
+    }
+)
+_THANKS_TOKENS = frozenset({"thanks", "thank", "cheers", "np"})
+_BYE_TOKENS = frozenset({"bye", "goodbye", "cya", "later", "goodnight"})
+
+
+def chitchat_reply(text: str) -> str | None:
+    from app.services.kb_tokens import tokenize
+
+    tokens = set(tokenize(text))
+    if not tokens:
+        return None
+    if tokens <= _GREET_TOKENS:
+        return GREET_LINE
+    if tokens <= _THANKS_TOKENS:
+        return THANKS_LINE
+    if tokens <= _BYE_TOKENS:
+        return BYE_LINE
+    return None
 
 
 def callback_line(window_hours: int) -> str:
@@ -93,7 +127,7 @@ def handoff_copy(  # noqa: C901
     if reason == "retrieval_miss":
         if human_enabled:
             return RETRIEVAL_MISS_HUMAN
-        return "I don't have that in our knowledge base yet. " + callback
+        return "I want to get you an accurate answer. " + callback
     if reason == "sufficiency_fail":
         if human_enabled:
             return SUFFICIENCY_FAIL_HUMAN
