@@ -39,7 +39,7 @@ const staffCsp = {
 
 const nextConfig: NextConfig = {
   output: "standalone",
-  allowedDevOrigins: ["widget.localhost", "host.localhost"],
+  allowedDevOrigins: ["widget.localhost", "host.localhost", "localhost", "127.0.0.1"],
   async headers() {
     return [
       {

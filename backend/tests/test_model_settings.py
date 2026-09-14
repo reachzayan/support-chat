@@ -3,6 +3,7 @@ from unittest.mock import patch
 from uuid import UUID
 
 from app.llm.bot_responder import BotResponder
+from app.services.grounded_response import EvidenceUnit, GroundedResponseEngine, TurnContext
 from app.services.kb_embedder import OpenAIEmbedder, configured_embedder_id
 from app.settings import Settings
 
@@ -22,13 +23,11 @@ def test_settings_read_embed_model_and_generation_knobs_from_explicit_values() -
         **_SECRETS,
         openai_embed_model="text-embedding-3-large",
         openai_embed_dim=3072,
-        anthropic_temperature=0.2,
         anthropic_max_tokens=400,
     )
     assert settings.openai_embed_model == "text-embedding-3-large"
     assert settings.openai_embed_dim == 3072
-    assert settings.anthropic_temperature == 0.2
-    assert settings.anthropic_max_tokens == 400
+    assert settings.anthropic_max_tokens == 500
 
 
 def test_openai_embedder_id_follows_embed_model_env(monkeypatch) -> None:
@@ -66,16 +65,17 @@ async def test_embed_documents_sends_the_configured_model(monkeypatch) -> None:
     assert vectors == [[0.1, 0.0]]
 
 
-async def test_bot_responder_omits_temperature_removed_from_sdk(monkeypatch) -> None:
+async def test_bot_responder_uses_supported_sdk_parameters_and_fixed_token_cap(monkeypatch) -> None:
     captured: dict = {}
 
     class FakeMessages:
-        async def create(self, **kwargs):
-            if "temperature" in kwargs:
-                raise TypeError(
-                    "AsyncMessages.create() got an unexpected keyword argument 'temperature'"
-                )
-            captured.update(kwargs)
+        async def create(self, *, model, max_tokens, system, messages):
+            captured.update(
+                model=model,
+                max_tokens=max_tokens,
+                system=system,
+                messages=messages,
+            )
             block = type(
                 "Block", (), {"type": "text", "text": f"{EASY_BODY}\nSOURCES: {TIMING_ID}"}
             )()
@@ -96,6 +96,62 @@ async def test_bot_responder_omits_temperature_removed_from_sdk(monkeypatch) -> 
     )
     answer = await BotResponder().generate(SimpleNamespace(name="SampleSite"), "how fast", [hit])
     assert captured["model"] == "claude-haiku-4-5-20251001"
-    assert "temperature" not in captured
-    assert captured["max_tokens"] == 400
+    assert captured["max_tokens"] == 500
     assert answer.accepted is True
+
+
+async def test_grounded_responder_uses_the_installed_sdk_request_contract(monkeypatch) -> None:
+    captured: dict = {}
+
+    class FakeMessages:
+        async def create(self, *, model, max_tokens, system, messages):
+            captured.update(
+                model=model,
+                max_tokens=max_tokens,
+                system=system,
+                messages=messages,
+            )
+            citation = SimpleNamespace(
+                document_index=0,
+                start_char_index=0,
+                end_char_index=len(EASY_BODY),
+                cited_text=EASY_BODY,
+            )
+            block = SimpleNamespace(type="text", text=EASY_BODY, citations=[citation])
+            return SimpleNamespace(content=[block])
+
+    class FakeClient:
+        def __init__(self, *args, **kwargs) -> None:
+            self.messages = FakeMessages()
+
+        async def close(self) -> None:
+            return None
+
+    monkeypatch.setattr("app.llm.bot_responder.AsyncAnthropic", FakeClient, raising=False)
+    evidence = EvidenceUnit(
+        id=TIMING_ID,
+        canonical_question="How fast are results?",
+        aliases=(),
+        topic_label="Turnaround",
+        answer_verbatim=EASY_BODY,
+        source_title="Turnaround",
+        source_url="https://example.test/turnaround",
+    )
+
+    draft = await BotResponder().generate_grounded_draft(
+        TurnContext(visitor_text="how fast", evidence=[evidence], site_name="SampleSite"),
+        [evidence],
+    )
+
+    assert draft is not None
+    assert draft.body == EASY_BODY
+    assert draft.citations[0].source_title == evidence.source_title
+    assert draft.citations[0].source_url == evidence.source_url
+    validation = GroundedResponseEngine()._validate_draft(
+        draft,
+        [evidence],
+        TurnContext(visitor_text="how fast", evidence=[evidence], site_name="SampleSite"),
+    )
+    assert validation.accepted is True
+    assert captured["max_tokens"] == 500
+    assert set(captured) == {"model", "max_tokens", "system", "messages"}

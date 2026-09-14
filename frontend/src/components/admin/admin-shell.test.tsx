@@ -49,10 +49,10 @@ describe("admin shell", () => {
     )
     expect(screen.getByRole("link", { name: "Sites" })).toHaveAttribute("href", "/admin/sites")
     expect(screen.getByRole("link", { name: "Logs" })).toHaveAttribute("href", "/admin/logs")
-    expect(screen.getByRole("link", { name: "Settings" })).toHaveAttribute(
-      "href",
-      "/admin/settings",
-    )
+    const accountLink = screen.getByRole("link", { name: "Alex Morgan account" })
+    expect(accountLink).toHaveAttribute("href", "/admin/settings")
+    expect(accountLink.closest('[data-slot="sidebar-footer"]')).not.toBeNull()
+    expect(screen.queryByRole("link", { name: "Settings" })).not.toBeInTheDocument()
     const sidebar = screen.getByTestId("admin-sidebar")
     expect(sidebar).toHaveAttribute("data-slot", "sidebar-container")
     expect(sidebar.parentElement).toHaveAttribute("data-state", "expanded")

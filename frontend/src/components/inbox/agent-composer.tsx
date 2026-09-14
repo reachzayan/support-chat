@@ -3,6 +3,9 @@
 import { ArrowUp } from "lucide-react"
 import { useCallback, useState, type ChangeEvent, type FormEvent, type KeyboardEvent } from "react"
 
+import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
+
 import type { CannedReply } from "./types"
 
 type AgentComposerProps = {
@@ -50,13 +53,13 @@ const ComposerField = ({
   onKeyDown: (event: KeyboardEvent<HTMLInputElement>) => void
 }) => (
   <div
-    className={`flex min-h-14 items-center gap-2 rounded-full border px-3 py-2 ${
+    className={`flex min-h-14 items-center gap-2 rounded-full border px-3 py-2 transition-[border-color,box-shadow,background-color] duration-150 ease-out ${
       closed
-        ? "border-line bg-ice text-mute"
+        ? "border-line text-mute bg-transparent"
         : "border-ink bg-paper shadow-[0_2px_8px_rgba(13,31,58,0.04)]"
     }`}
   >
-    <input
+    <Input
       id={inputId}
       name="message"
       autoComplete="off"
@@ -65,21 +68,23 @@ const ComposerField = ({
       onChange={onChange}
       onKeyDown={onKeyDown}
       placeholder={composerPlaceholder(closed, disabled)}
-      className="text-ink placeholder:text-mute disabled:text-mute min-w-0 flex-1 bg-transparent px-1 text-base outline-none"
+      className="text-ink placeholder:text-mute disabled:text-mute h-auto min-w-0 flex-1 rounded-none border-0 !bg-transparent px-1 text-base shadow-none outline-none focus-visible:border-0 focus-visible:ring-0 dark:!bg-transparent"
     />
-    <button
+    <Button
+      variant="default"
+      size="icon-lg"
       type="submit"
       aria-label="Send"
       disabled={!canSend}
-      className={`widget-send-button flex size-10 shrink-0 items-center justify-center rounded-full focus-visible:ring-2 focus-visible:outline-none ${
+      className={`widget-send-button flex size-11 shrink-0 items-center justify-center rounded-full focus-visible:ring-2 focus-visible:outline-none ${
         closed
           ? "bg-line text-mute"
-          : "bg-steel text-paper hover:bg-navy disabled:bg-ember-soft focus-visible:ring-steel"
+          : "bg-steel hover:bg-navy disabled:bg-ember-soft focus-visible:ring-steel dark:text-navy-deep text-white"
       }`}
     >
       <ArrowUp aria-hidden="true" className="size-5" strokeWidth={2.4} />
       <span className="sr-only">Send</span>
-    </button>
+    </Button>
   </div>
 )
 
@@ -136,7 +141,7 @@ export const AgentComposer = ({
   return (
     <form
       onSubmit={handleSubmit}
-      className={`border-line border-t px-5 py-4 ${closed ? "bg-ice-2" : "bg-[#F8F8FA]"}`}
+      className={`border-line border-t px-5 py-4 ${closed ? "bg-ice-2" : "bg-ice"}`}
     >
       <label className="sr-only" htmlFor={inputId}>
         Message

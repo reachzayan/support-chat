@@ -14,7 +14,6 @@ export const SitesConsoleModals = ({
   onSaved,
   onDeleted,
   onRequestDelete,
-  onError,
 }: {
   modal: ModalKind
   activeSite: SiteRecord | null
@@ -24,11 +23,10 @@ export const SitesConsoleModals = ({
   onSaved: (site: SiteRecord) => void
   onDeleted: (siteId: string) => void
   onRequestDelete: (siteId: string) => void
-  onError: (message: string | null) => void
 }) => (
   <>
     {modal === "add" ? (
-      <AddSiteModal isAdmin={isAdmin} onClose={onClose} onCreated={onCreated} onError={onError} />
+      <AddSiteModal isAdmin={isAdmin} onClose={onClose} onCreated={onCreated} />
     ) : null}
     {activeSite && modal === "manage" ? (
       <ManageSiteModal
@@ -36,17 +34,11 @@ export const SitesConsoleModals = ({
         isAdmin={isAdmin}
         onClose={onClose}
         onSaved={onSaved}
-        onError={onError}
         onRequestDelete={onRequestDelete}
       />
     ) : null}
     {activeSite && modal === "delete" ? (
-      <DeleteSiteModal
-        site={activeSite}
-        onClose={onClose}
-        onDeleted={onDeleted}
-        onError={onError}
-      />
+      <DeleteSiteModal site={activeSite} onClose={onClose} onDeleted={onDeleted} />
     ) : null}
   </>
 )

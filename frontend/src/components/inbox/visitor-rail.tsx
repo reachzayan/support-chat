@@ -38,7 +38,7 @@ export const VisitorRail = ({ detail }: VisitorRailProps) => {
   return (
     <aside
       aria-label="Visitor facts"
-      className="border-line bg-paper flex min-h-0 w-full flex-col overflow-y-auto border-l p-5 lg:w-[300px] lg:shrink-0"
+      className="border-line/70 bg-paper flex min-h-0 w-full flex-col overflow-y-auto border-l p-5 lg:w-[300px] lg:shrink-0"
     >
       <div className="border-line mb-2 flex items-center gap-3 border-b pb-4">
         <span className="bg-ice-2 text-steel flex size-10 items-center justify-center rounded-full text-sm font-extrabold">
@@ -65,7 +65,7 @@ const VisitorFacts = ({
   os: string
   assigned: string
 }) => (
-  <dl className="divide-line divide-y">
+  <dl className="space-y-1">
     <Fact label="Name">{detail.visitor.name ?? "Unknown"}</Fact>
     <Fact label="Email">{detail.visitor.email ?? "None"}</Fact>
     <Fact label="Phone">{detail.visitor.phone ?? "None"}</Fact>

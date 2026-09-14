@@ -8,7 +8,7 @@
 
 server {
     listen 80;
-    server_name __PUBLIC_HOST__;
+    server_name __PUBLIC_HOST__ staff.__PUBLIC_HOST__ widget.__PUBLIC_HOST__;
 
     client_max_body_size 8m;
 

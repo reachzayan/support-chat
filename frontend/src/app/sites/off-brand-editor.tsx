@@ -3,6 +3,8 @@
 import { useCallback, useState, type ChangeEvent } from "react"
 
 import { staffWrite, type SiteRecord } from "@/components/admin/staff-api"
+import { Button } from "@/components/ui/button"
+import { Textarea } from "@/components/ui/textarea"
 
 const FIELD =
   "border-line bg-ice text-ink focus-visible:ring-steel mt-1.5 w-full rounded-[8px] border px-3 py-2.5 text-sm outline-none focus-visible:ring-2 disabled:cursor-not-allowed disabled:opacity-60"
@@ -54,7 +56,7 @@ export const OffBrandEditor = ({ site, isAdmin, onError, onSaved }: OffBrandEdit
       <label className={LABEL} htmlFor={`off-brand-${site.id}`}>
         Brands
       </label>
-      <textarea
+      <Textarea
         id={`off-brand-${site.id}`}
         value={text}
         disabled={!isAdmin}
@@ -68,13 +70,13 @@ export const OffBrandEditor = ({ site, isAdmin, onError, onSaved }: OffBrandEdit
       ) : null}
       {isAdmin ? (
         <div className="mt-3 flex justify-end">
-          <button
+          <Button
             type="button"
             onClick={handleSave}
-            className="bg-navy text-paper hover:bg-navy-deep focus-visible:ring-steel cursor-pointer rounded-[8px] px-4 py-2.5 text-sm font-bold focus-visible:ring-2 focus-visible:outline-none"
+            className="bg-navy text-primary-foreground hover:bg-navy-deep focus-visible:ring-steel cursor-pointer rounded-[8px] px-4 py-2.5 text-sm font-bold focus-visible:ring-2 focus-visible:outline-none"
           >
             Save blocklist
-          </button>
+          </Button>
         </div>
       ) : null}
     </div>

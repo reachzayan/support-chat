@@ -85,7 +85,7 @@ export const HandoffOutcomeForm = ({ handoffId, onResolved }: HandoffOutcomeForm
         type="button"
         disabled={saving}
         onClick={handleSubmit}
-        className="bg-ember text-paper hover:bg-ember-mid focus-visible:ring-steel h-9 rounded-[8px] px-4 text-sm font-bold"
+        className="bg-ember hover:bg-ember-mid focus-visible:ring-steel dark:text-navy-deep h-9 rounded-[8px] px-4 text-sm font-bold text-white"
       >
         Resolve handoff
       </Button>

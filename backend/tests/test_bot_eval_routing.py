@@ -1,4 +1,4 @@
-from app.chat.outcome_copy import OFF_TOPIC_LINE, WAITING_LINE
+from app.chat.outcome_copy import WAITING_LINE
 from app.db import session_maker
 from app.services.bot_eval import load_dataset, run_case
 from app.services.kb_embedder import FakeEmbedder
@@ -43,7 +43,8 @@ async def test_france_capital_is_off_topic_not_a_specialist_offer(migrated_db) -
         turns=("what's the capital of France",),
         expected_state="bot",
         expected_reason="off_topic",
-        expected_copy=OFF_TOPIC_LINE,
+        must_contain=("screening and compliance",),
+        must_not_contain=("A specialist will join", "transfer you"),
     )
     responder = RecordingResponder()
     async with session_maker()() as session:
@@ -57,8 +58,9 @@ async def test_france_capital_is_off_topic_not_a_specialist_offer(migrated_db) -
             responder=responder,
             embedder=FakeEmbedder(),
         )
-    assert observed.body == OFF_TOPIC_LINE
+    assert "screening and compliance" in observed.body.casefold()
     assert observed.state == "bot"
     assert observed.body != WAITING_LINE
+    assert observed.system_reason == "off_topic"
     assert verdict.passed is True
     assert responder.calls == []

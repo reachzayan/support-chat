@@ -45,6 +45,6 @@ jobs:
           DEPLOY_SHA: ${{ github.sha }}
           BRANCH: ${{ env.DEPLOY_BRANCH }}
           GITHUB_TOKEN: ${{ github.token }}
-          REPO_DIR: /home/ssm-user/support-chat
+          REPO_DIR: ${{ env.REPO_DIR }}
           GITHUB_REPO: ${{ github.repository }}
         run: bash deploy/github-actions-ssm-deploy.sh

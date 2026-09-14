@@ -94,6 +94,17 @@ describe("knowledge add website", () => {
       seed_urls: ["https://sample-site.example.com/dot"],
     })
   })
+
+  test("add website shows an inline error for a non-https URL", async () => {
+    const user = userEvent.setup()
+    renderWithProviders(<KnowledgeConsole isAdmin={true} displayName="Riley Chen" />)
+    await waitFor(() => expect(screen.getByLabelText("Page URLs")).toBeInTheDocument())
+    await user.type(screen.getByLabelText("Page URLs"), "javascript:alert(1)")
+    await user.click(screen.getByRole("button", { name: "Add website" }))
+
+    expect(screen.getByText("Use one valid https:// URL per line.")).toBeInTheDocument()
+    expect(screen.queryByText("Loading changes.")).not.toBeInTheDocument()
+  })
 })
 
 describe("knowledge page detail", () => {

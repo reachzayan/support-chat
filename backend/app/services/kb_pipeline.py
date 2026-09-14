@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import json
 from dataclasses import replace
 from datetime import UTC, datetime
 from urllib.parse import urlparse
@@ -39,7 +40,7 @@ from app.services.kb_llm_extract import (
     evidence_from_extraction,
     needs_llm_extraction,
 )
-from app.services.kb_snapshot import begin_snapshot, fail, promote, validate_snapshot
+from app.services.kb_snapshot import begin_snapshot, fail, validate_snapshot
 from app.settings import get_settings
 
 log = structlog.get_logger("kb_pipeline")
@@ -170,12 +171,20 @@ async def _finish_ingest(
         await _fail_empty(session, source, snapshot_id)
         return
     content_hash = _content_hash(pending)
+    baseline = await session.scalar(
+        select(KbSnapshot)
+        .where(
+            KbSnapshot.source_id == source.id,
+            KbSnapshot.state == "live",
+        )
+        .order_by(KbSnapshot.created_at.desc())
+    )
+    if baseline is not None and baseline.content_hash == content_hash and source.pages_failed == 0:
+        await _mark_unchanged(session, source, snapshot_id, pending)
+        return
     live = await session.scalar(
         select(KbSnapshot).where(KbSnapshot.source_id == source.id, KbSnapshot.state == "live")
     )
-    if live is not None and live.content_hash == content_hash and source.pages_failed == 0:
-        await _mark_unchanged(session, source, snapshot_id, pending)
-        return
     if live is not None:
         for item in pending:
             if not item.get("copy_from_live"):
@@ -198,8 +207,10 @@ async def _finish_ingest(
         source.last_run_finished_at = datetime.now(UTC)
         await session.commit()
         return
-    source.stage = "promoting"
-    _sync_status(source)
+    # Site owners explicitly add the source, so a validated snapshot becomes
+    # the live source immediately.  There is no separate human-review gate.
+    from app.services.kb_snapshot import promote
+
     await promote(session, snapshot_id)
     source.stage = "ready"
     source.status = "ready"
@@ -420,10 +431,15 @@ async def _after_fetch(
         job.stage = "extract"
         if source.mode == "prefix":
             _collect_prefix_links(html, fetch_url, source, extra_urls, seen)
-        live = await session.scalar(
-            select(KbSnapshot).where(KbSnapshot.source_id == source.id, KbSnapshot.state == "live")
+        baseline = await session.scalar(
+            select(KbSnapshot)
+            .where(
+                KbSnapshot.source_id == source.id,
+                KbSnapshot.state == "live",
+            )
+            .order_by(KbSnapshot.created_at.desc())
         )
-        if live is not None and previous_hash and previous_hash == digest:
+        if baseline is not None and previous_hash and previous_hash == digest:
             return await _mark_page_unchanged(session, source, page, job, fetch_url, digest)
         page.processing_status = "extracting"
         await session.commit()
@@ -692,6 +708,14 @@ async def _copy_live_chunks(
                 aliases=list(chunk.aliases or []),
                 topic=chunk.topic,
                 approved=chunk.approved,
+                review_status=chunk.review_status,
+                reviewed_by=chunk.reviewed_by,
+                reviewed_at=chunk.reviewed_at,
+                review_note=chunk.review_note,
+                content_hash=chunk.content_hash,
+                risk_class=chunk.risk_class,
+                answer_mode=chunk.answer_mode,
+                topic_label=chunk.topic_label,
                 requires_human=chunk.requires_human,
                 legal_sensitive=chunk.legal_sensitive,
                 display_locator=chunk.display_locator,
@@ -769,8 +793,34 @@ async def _persist_chunks(
     vectors = await worker.embed_documents(texts) if texts else []
     if texts and (len(vectors) != len(texts) or any(item is None for item in vectors)):
         raise RuntimeError("embed")
+    live_rows = list(
+        (
+            await session.scalars(
+                select(KbChunk)
+                .join(KbSnapshot, KbSnapshot.id == KbChunk.snapshot_id)
+                .where(KbSnapshot.source_id == source.id, KbSnapshot.state == "live")
+            )
+        ).all()
+    )
+    reviewed_by_hash = {chunk.content_hash: chunk for chunk in live_rows if chunk.content_hash}
     token_total = 0
     for ordinal, part in enumerate(pieces):
+        heading = _pg_safe(part.heading or "")
+        canonical_question = _pg_safe(part.canonical_question or "") or None
+        aliases = [_pg_safe(alias) for alias in part.aliases]
+        answer_verbatim = _pg_safe(part.answer_verbatim or "")
+        body = _pg_safe(part.body)
+        content_hash = _chunk_content_hash(
+            heading=heading,
+            canonical_question=canonical_question,
+            aliases=aliases,
+            answer_verbatim=answer_verbatim,
+            body=body,
+        )
+        prior = reviewed_by_hash.get(content_hash)
+        # Website content is trusted as knowledge once the site owner adds it.
+        # Prompt-injection markers are still treated as document text by the
+        # responder; they never become instructions.
         session.add(
             KbChunk(
                 page_id=page.id,
@@ -778,17 +828,46 @@ async def _persist_chunks(
                 snapshot_id=snapshot_id,
                 ordinal=ordinal,
                 kind=part.kind,
-                heading=_pg_safe(part.heading or ""),
-                canonical_question=_pg_safe(part.canonical_question or "") or None,
-                answer_verbatim=_pg_safe(part.answer_verbatim or ""),
-                aliases=[_pg_safe(a) for a in part.aliases],
+                heading=heading,
+                canonical_question=canonical_question,
+                answer_verbatim=answer_verbatim,
+                aliases=aliases,
                 topic=part.topic,
                 display_locator=part.display_locator,
-                body=_pg_safe(part.body),
+                body=body,
                 embedding=vectors[ordinal] if vectors else None,
                 enabled=True,
+                approved=True,
+                review_status="approved",
+                topic_label=(prior.topic_label if prior is not None else heading) or heading,
+                content_hash=content_hash,
+                risk_class=prior.risk_class if prior is not None else "general",
+                answer_mode=prior.answer_mode if prior is not None else "paraphrase_allowed",
             )
         )
         token_total += count_embed_tokens(part.body)
     await session.flush()
     return token_total
+
+
+def _chunk_content_hash(
+    *,
+    heading: str,
+    canonical_question: str | None,
+    aliases: list[str],
+    answer_verbatim: str,
+    body: str,
+) -> str:
+    payload = json.dumps(
+        {
+            "aliases": aliases,
+            "answer_verbatim": answer_verbatim,
+            "body": body,
+            "canonical_question": canonical_question,
+            "heading": heading,
+        },
+        ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    )
+    return hashlib.sha256(payload.encode()).hexdigest()

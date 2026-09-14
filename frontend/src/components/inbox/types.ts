@@ -80,7 +80,7 @@ export const EMPTY_INBOX_COUNTS: InboxCounts = {
 export const INBOX_FILTERS: { id: InboxFilter; label: string }[] = [
   { id: "human", label: "Live" },
   { id: "bot", label: "Bot" },
-  { id: "queued", label: "Queued" },
+  { id: "queued", label: "Needs Attention" },
   { id: "closed", label: "Closed" },
 ]
 

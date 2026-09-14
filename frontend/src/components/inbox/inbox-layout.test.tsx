@@ -11,6 +11,7 @@ import {
   emitAlexJoined,
   openQueuedAda,
   resetInboxHarness,
+  setListItems,
 } from "./inbox-test-harness"
 
 describe("inbox layout", () => {
@@ -23,6 +24,17 @@ describe("inbox layout", () => {
     expect(screen.getByRole("heading", { name: "Select a conversation" })).toBeInTheDocument()
     expect(screen.queryByLabelText("Message")).not.toBeInTheDocument()
     expect(screen.queryByRole("log", { name: "Transcript" })).not.toBeInTheDocument()
+  })
+
+  test("empty conversation list omits the decorative placeholder", async () => {
+    setListItems([])
+    renderWithProviders(<InboxConsole user={ALEX} />)
+
+    const conversations = screen.getByRole("list", { name: "Conversations" })
+    await waitFor(() => expect(within(conversations).getByText("Inbox clear")).toBeInTheDocument())
+    expect(within(conversations).getByText("Inbox clear").parentElement).not.toContainHTML(
+      "rounded-full",
+    )
   })
 
   test("renders three panes, Chrome on macOS, and does not link javascript URLs", async () => {
@@ -56,9 +68,9 @@ describe("inbox layout", () => {
     const transcript = screen.getByRole("log", { name: "Transcript" })
     expect(
       within(transcript).getByText("How fast are DOT results?").closest(".widget-bubble"),
-    ).toHaveClass("rounded-[8px]", "mr-auto", "bg-paper")
+    ).toHaveClass("rounded-[20px]", "mr-auto", "bg-paper")
     expect(
       within(transcript).getByText("I can help with that.").closest(".widget-bubble"),
-    ).toHaveClass("rounded-[8px]", "ml-auto", "bg-navy")
+    ).toHaveClass("rounded-[20px]", "ml-auto", "bg-steel/15")
   })
 })

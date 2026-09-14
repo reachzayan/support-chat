@@ -50,17 +50,13 @@ export const DataConsole = () => {
   const selected = rows?.find((row) => row.id === selectedId) ?? null
 
   return (
-    <div className="bg-ice flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+    <div className="view-transition-enter bg-ice flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
       <div className="shrink-0">
-        <StaffHeader
-          eyebrow="Workspace / Data"
-          title="Data"
-          description="Every person who submitted the prechat form, including chats that closed when a specialist was not available. Drag a column edge to widen it."
-        />
+        <StaffHeader title="Data" />
       </div>
       <div
         id="main-content"
-        className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden px-5 py-6 lg:px-8"
+        className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden px-5 py-5 lg:px-8 lg:py-8"
       >
         <DataConsoleBody rows={rows} loadError={loadError} onTranscript={handleOpenTranscript} />
       </div>

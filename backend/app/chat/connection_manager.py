@@ -310,6 +310,24 @@ def message_frame(message: Message) -> dict[str, Any]:
         "display_locator": message.display_locator,
         "source_title": message.source_title,
         "system_reason": message.system_reason,
+        "response_outcome": message.response_outcome,
+        "reason_code": message.response_reason_code,
+        "citations": [
+            {
+                "chunk_id": str(citation.chunk_id) if citation.chunk_id is not None else None,
+                "snapshot_id": (
+                    str(citation.snapshot_id) if citation.snapshot_id is not None else None
+                ),
+                "response_start": citation.response_start,
+                "response_end": citation.response_end,
+                "source_start": citation.source_start,
+                "source_end": citation.source_end,
+                "cited_text": citation.cited_text,
+                "source_title": citation.source_title,
+                "source_url": citation.source_url,
+            }
+            for citation in message.citations
+        ],
         "created_at": created,
     }
 

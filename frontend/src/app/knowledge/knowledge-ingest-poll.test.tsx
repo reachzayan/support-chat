@@ -38,7 +38,7 @@ describe("knowledge ingest queued", () => {
 })
 
 describe("knowledge ingest progress", () => {
-  test("shows processing progress counts and failed-page review pill", async () => {
+  test("shows processing progress counts and failed-page status", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(async (input: RequestInfo) => {
@@ -92,7 +92,7 @@ describe("knowledge ingest progress", () => {
     const bar = screen.getByRole("progressbar", { name: "Ingestion progress" })
     expect(bar).toHaveAttribute("aria-valuenow", "7")
     expect(bar).toHaveAttribute("aria-valuemax", "12")
-    expect(screen.getByText("2 pages need review")).toBeInTheDocument()
+    expect(screen.getByText("2 pages failed")).toBeInTheDocument()
     await waitFor(() => expect(screen.getByText("Embedding")).toBeInTheDocument())
   })
 })

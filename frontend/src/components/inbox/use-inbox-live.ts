@@ -1,6 +1,6 @@
 "use client"
 
-import { useRef, useState } from "react"
+import { useCallback, useRef, useState } from "react"
 
 import { emptyLive } from "./inbox-session"
 import { EMPTY_INBOX_COUNTS, type CannedReply, type InboxFilter, type InboxListItem } from "./types"
@@ -44,5 +44,30 @@ export const useInboxLive = (userId: string) => {
     setCounts,
   )
   const actions = useInboxActions(refs, socketRef, setSelectedId, setLive, reloadDetail, reloadList)
-  return { filter, setFilter, items, nextCursor, selectedId, live, canned, counts, ...actions }
+  const handleFilter = useCallback(
+    (nextFilter: InboxFilter) => {
+      if (nextFilter === filter) {
+        return
+      }
+      refs.markFilter(nextFilter)
+      refs.markSelected(null)
+      const nextLive = emptyLive()
+      refs.resetLive(nextLive)
+      setFilter(nextFilter)
+      setSelectedId(null)
+      setLive(nextLive)
+    },
+    [filter, refs, setLive, setSelectedId],
+  )
+  return {
+    filter,
+    setFilter: handleFilter,
+    items,
+    nextCursor,
+    selectedId,
+    live,
+    canned,
+    counts,
+    ...actions,
+  }
 }

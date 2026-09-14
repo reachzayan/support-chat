@@ -107,6 +107,12 @@ async def test_mid_run_fetch_error_leaves_previous_live_snapshot(migrated_db) ->
         await ingest_source(
             session, source_id, embedder=embedder, fetch=_fetch({FAQ_URL: TIMING_HTML})
         )
+        candidate = await session.scalar(
+            select(KbSnapshot).where(KbSnapshot.source_id == source_id, KbSnapshot.state == "live")
+        )
+        assert candidate is not None
+        await promote(session, candidate.id)
+        await session.commit()
 
     async with session_maker()() as session:
         source = await session.get(KbSource, source_id)

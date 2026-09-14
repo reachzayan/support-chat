@@ -5,7 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.services.kb_hybrid import ChunkHit, HybridKbSearch
 from app.services.kb_tokens import normalize_query, search_tokens, tokenize
 
-MAX_RESULTS = 4
+MAX_RESULTS = 5
 
 __all__ = [
     "MAX_RESULTS",

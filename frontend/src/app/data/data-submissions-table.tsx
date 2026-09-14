@@ -1,6 +1,24 @@
 "use client"
 
-import { useCallback, useMemo } from "react"
+import { useCallback, useMemo, useState } from "react"
+
+import { Badge } from "@/components/ui/badge"
+import {
+  Pagination,
+  PaginationContent,
+  PaginationItem,
+  PaginationLink,
+  PaginationNext,
+  PaginationPrevious,
+} from "@/components/ui/pagination"
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table"
 
 import { useDataColumnWidths } from "./data-column-widths"
 import {
@@ -12,6 +30,8 @@ import {
   type ColumnLabel,
   type SubmissionRow,
 } from "./data-shared"
+
+const PAGE_SIZE = 10
 
 const DataColumnHeader = ({
   label,
@@ -39,7 +59,7 @@ const DataColumnHeader = ({
   const handleReset = useCallback(() => onResizeReset(label), [label, onResizeReset])
 
   return (
-    <th
+    <TableHead
       scope="col"
       className="text-ink bg-ice-2 sticky top-0 z-10 px-4 py-3 text-[10px] font-bold tracking-[0.12em] uppercase"
     >
@@ -58,7 +78,7 @@ const DataColumnHeader = ({
       >
         <span className="bg-line group-hover:bg-steel group-focus-visible:bg-steel absolute top-2 right-0 bottom-2 w-px" />
       </button>
-    </th>
+    </TableHead>
   )
 }
 
@@ -71,19 +91,15 @@ const SubmissionRowView = ({
 }) => {
   const handleClick = useCallback(() => onTranscript(row.id), [onTranscript, row.id])
   return (
-    <tr className="border-line odd:bg-paper even:bg-ice-2/60 border-t">
+    <TableRow className="odd:bg-paper even:bg-ice-2/60">
       <Cell>{blank(row.visitor.name)}</Cell>
       <Cell>{blank(row.visitor.email)}</Cell>
       <Cell>{blank(row.visitor.phone)}</Cell>
       <Cell>{blank(row.inquiry_type)}</Cell>
       <Cell>{blank(row.intent)}</Cell>
-      <td className="px-4 py-3">
-        <span
-          className={`inline-flex rounded-[8px] px-2 py-0.5 text-[11px] font-bold ${stateClass(row.state)}`}
-        >
-          {STATE_LABEL[row.state] ?? row.state}
-        </span>
-      </td>
+      <TableCell className="px-4 py-3">
+        <Badge className={stateClass(row.state)}>{STATE_LABEL[row.state] ?? row.state}</Badge>
+      </TableCell>
       <Cell>{row.site_name}</Cell>
       <Cell mono>{row.site_key}</Cell>
       <Cell>{blank(row.opening_message)}</Cell>
@@ -100,7 +116,7 @@ const SubmissionRowView = ({
       <Cell>{formatWhen(row.created_at)}</Cell>
       <Cell>{formatWhen(row.last_message_at)}</Cell>
       <Cell>{formatWhen(row.closed_at)}</Cell>
-      <td className="px-4 py-3">
+      <TableCell className="px-4 py-3">
         <button
           type="button"
           onClick={handleClick}
@@ -109,18 +125,18 @@ const SubmissionRowView = ({
         >
           Transcript
         </button>
-      </td>
-    </tr>
+      </TableCell>
+    </TableRow>
   )
 }
 
 const Cell = ({ children, mono = false }: { children: string; mono?: boolean }) => (
-  <td
+  <TableCell
     title={children === "—" ? undefined : children}
     className={`text-ink overflow-hidden px-4 py-3 text-xs wrap-break-word ${mono ? "font-mono" : ""}`}
   >
     {children}
-  </td>
+  </TableCell>
 )
 
 export const SubmissionsTable = ({
@@ -130,6 +146,7 @@ export const SubmissionsTable = ({
   rows: SubmissionRow[]
   onTranscript: (id: string) => void
 }) => {
+  const [page, setPage] = useState(1)
   const {
     widths,
     tableWidth,
@@ -139,11 +156,17 @@ export const SubmissionsTable = ({
     handleResizeKeyDown,
     handleResizeReset,
   } = useDataColumnWidths()
-  const tableStyle = useMemo(() => ({ width: tableWidth }), [tableWidth])
+  const tableStyle = useMemo(() => ({ width: "100%", minWidth: tableWidth }), [tableWidth])
   const colStyles = useMemo(
     () => COLUMNS.map((label) => ({ key: label, style: { width: widths[label] } })),
     [widths],
   )
+  const pageCount = Math.max(1, Math.ceil(rows.length / PAGE_SIZE))
+  const currentPage = Math.min(page, pageCount)
+  const visibleRows = rows.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE)
+  const handlePage = useCallback((nextPage: number) => {
+    setPage(nextPage)
+  }, [])
 
   return (
     <section
@@ -152,17 +175,21 @@ export const SubmissionsTable = ({
     >
       <div className="border-line flex shrink-0 items-baseline justify-between border-b px-5 py-4">
         <h2 className="text-navy text-sm font-extrabold">Submissions</h2>
-        <p className="text-mute text-xs">{rows.length} people</p>
+        <p className="text-mute text-xs">{rows.length} total submissions</p>
       </div>
       <div className="min-h-0 flex-1 overflow-x-auto overflow-y-auto">
-        <table className="table-fixed border-collapse text-left" style={tableStyle}>
+        <Table
+          aria-label="Form submissions"
+          className="table-fixed border-collapse text-left"
+          style={tableStyle}
+        >
           <colgroup>
             {colStyles.map((col) => (
               <col key={col.key} style={col.style} />
             ))}
           </colgroup>
-          <thead className="bg-ice-2">
-            <tr>
+          <TableHeader className="bg-ice-2">
+            <TableRow>
               {COLUMNS.map((label) => (
                 <DataColumnHeader
                   key={label}
@@ -174,15 +201,87 @@ export const SubmissionsTable = ({
                   onResizeReset={handleResizeReset}
                 />
               ))}
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((row) => (
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {visibleRows.map((row) => (
               <SubmissionRowView key={row.id} row={row} onTranscript={onTranscript} />
             ))}
-          </tbody>
-        </table>
+          </TableBody>
+        </Table>
       </div>
+      <TablePagination currentPage={currentPage} pageCount={pageCount} onPage={handlePage} />
     </section>
+  )
+}
+
+const TablePagination = ({
+  currentPage,
+  pageCount,
+  onPage,
+}: {
+  currentPage: number
+  pageCount: number
+  onPage: (page: number) => void
+}) => {
+  const handlePrevious = useCallback(
+    (event: React.MouseEvent<HTMLAnchorElement>) => {
+      event.preventDefault()
+      if (currentPage > 1) onPage(currentPage - 1)
+    },
+    [currentPage, onPage],
+  )
+  const handleNext = useCallback(
+    (event: React.MouseEvent<HTMLAnchorElement>) => {
+      event.preventDefault()
+      if (currentPage < pageCount) onPage(currentPage + 1)
+    },
+    [currentPage, onPage, pageCount],
+  )
+  const handlePage = useCallback(
+    (event: React.MouseEvent<HTMLAnchorElement>) => {
+      event.preventDefault()
+      const nextPage = Number(event.currentTarget.dataset.page)
+      if (Number.isInteger(nextPage)) onPage(nextPage)
+    },
+    [onPage],
+  )
+
+  return (
+    <Pagination className="border-line shrink-0 justify-end border-t px-5 py-3">
+      <PaginationContent>
+        <PaginationItem>
+          <PaginationPrevious
+            href="#"
+            aria-disabled={currentPage === 1}
+            tabIndex={currentPage === 1 ? -1 : undefined}
+            className={currentPage === 1 ? "pointer-events-none opacity-50" : undefined}
+            onClick={handlePrevious}
+          />
+        </PaginationItem>
+        {Array.from({ length: pageCount }, (_, index) => index + 1).map((pageNumber) => (
+          <PaginationItem key={pageNumber}>
+            <PaginationLink
+              href="#"
+              data-page={pageNumber}
+              isActive={currentPage === pageNumber}
+              aria-label={`Go to page ${pageNumber}`}
+              onClick={handlePage}
+            >
+              {pageNumber}
+            </PaginationLink>
+          </PaginationItem>
+        ))}
+        <PaginationItem>
+          <PaginationNext
+            href="#"
+            aria-disabled={currentPage === pageCount}
+            tabIndex={currentPage === pageCount ? -1 : undefined}
+            className={currentPage === pageCount ? "pointer-events-none opacity-50" : undefined}
+            onClick={handleNext}
+          />
+        </PaginationItem>
+      </PaginationContent>
+    </Pagination>
   )
 }

@@ -1,4 +1,5 @@
 from datetime import datetime
+from typing import TYPE_CHECKING
 from uuid import UUID
 
 from sqlalchemy import (
@@ -15,9 +16,12 @@ from sqlalchemy import (
 )
 from sqlalchemy.dialects.postgresql import ARRAY
 from sqlalchemy.dialects.postgresql import UUID as PGUUID
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base
+
+if TYPE_CHECKING:
+    from app.models.message_citation import MessageCitation
 
 
 class Message(Base):
@@ -37,7 +41,11 @@ class Message(Base):
         CheckConstraint(
             "(role = 'bot' AND ("
             "(source_article_ids IS NOT NULL AND cardinality(source_article_ids) > 0) OR "
-            "(source_chunk_ids IS NOT NULL AND cardinality(source_chunk_ids) > 0)"
+            "(source_chunk_ids IS NOT NULL AND cardinality(source_chunk_ids) > 0) OR "
+            "system_reason IN ("
+            "'clarify','insufficient','tech_fail','policy_boundary',"
+            "'off_topic','out_of_scope','sensitive'"
+            ")"
             ")) OR "
             "(role <> 'bot' AND source_article_ids IS NULL AND source_chunk_ids IS NULL)",
             name="ck_messages_sources",
@@ -58,6 +66,12 @@ class Message(Base):
             "'sufficiency_fail','provider_timeout','repeated_miss',"
             "'rate_ceiling','off_topic')",
             name="ck_messages_system_reason",
+        ),
+        CheckConstraint(
+            "response_outcome IS NULL OR response_outcome IN ("
+            "'exact_answer','synthesized_answer','clarification','partial_answer',"
+            "'knowledge_gap','boundary')",
+            name="ck_messages_response_outcome",
         ),
     )
 
@@ -82,4 +96,9 @@ class Message(Base):
     source_urls: Mapped[list[str] | None] = mapped_column(ARRAY(Text), nullable=True)
     display_locator: Mapped[str | None] = mapped_column(String, nullable=True)
     source_title: Mapped[str | None] = mapped_column(String, nullable=True)
+    response_outcome: Mapped[str | None] = mapped_column(String, nullable=True)
+    response_reason_code: Mapped[str | None] = mapped_column(String, nullable=True)
+    citations: Mapped[list["MessageCitation"]] = relationship(
+        back_populates="message", cascade="all, delete-orphan", lazy="selectin"
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

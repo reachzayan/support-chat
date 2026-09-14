@@ -215,6 +215,22 @@ describe("sites add website", () => {
     expect(within(table).getByText("Sample Services")).toBeInTheDocument()
     expect(within(table).getByText("sample-services-a1b2")).toBeInTheDocument()
   })
+
+  test("add website shows inline errors when required fields are empty", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(mockListFetch()))
+    const user = userEvent.setup()
+    renderWithProviders(<SitesConsole isAdmin={true} displayName="Riley Chen" />)
+
+    await screen.findByText("SampleSite Support")
+    await user.click(screen.getByRole("button", { name: "Add new website" }))
+    const dialog = await screen.findByRole("dialog", { name: "Add new website" })
+    await user.click(within(dialog).getByRole("button", { name: "Create website" }))
+
+    expect(within(dialog).getByText("Name is required.")).toBeInTheDocument()
+    expect(within(dialog).getByText("Privacy URL is required.")).toBeInTheDocument()
+    expect(within(dialog).getByText("Add at least one approved origin.")).toBeInTheDocument()
+    expect(within(dialog).getByLabelText("Name")).toHaveAttribute("aria-invalid", "true")
+  })
 })
 
 describe("sites leave guard", () => {

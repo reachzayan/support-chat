@@ -55,13 +55,9 @@ const InboxShell = ({ userId, isAdmin, inbox }: InboxShellProps) => {
   const mine = isAssignedTo(inbox.live, userId)
   const detail = inbox.live.detail
   return (
-    <div className="bg-ice flex min-h-0 min-w-0 flex-1 flex-col lg:overflow-hidden">
+    <div className="view-transition-enter bg-ice flex min-h-0 min-w-0 flex-1 flex-col lg:overflow-hidden">
       <div id="main-content" className="flex min-h-0 min-w-0 flex-1 flex-col">
-        <StaffHeader
-          eyebrow="Workspace / Inbox"
-          title="Inbox"
-          description="Keep visitor conversations moving, from the first question to specialist follow-up."
-        />
+        <StaffHeader title="Inbox" />
         <div className="flex min-h-0 flex-1 flex-col lg:flex-row">
           <ConversationList
             filter={inbox.filter}
@@ -98,32 +94,28 @@ const InboxShell = ({ userId, isAdmin, inbox }: InboxShellProps) => {
               onSend={inbox.handleSend}
             />
           ) : (
-            <EmptyTranscript />
+            <EmptyTranscript loading={inbox.selectedId !== null} />
           )}
-          {detail ? (
-            <VisitorRail detail={detail} />
-          ) : (
-            <aside
-              className="border-line bg-ice-2 hidden min-h-0 border-l lg:block lg:w-[300px] lg:shrink-0"
-              aria-hidden="true"
-            />
-          )}
+          {detail ? <VisitorRail detail={detail} /> : null}
         </div>
       </div>
     </div>
   )
 }
 
-const EmptyTranscript = () => {
+const EmptyTranscript = ({ loading }: { loading: boolean }) => {
   return (
-    <section className="bg-paper flex min-h-0 min-w-0 flex-1 flex-col items-center justify-center px-8">
-      <span className="border-line bg-ice-2 mb-4 flex size-12 items-center justify-center rounded-full border">
-        <span className="bg-steel size-2.5 rounded-full" />
-      </span>
-      <p className="text-mute mb-2 text-[10px] font-bold tracking-[0.16em] uppercase">Inbox</p>
-      <h1 className="text-navy text-base font-extrabold">Select a conversation</h1>
+    <section
+      className="bg-ice flex min-h-0 min-w-0 flex-1 flex-col items-center justify-center px-8"
+      aria-busy={loading}
+    >
+      <h1 className="text-navy text-base font-extrabold">
+        {loading ? "Opening conversation…" : "Select a conversation"}
+      </h1>
       <p className="text-mute mt-2 max-w-xs text-center text-sm leading-6">
-        Choose a chat from the queue to review its transcript and visitor context.
+        {loading
+          ? "Loading the latest transcript and visitor context."
+          : "Choose a chat from Needs Attention to review its transcript and visitor context."}
       </p>
     </section>
   )

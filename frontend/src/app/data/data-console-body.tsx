@@ -1,5 +1,7 @@
 "use client"
 
+import { DataTableSkeleton } from "@/components/admin/loading-skeleton"
+
 import type { SubmissionRow } from "./data-shared"
 import { SubmissionsTable } from "./data-submissions-table"
 
@@ -13,7 +15,7 @@ export const DataConsoleBody = ({
   onTranscript: (id: string) => void
 }) => {
   if (rows === null && !loadError) {
-    return <p className="text-mute text-sm">Loading submissions…</p>
+    return <DataTableSkeleton />
   }
   if (loadError) {
     return (

@@ -1,3 +1,4 @@
+import type { SourceCitation } from "./source-hovercard"
 import type { TranscriptLine } from "./transcript"
 
 export type ConversationState = "prechat" | "bot" | "queued" | "human" | "closed"
@@ -21,6 +22,35 @@ export const emptyChat = (): ChatView => ({
 const isRecord = (value: unknown): value is Record<string, unknown> => {
   return typeof value === "object" && value !== null
 }
+
+const citationFromRecord = (item: unknown): SourceCitation | null => {
+  if (!isRecord(item)) {
+    return null
+  }
+  const sourceUrl = typeof item.source_url === "string" ? item.source_url : null
+  const sourceTitle = typeof item.source_title === "string" ? item.source_title : null
+  if (!sourceUrl && !sourceTitle) {
+    return null
+  }
+  return {
+    source_urls: sourceUrl ? [sourceUrl] : null,
+    source_title: sourceTitle,
+    cited_text: typeof item.cited_text === "string" ? item.cited_text : null,
+  }
+}
+
+const citationsFromFrame = (value: unknown): SourceCitation[] =>
+  Array.isArray(value)
+    ? value.flatMap((item) => {
+        const citation = citationFromRecord(item)
+        return citation ? [citation] : []
+      })
+    : []
+
+const stringList = (value: unknown): string[] | null =>
+  Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : null
+
+const nullableString = (value: unknown): string | null => (typeof value === "string" ? value : null)
 
 const STATES = new Set<ConversationState>(["prechat", "bot", "queued", "human", "closed"])
 
@@ -58,15 +88,13 @@ const applyMessage = (view: ChatView, frame: Record<string, unknown>): ChatView 
   if (view.lines.some((line) => line.id === frame.id)) {
     return view
   }
-  const sourceChunkIds = Array.isArray(frame.source_chunk_ids)
-    ? frame.source_chunk_ids.filter((item): item is string => typeof item === "string")
-    : null
-  const sourceUrls = Array.isArray(frame.source_urls)
-    ? frame.source_urls.filter((item): item is string => typeof item === "string")
-    : null
-  const displayLocator = typeof frame.display_locator === "string" ? frame.display_locator : null
-  const sourceTitle = typeof frame.source_title === "string" ? frame.source_title : null
-  const systemReason = typeof frame.system_reason === "string" ? frame.system_reason : null
+  const sourceChunkIds = stringList(frame.source_chunk_ids)
+  const sourceUrls = stringList(frame.source_urls)
+  const displayLocator = nullableString(frame.display_locator)
+  const sourceTitle = nullableString(frame.source_title)
+  const systemReason = nullableString(frame.system_reason)
+  const responseOutcome = nullableString(frame.response_outcome)
+  const reasonCode = nullableString(frame.reason_code)
   const lines = [
     ...view.lines,
     {
@@ -78,6 +106,9 @@ const applyMessage = (view: ChatView, frame: Record<string, unknown>): ChatView 
       display_locator: displayLocator,
       source_title: sourceTitle,
       system_reason: systemReason,
+      response_outcome: responseOutcome,
+      reason_code: reasonCode,
+      citations: citationsFromFrame(frame.citations),
     },
   ].toSorted((left, right) => left.id - right.id)
   return { ...view, lines, lastEventId: Math.max(view.lastEventId, frame.id) }

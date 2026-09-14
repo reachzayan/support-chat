@@ -25,6 +25,8 @@ class MessageRepository:
         source_urls: list[str] | None = None,
         display_locator: str | None = None,
         source_title: str | None = None,
+        response_outcome: str | None = None,
+        response_reason_code: str | None = None,
     ) -> Message:
         message = Message(
             conversation_id=conversation_id,
@@ -39,6 +41,8 @@ class MessageRepository:
             source_urls=source_urls,
             display_locator=display_locator,
             source_title=source_title,
+            response_outcome=response_outcome,
+            response_reason_code=response_reason_code,
         )
         self._session.add(message)
         await self._session.flush()

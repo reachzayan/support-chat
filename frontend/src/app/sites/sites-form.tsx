@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useState, type ChangeEvent } from "react"
+import { useCallback, useEffect, useRef, useState, type ChangeEvent, type FocusEvent } from "react"
 
 import {
   Dialog,
@@ -10,6 +10,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
+import { Input } from "@/components/ui/input"
 
 import { BTN_PRIMARY, BTN_SECONDARY, FIELD, LABEL } from "./sites-shared"
 
@@ -68,25 +69,72 @@ export const useLeaveGuard = (dirty: boolean, onClose: () => void) => {
   return { leaveOpen, requestClose, handleStay, handleLeave }
 }
 
+export const useAnimatedDialogClose = (onClosed: () => void) => {
+  const [open, setOpen] = useState(true)
+  const closing = useRef(false)
+  const timer = useRef<number | null>(null)
+  const close = useCallback(
+    (afterClose?: () => void) => {
+      if (closing.current) {
+        return
+      }
+      closing.current = true
+      setOpen(false)
+      timer.current = window.setTimeout(afterClose ?? onClosed, 220)
+    },
+    [onClosed],
+  )
+  useEffect(
+    () => () => {
+      if (timer.current !== null) {
+        window.clearTimeout(timer.current)
+      }
+    },
+    [],
+  )
+  return { open, close }
+}
+
 export const Field = ({
   id,
   label,
   value,
   disabled,
   onChange,
+  error,
+  onBlur,
 }: {
   id: string
   label: string
   value: string
   disabled: boolean
   onChange: (event: ChangeEvent<HTMLInputElement>) => void
+  error?: string
+  onBlur?: (event: FocusEvent<HTMLInputElement>) => void
 }) => {
+  const errorId = `${id}-error`
   return (
     <div>
       <label className={LABEL} htmlFor={id}>
         {label}
       </label>
-      <input id={id} value={value} disabled={disabled} onChange={onChange} className={FIELD} />
+      <Input
+        id={id}
+        name={id}
+        autoComplete="off"
+        value={value}
+        disabled={disabled}
+        onChange={onChange}
+        onBlur={onBlur}
+        className={FIELD}
+        aria-invalid={error ? "true" : undefined}
+        aria-describedby={error ? errorId : undefined}
+      />
+      {error ? (
+        <p id={errorId} className="text-ember mt-1 text-xs" role="alert">
+          {error}
+        </p>
+      ) : null}
     </div>
   )
 }

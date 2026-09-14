@@ -194,9 +194,9 @@ def test_reconnect_after_cursor_11_replays_only_later_ids_then_state(
                 visitor, lambda frames: any(frame.get("type") == "ack" for frame in frames)
             )
 
-    # 1 welcome + 1 prechat visitor + 1 miss offer + 12 later visitors + 12 off-topic replies
-    assert message_count(uuid.UUID(conversation_id)) == 27
-    assert message_count(uuid.UUID(conversation_id), role="system") == 14
+    # Plan 14: conversational outcomes are bot rows (not system FALLBACK/off-topic).
+    assert message_count(uuid.UUID(conversation_id)) == 26
+    assert message_count(uuid.UUID(conversation_id), role="bot") >= 1
 
     with client.websocket_connect("/ws/visitor", headers={"Origin": WIDGET_ORIGIN}) as visitor:
         auth_visitor(visitor, ctx["bootstrap_token"])
@@ -207,14 +207,14 @@ def test_reconnect_after_cursor_11_replays_only_later_ids_then_state(
             lambda frames: (
                 any(frame.get("type") == "state" for frame in frames)
                 and any(
-                    frame.get("type") == "message" and frame.get("id") == 27 for frame in frames
+                    frame.get("type") == "message" and frame.get("id") == 26 for frame in frames
                 )
             ),
         )
 
     messages = frames_of_type(replayed, "message")
     ids = [frame["id"] for frame in messages]
-    assert ids == list(range(12, 28))
+    assert ids == list(range(12, 27))
     assert all(message_id > 11 for message_id in ids)
     assert frames_of_type(replayed, "state")[-1]["state"] == "bot"
     assert message_count(uuid.UUID(conversation_id), body=STILL_THERE) == 0

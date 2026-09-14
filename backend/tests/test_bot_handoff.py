@@ -112,8 +112,9 @@ async def test_disable_selected_source_before_release_stores_generated_literal_z
         await bot_task
 
     assert message_count(conversation_id, body=SCRIPTED_ANSWER) == 0
-    assert message_count(conversation_id, role="bot") == 0
-    assert message_count(conversation_id, role="system", body=FALLBACK) == 1
+    # Stale citations after disable fall back to extractive/tech_fail as bot speech.
+    assert message_count(conversation_id, role="bot") == 1
+    assert message_count(conversation_id, role="system", body=FALLBACK) == 0
 
 
 async def test_repeat_visitor_client_id_creates_one_row_and_at_most_one_provider_call(
@@ -183,7 +184,9 @@ async def test_provider_crash_clears_generation_and_accepts_the_next_visitor_mes
     assert second.message is not None
     assert second.message.body == STILL_WAITING
     assert conversation_state(conversation_id) == "bot"
-    assert message_count(conversation_id, role="system", body=FALLBACK) == 1
+    # Provider crash with live evidence becomes extractive_fallback, not FALLBACK system copy.
+    assert message_count(conversation_id, role="bot") == 1
+    assert message_count(conversation_id, role="system", body=FALLBACK) == 0
 
 
 async def test_latest_visitor_body_is_the_second_visitor_row(migrated_db) -> None:

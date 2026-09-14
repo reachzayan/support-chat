@@ -28,7 +28,27 @@ describe("pre-chat form", () => {
 
     expect(screen.getByRole("button", { name: "Start the chat" })).toBeInTheDocument()
     expect(screen.getByLabelText("Email")).toHaveFocus()
+    expect(screen.getByText("Enter a valid email address.")).toBeInTheDocument()
+    expect(screen.getByLabelText("Email")).toHaveAttribute("aria-invalid", "true")
     expect(handleSubmit).not.toHaveBeenCalled()
+  })
+
+  test("empty required fields show inline errors", async () => {
+    const user = userEvent.setup()
+    renderWithProviders(
+      <PrechatForm
+        name="SampleSite"
+        privacyUrl="http://localhost:3000/privacy"
+        onSubmit={vi.fn()}
+      />,
+    )
+
+    await user.click(screen.getByRole("button", { name: "Start the chat" }))
+
+    expect(screen.getByText("Full name is required.")).toBeInTheDocument()
+    expect(screen.getByText("Email is required.")).toBeInTheDocument()
+    expect(screen.getByLabelText("Full name")).toHaveAttribute("aria-invalid", "true")
+    expect(screen.getByLabelText("Email")).toHaveAttribute("aria-invalid", "true")
   })
 
   test("shows assistant warning, privacy link, and inquiry label", () => {

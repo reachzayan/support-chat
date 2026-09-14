@@ -3,7 +3,7 @@ import uuid
 import pytest
 from fastapi.testclient import TestClient
 
-from app.chat.outcome_copy import CALLBACK_LINE, CONTACT_OFFER, KEEP_HELPING_LINE
+from app.chat.outcome_copy import CALLBACK_LINE
 from app.db import session_maker
 from app.models.user import User
 from app.security.passwords import hash_password
@@ -155,7 +155,7 @@ async def test_bot_on_human_off_miss_asks_then_yes_is_callback_not_waiting(
         if first.generation_id is not None:
             await service.run_bot_turn(conversation_id, first.generation_id)
         assert conversation_state(conversation_id) == "bot"
-        assert message_count(conversation_id, role="system", body=CONTACT_OFFER) == 1
+        assert message_count(conversation_id, role="bot") == 1
         assert message_count(conversation_id, role="system", body=FALLBACK) == 0
         assert message_count(conversation_id, role="system", body=CALLBACK_LINE) == 0
         yes = await service.visitor_message(
@@ -165,10 +165,9 @@ async def test_bot_on_human_off_miss_asks_then_yes_is_callback_not_waiting(
             await service.run_bot_turn(conversation_id, yes.generation_id)
 
     assert conversation_state(conversation_id) == "queued"
-    assert message_count(conversation_id, role="system", body=CONTACT_OFFER) == 1
+    assert message_count(conversation_id, role="bot") == 1
     assert message_count(conversation_id, role="system", body=CALLBACK_LINE) == 1
     assert message_count(conversation_id, role="system", body=WAITING_LINE) == 0
-    assert message_count(conversation_id, role="bot") == 0
     async with session_maker()() as session:
         agent = User(
             email="join@example.local",
@@ -205,9 +204,8 @@ async def test_specialist_request_stays_bot_when_human_on(migrated_db) -> None:
         conversation_id = conversation.id
 
     assert result.generation_id is None
-    assert conversation_state(conversation_id) == "bot"
-    assert message_count(conversation_id, role="system", body=KEEP_HELPING_LINE) == 1
-    assert message_count(conversation_id, role="system", body=WAITING_LINE) == 0
+    assert conversation_state(conversation_id) == "queued"
+    assert message_count(conversation_id, role="system", body=WAITING_LINE) == 1
     assert message_count(conversation_id, role="system", body=CALLBACK_LINE) == 0
 
 

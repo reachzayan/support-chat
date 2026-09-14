@@ -4,7 +4,7 @@ export const FIELD =
   "border-line bg-ice text-ink focus-visible:ring-steel mt-1.5 w-full rounded-[8px] border px-3 py-2.5 text-sm outline-none focus-visible:ring-2 disabled:cursor-not-allowed disabled:opacity-60"
 export const LABEL = "text-mute text-[10px] font-bold tracking-[0.12em] uppercase"
 export const BTN_PRIMARY =
-  "bg-ember text-paper hover:bg-ember-mid focus-visible:ring-steel cursor-pointer rounded-[8px] px-3 py-2 text-xs font-bold focus-visible:ring-2 focus-visible:outline-none"
+  "micro-interaction bg-ember text-white dark:text-navy-deep hover:bg-ember-mid focus-visible:ring-steel cursor-pointer rounded-[8px] px-3 py-2 text-xs font-bold focus-visible:ring-2 focus-visible:outline-none"
 export const BTN_SECONDARY =
   "border-line bg-paper text-ink hover:bg-ice focus-visible:ring-steel cursor-pointer rounded-[8px] border px-3 py-2 text-xs font-bold focus-visible:ring-2 focus-visible:outline-none"
 export const BTN_DANGER =

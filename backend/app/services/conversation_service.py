@@ -9,6 +9,7 @@ from typing import Any
 from uuid import UUID, uuid4
 
 import structlog
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -16,27 +17,28 @@ from app.chat.outcome_copy import (
     DISENGAGE_LINE,
     KEEP_HELPING_LINE,
     OFF_TOPIC_LINE,
+    chitchat_reply,
     is_transfer_offer_body,
     transfer_offer_line,
 )
 from app.chat.state_machine import IllegalTransition, apply_event
-from app.llm.bot_responder import BotResponder, BufferedAnswer, output_is_safe
+from app.llm.bot_responder import BotResponder, BufferedAnswer
 from app.llm.intent import (
     classify_intent,
     classify_sensitive,
-    embed_intent_prototypes,
-    intent_from_query_vector,
     is_chitchat,
-    is_disengage_request,
     is_escalate_request,
-    is_sensitive_request,
     is_transfer_consent,
     is_transfer_decline,
-    is_unrelated_request,
 )
-from app.llm.safety_markers import OUTPUT_LEAK_MARKERS, SensitiveCategory
+from app.llm.safety_markers import SensitiveCategory
 from app.models.conversation import INQUIRY_TYPES, Conversation
+from app.models.kb_chunk import KbChunk
+from app.models.kb_page import KbPage
+from app.models.kb_snapshot import KbSnapshot
+from app.models.kb_source import KbSource
 from app.models.message import Message
+from app.models.message_citation import MessageCitation
 from app.models.site import Site
 from app.models.user import User
 from app.models.visitor import Visitor
@@ -49,21 +51,25 @@ from app.repositories.origins import InvalidOrigin, canonicalize_origin, sanitiz
 from app.repositories.site_repo import SiteRepository
 from app.repositories.user_repo import UserRepository
 from app.repositories.visitor_repo import VisitorRepository
-from app.services.faq_fastpath import normalize_fast_query, try_fast_answer
-from app.services.full_context import answer_full_context, prior_provider_messages
+from app.services.grounded_response import (
+    Citation,
+    EvidenceUnit,
+    GroundedResponseEngine,
+    ModelDraft,
+    ProviderStatus,
+    ResponseDecision,
+    ResponseOutcome,
+    TurnContext,
+    extractive_fallback_decision,
+    technical_failure_decision,
+)
 from app.services.handoff_service import EscalationReason, HandoffService, HandoffTrigger
 from app.services.kb_embedder import default_embedder
 from app.services.kb_search import KbSearch
-from app.services.off_topic import is_off_topic
 from app.services.pii_redactor import redact_for_log
-from app.services.rate_ceiling import RateCeiling
 from app.services.rate_limit import RateLimiter, RateLimitExceeded, RateLimitUnavailable
 from app.services.refusal_library import lookup_refusal
-from app.services.route_decision import decide as decide_route
 from app.services.route_decision import live_snapshots_for_site
-from app.services.sufficiency import CitedUnit
-from app.services.sufficiency import evaluate as evaluate_sufficiency
-from app.settings import get_settings
 
 log = structlog.get_logger("chat")
 
@@ -704,30 +710,21 @@ class ConversationService:
             )
             await self._commit_sensitive_refusal(conversation, site, category)
             return None
-        if is_disengage_request(text):
-            log.info(
-                "visitor_disengage",
-                conversation_id=str(conversation.id),
-                preview=redact_for_log(text),
-            )
-            await self._commit_disengage(conversation)
-            return None
         if await self._handle_transfer_consent_reply(conversation, text):
             return None
         if is_escalate_request(text):
             conversation.active_generation_id = None
-            await self._insert_message(conversation, "system", KEEP_HELPING_LINE)
+            await self._open_handoff(
+                conversation,
+                reason="visitor_request",
+                original_question=text,
+            )
             return None
         if is_chitchat(text):
             conversation.active_generation_id = None
-            return None
-        if is_unrelated_request(text, evidence_tokens=await self._evidence_tokens(site)):
-            log.info(
-                "visitor_off_topic",
-                conversation_id=str(conversation.id),
-                preview=redact_for_log(text),
-            )
-            await self._commit_off_topic(conversation)
+            reply = chitchat_reply(text)
+            if reply:
+                await self._insert_message(conversation, "system", reply)
             return None
         generation_id = uuid4()
         conversation.active_generation_id = generation_id
@@ -750,26 +747,25 @@ class ConversationService:
             return True
         return False
 
-    async def _commit_disengage(self, conversation: Conversation) -> None:
-        conversation.active_generation_id = None
-        await self._insert_message(
-            conversation, "system", DISENGAGE_LINE, system_reason="policy_boundary"
-        )
-
     async def _commit_off_topic(self, conversation: Conversation) -> None:
         conversation.active_generation_id = None
         await self._insert_message(
-            conversation, "system", OFF_TOPIC_LINE, system_reason="off_topic"
+            conversation,
+            "system",
+            OFF_TOPIC_LINE,
+            system_reason="off_topic",
+            response_outcome=ResponseOutcome.BOUNDARY.value,
+            response_reason_code="off_topic",
         )
 
     async def _evidence_tokens(self, site: Site) -> set[str]:
-        from app.services.full_context import load_approved_units
+        from app.services.full_context import load_live_units
         from app.services.kb_tokens import tokenize
 
         snapshots = await live_snapshots_for_site(self._session, site.id)
         if not snapshots:
             return set()
-        units = await load_approved_units(self._session, [item.id for item in snapshots])
+        units = await load_live_units(self._session, [item.id for item in snapshots])
         tokens: set[str] = set()
         for unit in units:
             blob = " ".join(
@@ -787,7 +783,18 @@ class ConversationService:
         if len(recent) < 2:
             return False
         prior = recent[-2]
-        return prior.role == "system" and is_transfer_offer_body(prior.body)
+        if prior.role == "system" and is_transfer_offer_body(prior.body):
+            return True
+        if prior.role != "bot":
+            return False
+        lowered = (prior.body or "").casefold()
+        return "specialist" in lowered and (
+            "would you like" in lowered
+            or "connect you" in lowered
+            or "confirm it" in lowered
+            or "take it from here" in lowered
+            or "can take over" in lowered
+        )
 
     async def _latest_offered_question(self, conversation_id: UUID) -> str:
         recent = await self._messages.list_recent_roles(conversation_id, {"visitor"}, 2)
@@ -810,14 +817,25 @@ class ConversationService:
                 snapshot_id=refusal.snapshot_id,
                 system_reason="sensitive",
                 source_title="company policy",
+                response_outcome=ResponseOutcome.BOUNDARY.value,
+                response_reason_code="policy_sensitive",
             )
         else:
-            await self._insert_message(conversation, "system", body, system_reason="sensitive")
+            await self._insert_message(
+                conversation,
+                "system",
+                body,
+                system_reason="sensitive",
+                response_outcome=ResponseOutcome.BOUNDARY.value,
+                response_reason_code="policy_sensitive",
+            )
         await self._insert_message(
             conversation,
             "system",
             transfer_offer_line(human_enabled=site.human_enabled),
             system_reason="insufficient",
+            response_outcome=ResponseOutcome.BOUNDARY.value,
+            response_reason_code="policy_sensitive",
         )
 
     async def run_bot_turn(
@@ -833,9 +851,6 @@ class ConversationService:
     async def _run_bot_turn(
         self, conversation_id: UUID, generation_id: UUID
     ) -> CommandResult | None:
-        import time
-
-        turn_started = time.perf_counter()
         conversation = await self._conversations.get_by_id(conversation_id)
         if conversation is None or conversation.state != "bot":
             return None
@@ -848,427 +863,282 @@ class ConversationService:
             return await self._finalize_bot_turn(conversation_id, generation_id, site.id, None)
 
         visitor_text = await self._latest_visitor_body(conversation_id)
-        route = await decide_route(
-            self._session,
-            site_id=site.id,
-            visitor_text=visitor_text,
-            intent=conversation.intent,
-            sensitive=is_sensitive_request(visitor_text),
-            escalate=is_escalate_request(visitor_text),
-        )
-        route_timings = {"intent_ms": int(route.elapsed_ms)}
-        if route.fast_path_ms is not None:
-            route_timings["fast_path_ms"] = int(route.fast_path_ms)
-        log.info(
-            "bot_route",
-            conversation_id=str(conversation_id),
-            path=route.path,
-            reason=route.reason,
-            token_estimate=route.token_estimate,
-        )
-        early_stop, early_result = await self._handle_early_route(
-            conversation_id, generation_id, site, route, visitor_text, route_timings
-        )
-        if early_stop:
-            return early_result
-
-        if await self._is_off_topic_turn(site, visitor_text):
-            log.info(
-                "off_topic",
-                conversation_id=str(conversation_id),
-                blocklist_hit=True,
-            )
-            return await self._finalize_bot_turn(
-                conversation_id,
-                generation_id,
-                site.id,
-                None,
-                system_reason="off_topic",
-                outcome_reason="off_topic",
-                stage_timings=route_timings,
-            )
-
-        try:
-            if not await RateCeiling().allow(conversation_id):
-                return await self._finalize_bot_turn(
-                    conversation_id,
-                    generation_id,
-                    site.id,
-                    None,
-                    system_reason="rate_ceiling",
-                    outcome_reason="rate_ceiling",
-                    provider_status="rate_limited",
-                    stage_timings=route_timings,
-                )
-        except RateLimitUnavailable:
-            log.info("rate_ceiling_unavailable", conversation_id=str(conversation_id))
-
-        route_path = self._resolved_generation_path(route)
-        window = await self._messages.list_recent_roles(
-            conversation_id, {"visitor", "bot"}, get_settings().conversation_window_size
-        )
-        answer, hits, provider_error, path_timings = await self._generate_for_path(
-            site, route, route_path, visitor_text, window, conversation
-        )
-        return await self._finalize_from_sufficiency(
-            conversation_id,
-            generation_id,
-            site,
-            visitor_text,
-            answer,
-            hits,
-            provider_error,
-            turn_started,
-            prior_timings={**route_timings, **path_timings},
+        return await self._run_grounded_bot_turn(
+            conversation_id, generation_id, conversation, site, visitor_text
         )
 
-    async def _is_off_topic_turn(self, site: Site, visitor_text: str) -> bool:
-        blocklist = list(getattr(site, "off_brand_blocklist", None) or [])
-        if not blocklist:
-            return False
-        snapshots = await live_snapshots_for_site(self._session, site.id)
-        snapshot_ids = [item.id for item in snapshots]
-        if not snapshot_ids:
-            return is_off_topic(visitor_text, blocklist=blocklist, evidence_bodies=[])
-        from app.services.full_context import load_approved_units
-
-        units = await load_approved_units(self._session, snapshot_ids)
-        bodies = [
-            " ".join(
-                part
-                for part in (
-                    unit.canonical_question or "",
-                    unit.heading or "",
-                    unit.answer_verbatim or "",
-                )
-                if part
-            )
-            for unit in units
-            if unit.legal_sensitive is False
-        ]
-        hit = is_off_topic(visitor_text, blocklist=blocklist, evidence_bodies=bodies)
-        if hit:
-            log.info(
-                "off_topic",
-                conversation_id=None,
-                site_id=str(site.id),
-                blocklist_hit=True,
-            )
-        return hit
-
-    async def _handle_early_route(
+    async def _run_grounded_bot_turn(
         self,
         conversation_id: UUID,
         generation_id: UUID,
-        site: Site,
-        route,
-        visitor_text: str,
-        stage_timings: dict[str, int] | None = None,
-    ) -> tuple[bool, CommandResult | None]:
-        if route.path in {"escalate", "sensitive"}:
-            locked = await self._conversations.lock_by_id(conversation_id)
-            if locked is not None and locked.active_generation_id == generation_id:
-                locked.active_generation_id = None
-                await self._session.commit()
-                return True, CommandResult(conversation=locked, site_key=site.key)
-            await self._session.commit()
-            return True, None
-        if route.path != "fast":
-            return False, None
-        normalized = normalize_fast_query(visitor_text)
-        if normalized is None:
-            return False, None
-        fast = await try_fast_answer(self._session, site.id, list(route.snapshot_ids), normalized)
-        if fast is None:
-            return False, None
-        answer = BufferedAnswer(
-            body=fast.answer_verbatim,
-            source_chunk_ids=[fast.unit_id],
-            accepted=True,
-            source_urls=[fast.page_url],
-            snapshot_id=fast.snapshot_id,
-            display_locator=fast.display_locator,
-            source_title=fast.source_title,
-        )
-        result = await self._finalize_bot_turn(
-            conversation_id,
-            generation_id,
-            site.id,
-            answer,
-            system_reason="answer",
-            stage_timings=stage_timings,
-        )
-        return True, result
-
-    def _resolved_generation_path(self, route) -> str:
-        if route.path != "fast":
-            return route.path
-        if route.token_estimate < get_settings().full_context_max_tokens:
-            return "full_context"
-        return "hybrid"
-
-    async def _generate_for_path(
-        self,
-        site: Site,
-        route,
-        route_path: str,
-        visitor_text: str,
-        window: list[Message],
         conversation: Conversation,
-    ) -> tuple[BufferedAnswer | None, list, bool, dict[str, int]]:
-        if route_path == "full_context":
-            return await self._generate_full_context(site, route, visitor_text, window)
-        return await self._generate_hybrid(site, visitor_text, window, conversation)
-
-    async def _generate_full_context(
-        self, site: Site, route, visitor_text: str, window: list[Message]
-    ) -> tuple[BufferedAnswer | None, list, bool, dict[str, int]]:
-        import time
-
-        prep_started = time.perf_counter()
-        provider_error = False
-        try:
-            answer = await answer_full_context(
-                self._session,
-                site,
-                list(route.snapshot_ids),
-                window,
-                visitor_text,
-                responder=self._responder,
-            )
-        except Exception as exc:
-            provider_error = True
-            log.info(
-                "provider_failure",
-                conversation_id=None,
-                error_class=type(exc).__name__,
-                elapsed_ms=0,
-            )
-            answer = BufferedAnswer("", [], False)
-        model_ms = round((time.perf_counter() - prep_started) * 1000)
-        log.info(
-            "full_context_stage",
-            elapsed_ms=model_ms,
-        )
-        hits: list = []
-        if answer is not None:
-            for chunk_id in answer.source_chunk_ids or []:
-                found = await self._chunks.get_enabled_for_site(site.id, chunk_id)
-                if found is not None:
-                    hits.append(found)
-            lowered = (answer.body or "").casefold()
-            if answer.accepted and any(marker in lowered for marker in OUTPUT_LEAK_MARKERS):
-                answer = BufferedAnswer(
-                    answer.body,
-                    list(answer.source_chunk_ids or []),
-                    False,
-                    unsafe=True,
-                    reject_reason="injection_leak",
-                )
-        return answer, hits, provider_error, {"model_ms": model_ms}
-
-    async def _generate_hybrid(
-        self,
         site: Site,
         visitor_text: str,
-        window: list[Message],
-        conversation: Conversation,
-    ) -> tuple[BufferedAnswer | None, list, bool, dict[str, int]]:
-        import time
-
-        retrieval_started = time.perf_counter()
-        query_vector = await self._embedder.embed_query(visitor_text)
-        if query_vector is None:
-            log.info(
-                "embed_timeout",
-                conversation_id=str(conversation.id),
-                embed_timeout=True,
-                role="bot",
-                length=0,
-            )
-        if self._intent_prototypes is None and query_vector is not None:
-            self._intent_prototypes = await embed_intent_prototypes(self._embedder)
-        if query_vector is not None and self._intent_prototypes is not None:
-            conversation.intent = intent_from_query_vector(query_vector, self._intent_prototypes)
-            await self._session.flush()
-        hits = await KbSearch(self._session).search(site.id, visitor_text, query_vector)
-        await self._session.commit()
-        retrieval_ms = round((time.perf_counter() - retrieval_started) * 1000)
-        model_started = time.perf_counter() if hits and self._responder is not None else None
-        answer = await self._produce_answer(
-            site,
-            visitor_text,
-            hits,
-            prior_messages=prior_provider_messages(window, visitor_text),
-        )
-        provider_error = answer is None and bool(hits)
-        path_timings: dict[str, int] = {"retrieval_ms": retrieval_ms}
-        if model_started is not None:
-            path_timings["model_ms"] = round((time.perf_counter() - model_started) * 1000)
-        return answer, hits, provider_error, path_timings
-
-    async def _finalize_from_sufficiency(
-        self,
-        conversation_id: UUID,
-        generation_id: UUID,
-        site: Site,
-        visitor_text: str,
-        answer: BufferedAnswer | None,
-        hits: list,
-        provider_error: bool,
-        turn_started: float,
-        prior_timings: dict[str, int] | None = None,
     ) -> CommandResult | None:
-        import time
+        evidence = await self._retrieve_evidence(site.id, visitor_text)
+        complete = getattr(self._responder, "generate_grounded_draft", None)
+        if complete is None:
 
-        cited_units = await self._cited_units_for_answer(site.id, answer, hits)
-        live_urls = {unit.url for unit in cited_units if unit.url}
-        sufficiency_started = time.perf_counter()
-        if answer is not None and (answer.unsafe or answer.reject_reason):
-            decision_reason = answer.reject_reason or "unsafe"
-            log.info(
-                "output_reject",
-                reason=decision_reason,
-                conversation_id=str(conversation_id),
+            async def complete(turn, units):
+                return await self._legacy_grounded_draft(site, turn, units)
+
+        capability_labels = await self._capability_labels(site.id)
+        decision = await GroundedResponseEngine(complete=complete).respond(
+            TurnContext(
+                visitor_text=visitor_text,
+                evidence=evidence,
+                site_name=site.name,
+                site_capability_labels=capability_labels,
+                off_brand_blocklist=tuple(getattr(site, "off_brand_blocklist", None) or ()),
             )
-            if answer.unsafe and decision_reason == "injection_leak":
-                system_reason = "disengage"
-            elif answer.unsafe:
-                system_reason = "policy_boundary"
+        )
+        return await self._finalize_grounded_decision(
+            conversation_id, generation_id, site.id, decision, visitor_text=visitor_text
+        )
+
+    async def _retrieve_evidence(self, site_id: UUID, visitor_text: str) -> list[EvidenceUnit]:
+        query_vector: list[float] | None = None
+        try:
+            query_vector = await self._embedder.embed_query(visitor_text)
+        except Exception:
+            # Hybrid still runs FTS / exact / overview without dense; do not tech_fail the turn.
+            log.info("grounded_embed_failed", site_id=str(site_id))
+        hits = await KbSearch(self._session).search(site_id, visitor_text, query_vector)
+        return [
+            EvidenceUnit(
+                id=hit.id,
+                canonical_question=hit.canonical_question,
+                aliases=tuple(hit.aliases or ()),
+                topic_label=hit.topic_label or hit.heading,
+                answer_verbatim=hit.answer_verbatim or hit.body,
+                source_title=hit.title,
+                source_url=hit.url,
+                snapshot_id=hit.snapshot_id,
+                risk_class=hit.risk_class,
+                answer_mode=hit.answer_mode,
+                enabled=hit.enabled,
+                live=True,
+            )
+            for hit in hits[:5]
+        ]
+
+    async def _capability_labels(self, site_id: UUID) -> tuple[str, ...]:
+        labels = await self._session.scalars(
+            select(func.coalesce(KbChunk.topic_label, KbChunk.heading))
+            .join(KbSnapshot, KbSnapshot.id == KbChunk.snapshot_id)
+            .join(KbPage, KbPage.id == KbChunk.page_id)
+            .join(KbSource, KbSource.id == KbPage.source_id)
+            .where(
+                KbChunk.site_id == site_id,
+                KbChunk.enabled.is_(True),
+                KbChunk.kind != "refusal",
+                KbPage.enabled.is_(True),
+                KbSource.enabled.is_(True),
+                KbSnapshot.state == "live",
+            )
+            .order_by(KbChunk.ordinal, KbChunk.id)
+            .limit(5)
+        )
+        return tuple(dict.fromkeys(label for label in labels if label))[:3]
+
+    async def _legacy_grounded_draft(
+        self, site: Site, turn: TurnContext, units: list[EvidenceUnit]
+    ):
+        """Adapt test/custom responders to the typed grounded provider contract."""
+        chunk_ids = [unit.id for unit in units]
+        result = await self._session.execute(
+            select(KbChunk, KbPage)
+            .join(KbPage, KbPage.id == KbChunk.page_id)
+            .where(KbChunk.id.in_(chunk_ids), KbChunk.site_id == site.id)
+        )
+        by_id = {chunk.id: (chunk, page) for chunk, page in result.all()}
+        documents = [by_id[unit.id][0] for unit in units if unit.id in by_id]
+        generate_from_documents = getattr(self._responder, "generate_from_documents", None)
+        if generate_from_documents is not None:
+            answer = await generate_from_documents(
+                site=site,
+                visitor_text=turn.visitor_text,
+                documents=documents,
+                prior_messages=[],
+            )
+        else:
+            generate = getattr(self._responder, "generate", None)
+            if generate is None:
+                return None
+            answer = await generate(site, turn.visitor_text, documents)
+        if answer is None:
+            return None
+        body = str(getattr(answer, "body", "") or "").strip()
+        cited_ids = list(getattr(answer, "source_chunk_ids", None) or [])
+        if not getattr(answer, "accepted", False) or not body:
+            return ModelDraft(body=body, citations=[])
+        citations: list[Citation] = []
+        for unit in units:
+            if unit.id not in cited_ids:
+                continue
+            start = body.find(unit.answer_verbatim)
+            if start < 0:
+                continue
+            end = start + len(unit.answer_verbatim)
+            citations.append(
+                Citation(
+                    chunk_id=unit.id,
+                    snapshot_id=unit.snapshot_id,
+                    response_start=start,
+                    response_end=end,
+                    source_start=0,
+                    source_end=len(unit.answer_verbatim),
+                    cited_text=unit.answer_verbatim,
+                    source_title=unit.source_title,
+                    source_url=unit.source_url,
+                )
+            )
+        return ModelDraft(body=body, citations=citations)
+
+    async def _finalize_grounded_decision(
+        self,
+        conversation_id: UUID,
+        generation_id: UUID,
+        site_id: UUID,
+        decision: ResponseDecision,
+        *,
+        visitor_text: str = "",
+    ) -> CommandResult | None:
+        conversation, site, site_key = await self._lock_finalize_context(
+            conversation_id, generation_id, site_id
+        )
+        if conversation is None:
+            return None
+        if (
+            site is None
+            or conversation.state != "bot"
+            or conversation.active_generation_id != generation_id
+        ):
+            await self._session.commit()
+            return CommandResult(conversation=conversation, site_key=site_key)
+        if decision.citations and not await self._grounded_citations_live(
+            site.id, decision.citations
+        ):
+            live_units = await self._live_units_for_citations(site.id, decision.citations)
+            if live_units:
+                decision = extractive_fallback_decision(live_units)
             else:
-                system_reason = "insufficient"
-            return await self._finalize_bot_turn(
-                conversation_id,
-                generation_id,
-                site.id,
-                answer,
+                decision = technical_failure_decision()
+        conversation.active_generation_id = None
+        system_reason = self._system_reason_for(decision)
+        if decision.citations:
+            conversation.state = _transition(conversation.state, "bot_reply")
+            source_ids = list(dict.fromkeys(citation.chunk_id for citation in decision.citations))
+            inserted = await self._insert_message(
+                conversation,
+                "bot",
+                decision.body,
+                source_chunk_ids=source_ids,
+                snapshot_id=decision.citations[0].snapshot_id,
                 system_reason=system_reason,
-                outcome_reason=decision_reason,
-                stage_timings={
-                    **(prior_timings or {}),
-                    "sufficiency_ms": round((time.perf_counter() - sufficiency_started) * 1000),
-                    "turn_ms": round((time.perf_counter() - turn_started) * 1000),
-                },
+                source_urls=list(
+                    dict.fromkeys(citation.source_url for citation in decision.citations)
+                ),
+                source_title=decision.citations[0].source_title,
+                response_outcome=decision.outcome.value if decision.outcome is not None else None,
+                response_reason_code=decision.reason_code,
             )
-        decision = evaluate_sufficiency(
-            answer,
-            cited_units=cited_units,
-            live_urls=live_urls,
-            provider_error=provider_error or (answer is None),
-            visitor_sensitive=is_sensitive_request(visitor_text),
-        )
-        sufficiency_ms = round((time.perf_counter() - sufficiency_started) * 1000)
-        log.info(
-            "sufficiency",
-            outcome=decision.outcome,
-            reason=decision.reason,
-            elapsed_ms=sufficiency_ms,
-            turn_ms=round((time.perf_counter() - turn_started) * 1000),
-        )
-        if decision.outcome != "answer":
-            log.info(
-                "sufficiency_reject",
-                conversation_id=str(conversation_id),
-                reason=decision.reason,
-                cited_count=len(cited_units),
-            )
-        if decision.reason == "no_citation":
-            log.info("citation_reject", conversation_id=str(conversation_id))
-        stage_timings = {
-            **(prior_timings or {}),
-            "sufficiency_ms": sufficiency_ms,
-            "turn_ms": round((time.perf_counter() - turn_started) * 1000),
-        }
-        if decision.outcome == "answer" and answer is not None and answer.accepted:
-            return await self._finalize_bot_turn(
-                conversation_id,
-                generation_id,
-                site.id,
-                answer,
-                system_reason="answer",
-                stage_timings=stage_timings,
-            )
-        if decision.outcome == "clarify" and decision.clarification:
-            clarify = BufferedAnswer(
-                body=decision.clarification,
-                source_chunk_ids=[],
-                accepted=False,
-            )
-            return await self._finalize_bot_turn(
-                conversation_id,
-                generation_id,
-                site.id,
-                clarify,
-                system_reason="clarify",
-                clarification=decision.clarification,
-                stage_timings=stage_timings,
-            )
-        return await self._finalize_bot_turn(
-            conversation_id,
-            generation_id,
-            site.id,
-            answer,
-            system_reason=decision.outcome,
-            outcome_reason=decision.reason,
-            stage_timings=stage_timings,
-            provider_status="timeout" if decision.outcome == "tech_fail" else "ok",
-            candidate_unit_ids=[unit.id for unit in cited_units],
-            rejection_reasons=[
-                {"unit_id": str(unit.id), "reason": decision.reason} for unit in cited_units
-            ],
-        )
-
-    async def _cited_units_for_answer(
-        self, site_id: UUID, answer: BufferedAnswer | None, hits: list
-    ) -> list[CitedUnit]:
-        units: list[CitedUnit] = []
-        seen: set[UUID] = set()
-        if answer is not None:
-            for chunk_id in answer.source_chunk_ids or []:
-                if chunk_id in seen:
-                    continue
-                seen.add(chunk_id)
-                packed = await self._chunks.get_enabled_with_page(site_id, chunk_id)
-                if packed is None:
-                    units.append(
-                        CitedUnit(
-                            id=chunk_id,
-                            answer_verbatim="",
-                            url="",
-                            enabled=False,
-                            snapshot_live=False,
-                        )
-                    )
-                    continue
-                chunk, page = packed
-                units.append(
-                    CitedUnit(
-                        id=chunk.id,
-                        answer_verbatim=chunk.answer_verbatim,
-                        url=page.url,
-                        legal_sensitive=bool(chunk.legal_sensitive),
-                        enabled=bool(chunk.enabled),
-                        snapshot_live=True,
+            for citation in decision.citations:
+                self._session.add(
+                    MessageCitation(
+                        message=inserted,
+                        chunk_id=citation.chunk_id,
+                        snapshot_id=citation.snapshot_id,
+                        response_start=citation.response_start,
+                        response_end=citation.response_end,
+                        source_start=citation.source_start,
+                        source_end=citation.source_end,
+                        cited_text=citation.cited_text,
+                        source_title=citation.source_title,
+                        source_url=citation.source_url,
                     )
                 )
-        for hit in hits:
-            chunk_id = getattr(hit, "id", None)
-            if chunk_id is None or chunk_id in seen:
+        else:
+            inserted = await self._insert_message(
+                conversation,
+                "bot",
+                decision.body,
+                system_reason=system_reason,
+                response_outcome=decision.outcome.value if decision.outcome is not None else None,
+                response_reason_code=decision.reason_code,
+            )
+        if decision.offer_handoff and decision.outcome in {
+            ResponseOutcome.KNOWLEDGE_GAP,
+            ResponseOutcome.PARTIAL_ANSWER,
+            ResponseOutcome.BOUNDARY,
+            None,
+        }:
+            # Persist the offer as bot speech; consent on the next visitor turn.
+            conversation.fallback_count = max(conversation.fallback_count, 1)
+        await self._session.commit()
+        return CommandResult(conversation=conversation, site_key=site_key, message=inserted)
+
+    @staticmethod
+    def _system_reason_for(decision: ResponseDecision) -> str:
+        if decision.citations:
+            return "answer"
+        if decision.provider_status is ProviderStatus.TECH_FAIL and decision.outcome is None:
+            return "tech_fail"
+        if decision.outcome is ResponseOutcome.CLARIFICATION:
+            return "clarify"
+        if decision.outcome is ResponseOutcome.BOUNDARY:
+            if decision.reason_code == "off_topic":
+                return "off_topic"
+            return "policy_boundary"
+        if decision.outcome is ResponseOutcome.KNOWLEDGE_GAP:
+            return "insufficient"
+        return "insufficient"
+
+    async def _live_units_for_citations(
+        self, site_id: UUID, citations: list[Citation]
+    ) -> list[EvidenceUnit]:
+        units: list[EvidenceUnit] = []
+        for citation in citations:
+            chunk = await self._chunks.get_enabled_for_site(site_id, citation.chunk_id)
+            if chunk is None or chunk.snapshot_id != citation.snapshot_id:
                 continue
-            seen.add(chunk_id)
+            page = await self._session.get(KbPage, chunk.page_id)
             units.append(
-                CitedUnit(
-                    id=chunk_id,
-                    answer_verbatim=getattr(hit, "answer_verbatim", None)
-                    or getattr(hit, "body", "")
-                    or "",
-                    url=getattr(hit, "url", "") or "",
-                    legal_sensitive=bool(getattr(hit, "legal_sensitive", False)),
-                    enabled=True,
-                    snapshot_live=True,
+                EvidenceUnit(
+                    id=chunk.id,
+                    canonical_question=chunk.canonical_question,
+                    aliases=tuple(chunk.aliases or []),
+                    topic_label=chunk.topic_label or chunk.heading,
+                    answer_verbatim=chunk.answer_verbatim,
+                    source_title=page.title if page is not None else citation.source_title,
+                    source_url=page.url if page is not None else citation.source_url,
+                    snapshot_id=chunk.snapshot_id,
+                    risk_class=chunk.risk_class,
+                    answer_mode=chunk.answer_mode,
                 )
             )
         return units
+
+    async def _grounded_citations_live(self, site_id: UUID, citations: list[Citation]) -> bool:
+        from app.services.pii_redactor import redact_for_model
+
+        for citation in citations:
+            chunk = await self._chunks.get_enabled_for_site(site_id, citation.chunk_id)
+            if chunk is None or chunk.snapshot_id != citation.snapshot_id:
+                return False
+            # Commit-time gate: chunk still live for this site/snapshot. Do not
+            # re-slice unredacted DB text against redacted model offsets.
+            source = redact_for_model(chunk.answer_verbatim)
+            if citation.source_start < 0 or citation.source_end > len(source):
+                # Extractive citations use full unredacted spans; accept those too.
+                if (
+                    citation.source_start == 0
+                    and citation.source_end == len(chunk.answer_verbatim)
+                    and citation.cited_text == chunk.answer_verbatim
+                ):
+                    continue
+                return False
+        return True
 
     async def _release_generation(self, conversation_id: UUID, generation_id: UUID) -> None:
         try:
@@ -1289,69 +1159,6 @@ class ConversationService:
 
     async def _latest_visitor_body(self, conversation_id: UUID) -> str:
         return await self._messages.latest_visitor_body(conversation_id)
-
-    async def _produce_answer(
-        self,
-        site: Site,
-        visitor_text: str,
-        hits: list,
-        prior_messages: list[dict] | None = None,
-    ) -> BufferedAnswer | None:
-        if not hits or self._responder is None:
-            return None
-        try:
-            if hasattr(self._responder, "generate_from_documents"):
-                answer = await self._responder.generate_from_documents(
-                    site=site,
-                    visitor_text=visitor_text,
-                    documents=hits,
-                    prior_messages=prior_messages or [],
-                )
-            else:
-                answer = await self._responder.generate(site, visitor_text, hits)
-        except Exception as exc:
-            log.info(
-                "provider_failure",
-                conversation_id=None,
-                error_class=type(exc).__name__,
-                elapsed_ms=0,
-            )
-            return None
-        return self._gate_buffered_answer(site, answer, hits)
-
-    def _gate_buffered_answer(
-        self, site: Site, answer: BufferedAnswer, hits: list
-    ) -> BufferedAnswer:
-        allowed = [item.id for item in hits]
-        cited = answer.source_chunk_ids or answer.source_article_ids
-        blocklist = list(getattr(site, "off_brand_blocklist", None) or [])
-        cited_text = "\n".join(
-            str(getattr(item, "answer_verbatim", None) or getattr(item, "body", "") or "")
-            for item in hits
-            if getattr(item, "id", None) in set(cited)
-        )
-        if answer.accepted and output_is_safe(
-            answer.body,
-            allowed,
-            cited,
-            cited_answer_text=cited_text,
-            off_brand_blocklist=blocklist,
-        ):
-            return answer
-        if not answer.accepted and not answer.unsafe:
-            return BufferedAnswer(
-                answer.body,
-                cited,
-                False,
-                reject_reason=getattr(answer, "reject_reason", None),
-            )
-        return BufferedAnswer(
-            answer.body,
-            cited,
-            False,
-            unsafe=True,
-            reject_reason=getattr(answer, "reject_reason", None) or "unsafe",
-        )
 
     async def _finalize_bot_turn(
         self,
@@ -1426,8 +1233,6 @@ class ConversationService:
         candidate_unit_ids: list[UUID] | None = None,
         rejection_reasons: list[dict] | None = None,
     ) -> CommandResult:
-        if system_reason == "clarify" and clarification:
-            return await self._commit_clarify(conversation, site_key, clarification)
         cited = [] if answer is None else (answer.source_chunk_ids or answer.source_article_ids)
         if system_reason == "answer" and answer is not None and answer.accepted and cited:
             if await self._sources_live(site.id, cited):
@@ -1449,26 +1254,17 @@ class ConversationService:
             return CommandResult(conversation=conversation, site_key=site_key, message=inserted)
         return await self._commit_transfer_offer(conversation, site_key, site)
 
-    async def _commit_clarify(
-        self, conversation: Conversation, site_key: str, clarification: str
-    ) -> CommandResult:
-        conversation.active_generation_id = None
-        conversation.fallback_count = 0
-        inserted = await self._insert_message(
-            conversation,
-            "system",
-            clarification,
-            system_reason="clarify",
-        )
-        await self._session.commit()
-        return CommandResult(conversation=conversation, site_key=site_key, message=inserted)
-
     async def _commit_off_topic_finalize(
         self, conversation: Conversation, site_key: str
     ) -> CommandResult:
         conversation.active_generation_id = None
         inserted = await self._insert_message(
-            conversation, "system", OFF_TOPIC_LINE, system_reason="off_topic"
+            conversation,
+            "system",
+            OFF_TOPIC_LINE,
+            system_reason="off_topic",
+            response_outcome=ResponseOutcome.BOUNDARY.value,
+            response_reason_code="off_topic",
         )
         await self._session.commit()
         return CommandResult(conversation=conversation, site_key=site_key, message=inserted)
@@ -1739,6 +1535,8 @@ class ConversationService:
         source_urls: list[str] | None = None,
         display_locator: str | None = None,
         source_title: str | None = None,
+        response_outcome: str | None = None,
+        response_reason_code: str | None = None,
         at: datetime | None = None,
     ) -> Message:
         message = await self._messages.create(
@@ -1754,6 +1552,8 @@ class ConversationService:
             source_urls=source_urls,
             display_locator=display_locator,
             source_title=source_title,
+            response_outcome=response_outcome,
+            response_reason_code=response_reason_code,
         )
         conversation.last_message_at = at or datetime.now(UTC)
         return message

@@ -61,6 +61,8 @@ def test_sad_fuel_and_gender_are_unrelated_not_escalation() -> None:
     assert is_unrelated_request("how fast are results") is False
     assert is_unrelated_request("and the pricing") is False
     assert is_unrelated_request("what is your unpublished internal pricing matrix") is False
+    assert is_unrelated_request("we're a trucking company looking for a partner") is False
+    assert is_unrelated_request("can you help us get set up") is False
     assert is_escalate_request("I am sad") is False
 
 

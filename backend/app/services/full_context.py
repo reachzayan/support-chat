@@ -1,25 +1,19 @@
 from __future__ import annotations
 
-import time
 from dataclasses import dataclass
 from uuid import UUID
 
-import structlog
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.llm.bot_responder import BotResponder, BufferedAnswer
 from app.models.kb_chunk import KbChunk
 from app.models.kb_page import KbPage
 from app.models.kb_snapshot import KbSnapshot
 from app.models.kb_source import KbSource
 from app.models.message import Message
-from app.models.site import Site
 from app.services.faq_fastpath import is_marketing_cta, normalize_fast_query
 from app.services.kb_tokens import GENERIC_NOISE, WEAK_OVERLAP, is_overview_query, tokenize
 from app.settings import get_settings
-
-log = structlog.get_logger("full_context")
 
 _UNITS_CACHE: dict[tuple[UUID, ...], list[EvidenceDoc]] = {}
 
@@ -67,7 +61,7 @@ def prior_provider_messages(rows: list[Message], visitor_text: str) -> list[dict
     return messages
 
 
-async def load_approved_units(session: AsyncSession, snapshot_ids: list[UUID]) -> list[EvidenceDoc]:
+async def load_live_units(session: AsyncSession, snapshot_ids: list[UUID]) -> list[EvidenceDoc]:
     if not snapshot_ids:
         return []
     cache_key = tuple(sorted(snapshot_ids))
@@ -82,7 +76,6 @@ async def load_approved_units(session: AsyncSession, snapshot_ids: list[UUID]) -
         .where(
             KbChunk.snapshot_id.in_(snapshot_ids),
             KbChunk.enabled.is_(True),
-            KbChunk.approved.is_(True),
             KbChunk.kind != "refusal",
             KbPage.enabled.is_(True),
             KbSnapshot.state == "live",
@@ -130,7 +123,6 @@ async def likeliest_unit_id(
             KbChunk.site_id == site_id,
             KbChunk.snapshot_id.in_(snapshot_ids),
             KbChunk.enabled.is_(True),
-            KbChunk.approved.is_(True),
             KbChunk.search_document.op("@@")(ts),
         )
         .order_by(rank.desc(), KbChunk.id)
@@ -180,51 +172,9 @@ def units_matching_query(units: list[EvidenceDoc], visitor_text: str) -> list[Ev
         matched.append(unit)
     if is_overview_query(visitor_text) and not matched:
         return list(units)
-    return matched
-
-
-async def answer_full_context(
-    session: AsyncSession,
-    site: Site,
-    snapshot_ids: list[UUID],
-    conversation_window: list[Message],
-    visitor_text: str,
-    responder: BotResponder | None = None,
-) -> BufferedAnswer:
-    started = time.perf_counter()
-    units = await load_approved_units(session, snapshot_ids)
-    if not units:
-        log.info(
-            "full_context_empty",
-            elapsed_ms=round((time.perf_counter() - started) * 1000, 2),
-        )
-        return BufferedAnswer("", [], False)
-
-    matched = units_matching_query(units, visitor_text)
     if not matched:
-        log.info(
-            "full_context_empty",
-            elapsed_ms=round((time.perf_counter() - started) * 1000, 2),
-        )
-        return BufferedAnswer("", [], False)
-
-    prefer = await likeliest_unit_id(session, site.id, snapshot_ids, visitor_text)
-    ordered = order_units_for_prompt(matched, prefer)
-    bot = responder or BotResponder()
-    answer = await bot.generate_from_documents(
-        site=site,
-        visitor_text=visitor_text,
-        documents=ordered,
-        prior_messages=prior_provider_messages(conversation_window, visitor_text),
-    )
-    log.info(
-        "full_context_done",
-        elapsed_ms=round((time.perf_counter() - started) * 1000, 2),
-        unit_count=len(ordered),
-        accepted=answer.accepted,
-        cited=len(answer.source_chunk_ids),
-    )
-    return answer
+        return list(units)
+    return matched
 
 
 def clear_units_cache() -> None:

@@ -1,3 +1,4 @@
+from datetime import datetime
 from uuid import UUID, uuid4
 
 from pgvector.sqlalchemy import Vector
@@ -5,6 +6,7 @@ from sqlalchemy import (
     Boolean,
     CheckConstraint,
     Computed,
+    DateTime,
     ForeignKey,
     ForeignKeyConstraint,
     Index,
@@ -57,7 +59,25 @@ class KbChunk(Base):
     answer_verbatim: Mapped[str] = mapped_column(Text)
     aliases: Mapped[list] = mapped_column(JSONB, server_default=text("'[]'::jsonb"))
     topic: Mapped[str | None] = mapped_column(String, nullable=True)
+    # Kept as compatibility metadata for rows written by revision 20.  It is
+    # not a publication gate; site-owned ingestion is trusted immediately.
     approved: Mapped[bool] = mapped_column(Boolean, server_default=text("true"))
+    review_status: Mapped[str] = mapped_column(
+        String, server_default=text("'approved'"), nullable=False
+    )
+    reviewed_by: Mapped[UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    review_note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    content_hash: Mapped[str] = mapped_column(String, server_default=text("''"), nullable=False)
+    risk_class: Mapped[str] = mapped_column(
+        String, server_default=text("'general'"), nullable=False
+    )
+    answer_mode: Mapped[str] = mapped_column(
+        String, server_default=text("'paraphrase_allowed'"), nullable=False
+    )
+    topic_label: Mapped[str | None] = mapped_column(String, nullable=True)
     requires_human: Mapped[bool] = mapped_column(Boolean, server_default=text("false"))
     legal_sensitive: Mapped[bool] = mapped_column(Boolean, server_default=text("false"))
     display_locator: Mapped[str | None] = mapped_column(String, nullable=True)

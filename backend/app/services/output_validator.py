@@ -23,6 +23,8 @@ _NUMERIC_CLAIM_RE = re.compile(
     re.IGNORECASE,
 )
 
+CLARIFY_CHAR_CAP = 200
+
 ValidationReason = str
 
 
@@ -31,6 +33,17 @@ class ValidationOutcome:
     accepted: bool
     reason: ValidationReason
     citations: list[UUID] = field(default_factory=list)
+
+
+def is_clarifying_question(body: str, *, cited_answer_text: str = "") -> bool:
+    """Model output may never be promoted to a clarification.
+
+    Clarifications are server-owned ``ResponseDecision`` values.  Keep this
+    compatibility function while callers migrate, but make its former
+    question-mark heuristic impossible to use as a persistence bypass.
+    """
+    del body, cited_answer_text
+    return False
 
 
 def evaluate(  # noqa: C901

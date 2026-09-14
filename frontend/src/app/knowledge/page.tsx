@@ -3,6 +3,7 @@
 import { useRouter } from "next/navigation"
 import { useEffect, useState } from "react"
 
+import { StaffPageSkeleton } from "@/components/admin/loading-skeleton"
 import { fetchMe, refreshSession, type StaffUser } from "@/lib/auth-client"
 
 import { KnowledgeConsole } from "./knowledge-console"
@@ -25,7 +26,7 @@ export default function KnowledgePage() {
   }, [router])
 
   if (user === null) {
-    return null
+    return <StaffPageSkeleton />
   }
   return <KnowledgeConsole isAdmin={user.is_admin} displayName={user.display_name} />
 }

@@ -78,6 +78,25 @@ async def test_provider_exception_log_omits_prompt(migrated_db) -> None:
     assert any(entry.get("error_class") == "RuntimeError" for entry in logs)
 
 
+async def test_sdk_argument_mismatch_log_names_only_the_invalid_parameter(migrated_db) -> None:
+    async def fail(_prompt: str) -> str:
+        raise TypeError("AsyncMessages.create() got an unexpected keyword argument 'temperature'")
+
+    async with session_maker()() as session:
+        site = await insert_site(session, "sdk-mismatch", "SDK Mismatch")
+        article = await insert_article(session, site, EASY_TITLE, EASY_BODY)
+        await session.commit()
+    with capture_logs() as logs:
+        await BotResponder(complete=fail).generate(site, DOT_BODY, [article])
+
+    matching = [entry for entry in logs if entry.get("event") == "provider_error"]
+    assert len(matching) == 1
+    assert matching[0]["error_class"] == "TypeError"
+    assert matching[0]["error_code"] == "sdk_argument_mismatch"
+    assert matching[0]["invalid_parameter"] == "temperature"
+    assert "exception" not in matching[0]
+
+
 def test_malformed_frame_log_omits_payload(client: TestClient) -> None:
     insert_site_sync(DEMO_SITE_KEY, "Demo", DEMO_PUBLIC_KEY)
     token = post_bootstrap(client).json()["bootstrap_token"]

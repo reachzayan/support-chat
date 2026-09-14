@@ -51,6 +51,9 @@ describe("visitor session view", () => {
         display_locator: null,
         source_title: null,
         system_reason: null,
+        response_outcome: null,
+        reason_code: null,
+        citations: [],
       },
     ])
     expect(view.lastEventId).toBe(12)
