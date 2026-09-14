@@ -13,6 +13,7 @@ from app.models.kb_smoke_assertion import KbSmokeAssertion
 from app.models.kb_snapshot import KbSnapshot
 from app.models.kb_source import KbSource
 from app.models.message import Message
+from app.models.message_citation import MessageCitation
 from app.models.refresh_token import RefreshToken
 from app.models.site import Site
 from app.models.user import User
@@ -34,6 +35,7 @@ __all__ = [
     "KbSnapshot",
     "KbSource",
     "Message",
+    "MessageCitation",
     "RefreshToken",
     "Site",
     "User",
