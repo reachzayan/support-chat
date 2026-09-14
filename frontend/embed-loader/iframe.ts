@@ -38,7 +38,7 @@ export const createPanel = (doc: Document, widgetOrigin: string): HTMLIFrameElem
     "width:420px",
     "height:680px",
     "border:0",
-    "border-radius:18px",
+    "border-radius:16px",
     "z-index:2147483646",
     "background:#FFFFFF",
     "box-shadow:0 16px 40px rgba(11,35,71,0.28)",

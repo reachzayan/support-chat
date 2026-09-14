@@ -10,6 +10,7 @@ export type SourceCitation = {
   source_urls?: string[] | null
   display_locator?: string | null
   source_title?: string | null
+  cited_text?: string | null
 }
 
 const learnMoreHref = (citation: SourceCitation) => {
@@ -65,10 +66,13 @@ export const SourceHoverCard = ({
       </HoverCardTrigger>
       <HoverCardContent className="border-line bg-paper text-ink w-64 p-3 shadow-sm">
         <p className="text-navy text-sm font-semibold">{title}</p>
+        {citation.cited_text ? (
+          <p className="text-mute mt-2 text-xs leading-5">“{citation.cited_text}”</p>
+        ) : null}
         {href ? (
           <button
             type="button"
-            className="text-steel focus-visible:outline-steel mt-2 inline-flex cursor-pointer text-xs font-medium underline-offset-2 hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2"
+            className="text-steel focus-visible:outline-steel mt-2 inline-flex cursor-pointer text-xs font-medium focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2"
             onClick={handleOpen}
           >
             Learn more

@@ -28,14 +28,14 @@ describe("transcript typing indicator", () => {
     renderWithProviders(<Transcript lines={VISITOR_LINES} typing={true} />)
 
     expect(screen.getByText(VISITOR_LINE)).toBeInTheDocument()
-    expect(screen.getByText("Agent is typing…")).toBeInTheDocument()
+    expect(screen.getByText("Assistant is typing…")).toBeInTheDocument()
   })
 
   test("inactive typing does not show the assistant indicator", () => {
     renderWithProviders(<Transcript lines={VISITOR_LINES} typing={false} />)
 
     expect(screen.getByText(VISITOR_LINE)).toBeInTheDocument()
-    expect(screen.queryByText("Agent is typing…")).not.toBeInTheDocument()
+    expect(screen.queryByText("Assistant is typing…")).not.toBeInTheDocument()
   })
 
   test("keeps lifecycle notices centered while treating other system copy as an agent message", () => {

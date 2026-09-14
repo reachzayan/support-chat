@@ -82,35 +82,46 @@
     }
     return { type: "widget.resize", height: value.height, width: value.width }
   }
+  var SIMPLE_WIDGET_TYPES = /* @__PURE__ */ new Set([
+    "widget.ready",
+    "widget.rebootstrap",
+    "widget.activated",
+    "widget.close",
+    "widget.reset",
+  ])
+  var parseSimpleWidget = (type) => {
+    if (!SIMPLE_WIDGET_TYPES.has(type)) {
+      return null
+    }
+    return { type }
+  }
+  var parseOpenUrl = (value) => {
+    if (typeof value.url !== "string") {
+      return null
+    }
+    try {
+      const parsed = new URL(value.url)
+      if (parsed.protocol !== "https:" && parsed.protocol !== "http:") {
+        return null
+      }
+    } catch (e) {
+      return null
+    }
+    return { type: "widget.open_url", url: value.url }
+  }
   var parseWidgetToHost = (value) => {
     if (!isRecord2(value) || typeof value.type !== "string") {
       return null
     }
-    if (
-      value.type === "widget.ready" ||
-      value.type === "widget.rebootstrap" ||
-      value.type === "widget.activated" ||
-      value.type === "widget.close" ||
-      value.type === "widget.reset"
-    ) {
-      return { type: value.type }
+    const simple = parseSimpleWidget(value.type)
+    if (simple !== null) {
+      return simple
     }
     if (value.type === "widget.resize") {
       return parseResize(value)
     }
     if (value.type === "widget.open_url") {
-      if (typeof value.url !== "string") {
-        return null
-      }
-      try {
-        const parsed = new URL(value.url)
-        if (parsed.protocol !== "https:" && parsed.protocol !== "http:") {
-          return null
-        }
-      } catch (e) {
-        return null
-      }
-      return { type: "widget.open_url", url: value.url }
+      return parseOpenUrl(value)
     }
     return null
   }
@@ -176,7 +187,7 @@
       "width:420px",
       "height:680px",
       "border:0",
-      "border-radius:18px",
+      "border-radius:16px",
       "z-index:2147483646",
       "background:#FFFFFF",
       "box-shadow:0 16px 40px rgba(11,35,71,0.28)",
@@ -237,35 +248,42 @@
     if (frame === null) {
       return
     }
-    if (frame.type === "widget.ready") {
-      handlers.onReady()
+    dispatchWidgetFrame(state, frame, handlers)
+  }
+  var dispatchWidgetFrame = (state, frame, handlers) => {
+    switch (frame.type) {
+      case "widget.ready":
+        handlers.onReady()
+        return
+      case "widget.activated":
+        handlers.onActivated()
+        return
+      case "widget.rebootstrap":
+        handlers.onRebootstrap()
+        return
+      case "widget.close":
+        handlers.onClose()
+        return
+      case "widget.reset":
+        handlers.onReset()
+        return
+      case "widget.open_url":
+        handlers.onOpenUrl(frame.url)
+        return
+      case "widget.resize":
+        applyWidgetResize(state, frame)
+        return
+      default:
+        return
+    }
+  }
+  var applyWidgetResize = (state, frame) => {
+    if (state.iframe === null) {
       return
     }
-    if (frame.type === "widget.activated") {
-      handlers.onActivated()
-      return
-    }
-    if (frame.type === "widget.rebootstrap") {
-      handlers.onRebootstrap()
-      return
-    }
-    if (frame.type === "widget.close") {
-      handlers.onClose()
-      return
-    }
-    if (frame.type === "widget.reset") {
-      handlers.onReset()
-      return
-    }
-    if (frame.type === "widget.open_url") {
-      handlers.onOpenUrl(frame.url)
-      return
-    }
-    if (state.iframe !== null) {
-      state.iframe.style.height = `${frame.height}px`
-      if (frame.width !== void 0) {
-        state.iframe.style.width = `${frame.width}px`
-      }
+    state.iframe.style.height = `${frame.height}px`
+    if (frame.width !== void 0) {
+      state.iframe.style.width = `${frame.width}px`
     }
   }
 

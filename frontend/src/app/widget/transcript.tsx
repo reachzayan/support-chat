@@ -13,6 +13,9 @@ export type TranscriptLine = {
   display_locator?: string | null
   source_title?: string | null
   system_reason?: string | null
+  response_outcome?: string | null
+  reason_code?: string | null
+  citations?: SourceCitation[]
 }
 
 export type TranscriptSelfRole = "visitor" | "agent"
@@ -46,9 +49,9 @@ export const isCenteredNotice = (line: TranscriptLine) => {
 }
 
 const selfBubble =
-  "ml-auto max-w-[82%] rounded-[8px] rounded-br-sm bg-navy px-4 py-3 text-sm leading-6 text-paper"
+  "ml-auto max-w-[82%] rounded-[20px] rounded-br-[6px] border border-steel/40 bg-steel/15 px-4 py-2 text-sm leading-5 text-ink"
 const otherBubble =
-  "mr-auto max-w-[82%] rounded-[8px] rounded-bl-sm border border-line bg-paper px-4 py-3 text-sm leading-6 text-ink shadow-[0_1px_2px_rgba(13,31,58,0.04)]"
+  "mr-auto max-w-[82%] rounded-[20px] rounded-bl-[6px] border border-line bg-paper px-4 py-2 text-sm leading-5 text-ink shadow-[0_1px_2px_rgba(13,31,58,0.04)]"
 const noticeClass =
   "mx-auto max-w-[92%] rounded-full border border-line bg-paper px-3 py-1 text-center text-[11px] leading-5 text-mute"
 
@@ -71,7 +74,11 @@ const bubbleClass = (line: TranscriptLine, selfRole: TranscriptSelfRole) => {
   if (isCenteredNotice(line)) {
     return noticeClass
   }
-  if (line.role === selfRole) {
+  const responderOnRight =
+    line.role === selfRole ||
+    (selfRole === "agent" &&
+      (line.role === "agent" || line.role === "admin" || line.role === "bot"))
+  if (responderOnRight) {
     return selfBubble
   }
   return otherBubble
@@ -84,12 +91,18 @@ const roleLabel = (line: TranscriptLine, selfRole: TranscriptSelfRole) => {
   if (line.role === "visitor") {
     return "Visitor"
   }
+  if (line.role === "admin") {
+    return "Admin"
+  }
+  if (line.role === "bot") {
+    return "Assistant"
+  }
   return "Agent"
 }
 
 const hasSource = (line: TranscriptLine) => {
-  if (line.system_reason === "policy_boundary") {
-    return line.role === "bot" || line.role === "system"
+  if (line.citations?.length) {
+    return true
   }
   if (line.role !== "bot") {
     return false
@@ -100,14 +113,13 @@ const hasSource = (line: TranscriptLine) => {
 const citationFromLine = (line: TranscriptLine): SourceCitation => ({
   source_urls: line.source_urls,
   display_locator: line.display_locator,
-  source_title:
-    line.system_reason === "policy_boundary"
-      ? line.source_title || "company policy"
-      : line.source_title,
+  source_title: line.source_title,
 })
 
-const sourceLabel = (line: TranscriptLine) =>
-  line.system_reason === "policy_boundary" ? "company policy" : "Source"
+const citationsFromLine = (line: TranscriptLine): SourceCitation[] =>
+  line.citations?.length ? line.citations : [citationFromLine(line)]
+
+const sourceLabel = (_line: TranscriptLine) => "Source"
 
 const TranscriptRow = ({
   line,
@@ -127,11 +139,16 @@ const TranscriptRow = ({
       ) : null}
       <p id={messageId}>{line.body}</p>
       {hasSource(line) ? (
-        <SourceHoverCard
-          citation={citationFromLine(line)}
-          describedBy={messageId}
-          label={sourceLabel(line)}
-        />
+        <span className="mt-2 flex flex-wrap gap-2">
+          {citationsFromLine(line).map((citation, index) => (
+            <SourceHoverCard
+              key={`${citation.source_urls?.[0] ?? citation.source_title ?? "source"}-${citation.cited_text ?? ""}`}
+              citation={citation}
+              describedBy={messageId}
+              label={`${sourceLabel(line)} ${index + 1}`}
+            />
+          ))}
+        </span>
       ) : null}
     </div>
   )
@@ -140,7 +157,7 @@ const TranscriptRow = ({
 const TypingNotice = () => (
   <p className="text-mute flex items-center gap-2 px-1 text-xs" aria-live="polite">
     <span className="bg-steel size-1.5 rounded-full" />
-    Agent is typing…
+    Assistant is typing…
   </p>
 )
 
@@ -151,7 +168,7 @@ const isEmptyTranscript = (
   logLabel: string | undefined,
 ) => lines.length === 0 && !typing && notice === undefined && logLabel === undefined
 
-const transcriptSurface = (muted: boolean) => (muted ? "bg-ice-2" : "bg-[#FAFBFD]")
+const transcriptSurface = (muted: boolean) => (muted ? "bg-ice-2" : "bg-ice")
 
 const TranscriptContent = ({
   lines,

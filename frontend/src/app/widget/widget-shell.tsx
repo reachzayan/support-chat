@@ -9,6 +9,7 @@ import {
   type SyntheticEvent,
 } from "react"
 
+import { ThemeToggle } from "@/components/theme-toggle"
 import {
   WIDGET_DEFAULT_HEIGHT,
   WIDGET_DEFAULT_WIDTH,
@@ -54,7 +55,7 @@ type WidgetShellProps = {
 }
 
 const ICON_BUTTON =
-  "text-paper/85 hover:bg-white/10 hover:text-paper focus-visible:ring-paper flex size-9 cursor-pointer items-center justify-center rounded-[8px] transition-colors duration-150 focus-visible:ring-2 focus-visible:outline-none"
+  "text-white/85 hover:bg-white/10 hover:text-white focus-visible:ring-paper flex size-9 cursor-pointer items-center justify-center rounded-[8px] transition-colors duration-150 focus-visible:ring-2 focus-visible:outline-none"
 
 export const WidgetShell = ({ name, onClose, onReset, onResize, children }: WidgetShellProps) => {
   const displayName =
@@ -87,9 +88,9 @@ export const WidgetShell = ({ name, onClose, onReset, onResize, children }: Widg
       aria-label={displayName}
       onKeyDown={handleKeyDown}
       onCancel={handleCancel}
-      className="widget-enter bg-paper text-ink m-0 flex h-dvh max-h-none w-full max-w-none flex-col overflow-hidden rounded-[18px] border-0 p-0 font-sans"
+      className="widget-enter bg-paper text-ink m-0 flex h-dvh max-h-none w-full max-w-none flex-col overflow-hidden rounded-[16px] border-0 p-0 font-sans outline-none"
     >
-      <header className="border-navy-mid bg-navy text-paper border-b px-5 py-4">
+      <header className="border-navy-mid bg-navy-deep border-b px-5 py-4 text-white">
         <WidgetTopbar name={displayName} onClose={onClose} onReset={onReset} onResize={onResize} />
       </header>
       <main className="flex min-h-0 min-w-0 flex-1 flex-col">{children}</main>
@@ -126,6 +127,7 @@ const WidgetTopbar = ({
       </div>
       <div className="flex items-center gap-1">
         {onResize ? <ResizeHandle onResize={onResize} /> : null}
+        <ThemeToggle compact />
         <button type="button" aria-label="Reset chat" onClick={onReset} className={ICON_BUTTON}>
           <RotateCcw aria-hidden="true" className="size-5" strokeWidth={2.2} />
         </button>

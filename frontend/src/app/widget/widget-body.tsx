@@ -49,11 +49,11 @@ const transcriptNotice = (
 }
 
 const ClosedFooter = ({ onRestart }: { onRestart: () => void }) => (
-  <div className="border-line border-t bg-[#F8F8FA] px-5 py-4">
+  <div className="border-line bg-ice border-t px-5 py-4">
     <button
       type="button"
       onClick={onRestart}
-      className="bg-ember text-paper hover:bg-ember-mid focus-visible:ring-steel min-h-11 cursor-pointer rounded-[8px] px-4 py-2 text-sm font-bold transition-[background-color,transform] duration-150 ease-out focus-visible:ring-2 focus-visible:outline-none active:scale-[0.98]"
+      className="bg-ember hover:bg-ember-mid focus-visible:ring-steel dark:text-navy-deep min-h-11 cursor-pointer rounded-[8px] px-4 py-2 text-sm font-bold text-white transition-[background-color,transform] duration-150 ease-out focus-visible:ring-2 focus-visible:outline-none active:scale-[0.98]"
     >
       Start a new chat
     </button>
@@ -78,7 +78,7 @@ const PrivacyBanner = ({
         conversation in line with our{" "}
         <button
           type="button"
-          className="text-ink cursor-pointer font-bold underline underline-offset-2"
+          className="text-steel cursor-pointer font-bold"
           onClick={handleOpenPrivacy}
         >
           Privacy notice
