@@ -419,7 +419,7 @@ class BotResponder:
         last_index = len(documents) - 1
         for index, item in enumerate(documents):
             content.append(_document_block(item, cache_control=index == last_index))
-        messages: list[dict] = []
+        messages: list[dict] = [{"role": "user", "content": content}]
         for item in prior_messages:
             role = item.get("role")
             text = item.get("content")
@@ -427,10 +427,7 @@ class BotResponder:
                 continue
             if not isinstance(text, str) or not text.strip():
                 continue
-            if not messages and role == "assistant":
-                continue
             messages.append({"role": role, "content": text})
-        messages.append({"role": "user", "content": content})
         messages.append(
             {
                 "role": "user",
@@ -470,7 +467,7 @@ class BotResponder:
             _document_block(item, cache_control=index == len(documents) - 1)
             for index, item in enumerate(documents)
         ]
-        messages: list[dict] = []
+        messages: list[dict] = [{"role": "user", "content": content}]
         for item in prior_messages:
             role = item.get("role")
             text = item.get("content")
@@ -478,10 +475,7 @@ class BotResponder:
                 continue
             if not isinstance(text, str) or not text.strip():
                 continue
-            if not messages and role == "assistant":
-                continue
             messages.append({"role": role, "content": text})
-        messages.append({"role": "user", "content": content})
         messages.append(
             {
                 "role": "user",

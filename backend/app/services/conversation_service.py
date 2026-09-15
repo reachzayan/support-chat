@@ -10,15 +10,13 @@ from typing import Any
 from uuid import UUID, uuid4
 
 import structlog
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.chat.outcome_copy import (
     DISENGAGE_LINE,
     KEEP_HELPING_LINE,
-    OFF_TOPIC_LINE,
-    UNCITED_ADVISORY_SUFFIX,
     chitchat_reply,
     is_transfer_offer_body,
     transfer_offer_line,
@@ -754,35 +752,6 @@ class ConversationService:
             return True
         return False
 
-    async def _commit_off_topic(self, conversation: Conversation) -> None:
-        conversation.active_generation_id = None
-        await self._insert_message(
-            conversation,
-            "system",
-            OFF_TOPIC_LINE,
-            system_reason="off_topic",
-            response_outcome=ResponseOutcome.BOUNDARY.value,
-            response_reason_code="off_topic",
-        )
-
-    async def _evidence_tokens(self, site: Site) -> set[str]:
-        from app.services.full_context import load_live_units
-        from app.services.kb_tokens import tokenize
-
-        snapshots = await live_snapshots_for_site(self._session, site.id)
-        if not snapshots:
-            return set()
-        units = await load_live_units(self._session, [item.id for item in snapshots])
-        tokens: set[str] = set()
-        for unit in units:
-            blob = " ".join(
-                part
-                for part in (unit.canonical_question, unit.heading, unit.answer_verbatim)
-                if part
-            )
-            tokens.update(tokenize(blob))
-        return tokens
-
     async def _awaiting_transfer_consent(self, conversation_id: UUID) -> bool:
         recent = await self._messages.list_recent_roles(
             conversation_id, {"visitor", "bot", "system", "agent"}, 2
@@ -929,29 +898,17 @@ class ConversationService:
                 except TypeError:
                     return await original_complete(turn, units)
 
-        capability_labels = await self._capability_labels(site.id)
         decision = await GroundedResponseEngine(complete=complete).respond(
             TurnContext(
                 visitor_text=visitor_text,
                 evidence=evidence,
                 site_name=site.name,
-                grounding_text=retrieval_text,
                 prior_messages=prior_messages,
-                site_capability_labels=capability_labels,
+                prior_miss_count=conversation.fallback_count,
                 off_brand_blocklist=tuple(getattr(site, "off_brand_blocklist", None) or ()),
             ),
             stage_timings=stage_timings,
         )
-        if decision.reason_code == "uncited_advisory":
-            claude_chars = len(decision.body)
-            if decision.body.endswith(UNCITED_ADVISORY_SUFFIX):
-                claude_chars = len(decision.body[: -len(UNCITED_ADVISORY_SUFFIX)].rstrip())
-            log.info(
-                "grounded_uncited_advisory",
-                body_chars=claude_chars,
-                request_id=decision.request_id,
-                generation_id=str(generation_id),
-            )
         return await self._finalize_grounded_decision(
             conversation_id,
             generation_id,
@@ -967,6 +924,32 @@ class ConversationService:
         visitor_text: str,
         stage_timings: dict[str, int] | None = None,
     ) -> list[EvidenceUnit]:
+        settings = get_settings()
+        snapshots = await live_snapshots_for_site(self._session, site_id)
+        if not snapshots:
+            return []
+        token_estimate = sum(item.token_estimate for item in snapshots)
+        if token_estimate < settings.full_context_max_tokens:
+            from app.services.full_context import load_live_units
+
+            units = await load_live_units(self._session, [item.id for item in snapshots])
+            return [
+                EvidenceUnit(
+                    id=unit.id,
+                    canonical_question=unit.canonical_question,
+                    aliases=unit.aliases,
+                    topic_label=unit.topic_label or unit.heading,
+                    answer_verbatim=unit.answer_verbatim,
+                    source_title=unit.title,
+                    source_url=unit.url,
+                    snapshot_id=unit.snapshot_id,
+                    risk_class=unit.risk_class,
+                    answer_mode=unit.answer_mode,
+                    enabled=True,
+                    live=True,
+                )
+                for unit in units
+            ]
         hits = await HybridKbSearch(self._session).search_with_deferred_embed(
             self._embedder,
             site_id,
@@ -990,25 +973,6 @@ class ConversationService:
             )
             for hit in hits[:5]
         ]
-
-    async def _capability_labels(self, site_id: UUID) -> tuple[str, ...]:
-        labels = await self._session.scalars(
-            select(func.coalesce(KbChunk.topic_label, KbChunk.heading))
-            .join(KbSnapshot, KbSnapshot.id == KbChunk.snapshot_id)
-            .join(KbPage, KbPage.id == KbChunk.page_id)
-            .join(KbSource, KbSource.id == KbPage.source_id)
-            .where(
-                KbChunk.site_id == site_id,
-                KbChunk.enabled.is_(True),
-                KbChunk.kind != "refusal",
-                KbPage.enabled.is_(True),
-                KbSource.enabled.is_(True),
-                KbSnapshot.state == "live",
-            )
-            .order_by(KbChunk.ordinal, KbChunk.id)
-            .limit(5)
-        )
-        return tuple(dict.fromkeys(label for label in labels if label))[:3]
 
     async def _legacy_grounded_draft(
         self, site: Site, turn: TurnContext, units: list[EvidenceUnit]
@@ -1132,6 +1096,7 @@ class ConversationService:
                         source_url=citation.source_url,
                     )
                 )
+            conversation.fallback_count = 0
         else:
             inserted = await self._insert_message(
                 conversation,
@@ -1141,6 +1106,11 @@ class ConversationService:
                 response_outcome=decision.outcome.value if decision.outcome is not None else None,
                 response_reason_code=decision.reason_code,
             )
+            if (
+                decision.outcome is ResponseOutcome.CLARIFICATION
+                and decision.reason_code == "no_evidence"
+            ):
+                conversation.fallback_count += 1
         if decision.offer_handoff and decision.outcome in {
             ResponseOutcome.KNOWLEDGE_GAP,
             ResponseOutcome.PARTIAL_ANSWER,
@@ -1175,8 +1145,6 @@ class ConversationService:
             decision.provider_status is ProviderStatus.TECH_FAIL
         ):
             return "tech_fail"
-        if decision.reason_code == "uncited_advisory":
-            return "uncited_advisory"
         if decision.reason_code == "grounding_reject":
             return "insufficient"
         if decision.citations:
@@ -1184,8 +1152,6 @@ class ConversationService:
         if decision.outcome is ResponseOutcome.CLARIFICATION:
             return "clarify"
         if decision.outcome is ResponseOutcome.BOUNDARY:
-            if decision.reason_code == "off_topic":
-                return "off_topic"
             return "policy_boundary"
         if decision.outcome is ResponseOutcome.KNOWLEDGE_GAP:
             return "insufficient"
@@ -1325,8 +1291,6 @@ class ConversationService:
             conversation.active_generation_id = None
             await self._session.commit()
             return CommandResult(conversation=conversation, site_key=site_key)
-        if system_reason == "off_topic":
-            return await self._commit_off_topic_finalize(conversation, site_key)
         if system_reason == "disengage":
             conversation.active_generation_id = None
             inserted = await self._insert_message(
@@ -1335,21 +1299,6 @@ class ConversationService:
             await self._session.commit()
             return CommandResult(conversation=conversation, site_key=site_key, message=inserted)
         return await self._commit_transfer_offer(conversation, site_key, site)
-
-    async def _commit_off_topic_finalize(
-        self, conversation: Conversation, site_key: str
-    ) -> CommandResult:
-        conversation.active_generation_id = None
-        inserted = await self._insert_message(
-            conversation,
-            "system",
-            OFF_TOPIC_LINE,
-            system_reason="off_topic",
-            response_outcome=ResponseOutcome.BOUNDARY.value,
-            response_reason_code="off_topic",
-        )
-        await self._session.commit()
-        return CommandResult(conversation=conversation, site_key=site_key, message=inserted)
 
     async def _commit_transfer_offer(
         self, conversation: Conversation, site_key: str, site: Site | None = None

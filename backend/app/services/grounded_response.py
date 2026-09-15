@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import re
 import time
-import unicodedata
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from enum import StrEnum
@@ -18,15 +17,14 @@ from uuid import UUID
 import structlog
 
 from app.chat.outcome_copy import (
+    CLARIFY_SCOPE_LINE,
     INSUFFICIENT_HUMAN,
     TECH_FAIL_HUMAN,
-    UNCITED_ADVISORY_SUFFIX,
     handoff_copy,
 )
-from app.llm.intent import is_disengage_request, is_unrelated_request
+from app.llm.intent import is_disengage_request
 from app.llm.safety_markers import contains_injection_marker
 from app.services import output_validator
-from app.services.kb_tokens import tokenize
 
 log = structlog.get_logger("grounded_response")
 
@@ -80,11 +78,10 @@ class TurnContext:
     visitor_text: str
     evidence: list[EvidenceUnit]
     site_name: str = ""
-    grounding_text: str | None = None
     prior_messages: tuple[dict[str, str], ...] = ()
+    prior_miss_count: int = 0
     explicit_human_request: bool = False
     sensitive: bool = False
-    site_capability_labels: tuple[str, ...] = ()
     off_brand_blocklist: tuple[str, ...] = ()
 
 
@@ -115,7 +112,6 @@ class DraftValidation:
 
 Provider = Callable[[TurnContext, list[EvidenceUnit]], Awaitable[ModelDraft | None]]
 
-_PUNCT_RE = re.compile(r"[^\w\s]", re.UNICODE)
 _FRUSTRATION_RE = re.compile(r"\b(dumb|useless|stupid|idiot|not helpful|waste of time)\b", re.I)
 _ABUSE_RE = re.compile(r"\b(fuck|shit|bitch|asshole)\b", re.I)
 _NUMERIC_CLAIM_RE = re.compile(
@@ -128,25 +124,16 @@ _MAX_CHARS = 1500
 _SOFT_WORD_CAP = 120
 
 
-def normalized_question(value: str) -> str:
-    normalized = unicodedata.normalize("NFKC", value or "").casefold()
-    normalized = _PUNCT_RE.sub(" ", normalized)
-    return " ".join(normalized.split())
-
-
 def contextual_grounding_query(
     visitor_text: str, prior_messages: tuple[dict[str, str], ...]
 ) -> str:
-    """Give short follow-ups enough context for retrieval without rewriting normal turns."""
-    if len(tokenize(visitor_text)) >= 3:
-        return visitor_text
+    """Ground retrieval in the latest exchange instead of isolated fragments."""
     for message in reversed(prior_messages):
         if message.get("role") != "assistant":
             continue
         body = (message.get("content") or "").strip()
-        if body.endswith("?"):
+        if body:
             return f"{body} {visitor_text}"
-        break
     return visitor_text
 
 
@@ -219,10 +206,16 @@ def _direct_handoff() -> ResponseDecision:
     )
 
 
-def _safe_no_evidence_handoff() -> ResponseDecision:
+def _safe_no_evidence(prior_miss_count: int) -> ResponseDecision:
+    if prior_miss_count <= 0:
+        return ResponseDecision(
+            ResponseOutcome.CLARIFICATION,
+            "no_evidence",
+            CLARIFY_SCOPE_LINE,
+        )
     return ResponseDecision(
         ResponseOutcome.KNOWLEDGE_GAP,
-        "no_evidence",
+        "repeated_miss",
         handoff_copy("retrieval_miss", human_enabled=True),
         offer_handoff=True,
     )
@@ -258,19 +251,6 @@ def _safe_grounding_reject(reason: str, *, request_id: str | None = None) -> Res
     )
 
 
-def _uncited_advisory(draft: ModelDraft) -> ResponseDecision:
-    body = draft.body.strip()
-    return ResponseDecision(
-        ResponseOutcome.SYNTHESIZED_ANSWER,
-        "uncited_advisory",
-        f"{body}\n\n{UNCITED_ADVISORY_SUFFIX}",
-        citations=[],
-        offer_handoff=True,
-        provider_status=ProviderStatus.OK,
-        request_id=draft.request_id,
-    )
-
-
 def _elapsed_ms(started_ns: int) -> int:
     return (time.perf_counter_ns() - started_ns) // 1_000_000
 
@@ -286,7 +266,6 @@ class GroundedResponseEngine:
     ) -> ResponseDecision:
         timings = stage_timings if stage_timings is not None else {}
         question = (turn.visitor_text or "").strip()
-        grounding_question = (turn.grounding_text or question).strip()
         if turn.sensitive:
             return _safe_sensitive_handoff()
         if turn.explicit_human_request:
@@ -300,27 +279,16 @@ class GroundedResponseEngine:
 
         evidence = _eligible(turn.evidence)
         if not evidence:
-            if not turn.evidence and is_unrelated_request(grounding_question):
-                return self._boundary("off_topic", turn)
-            return _safe_no_evidence_handoff()
+            return _safe_no_evidence(turn.prior_miss_count)
 
         if self._complete is None:
             return _safe_technical_failure(reason="provider_unavailable")
         try:
-            draft = await self._complete(turn, evidence[:5])
+            draft = await self._complete(turn, evidence)
         except Exception:
             return _safe_technical_failure(reason="provider_exception")
         if draft is None or not draft.body.strip():
             return _safe_technical_failure(reason="empty_draft")
-
-        body = draft.body.strip()
-        # Uncited non-clarifying answers: keep source_copy as a hard reject, otherwise
-        # show Claude's body with an advisory suffix (do not tech-fail).
-        if not draft.citations and not _is_clarifying_only(body):
-            if _is_source_copy(body, evidence):
-                self._reject("source_copy", draft)
-                return _safe_grounding_reject(reason="source_copy", request_id=draft.request_id)
-            return _uncited_advisory(draft)
 
         started = time.perf_counter_ns()
         validation = self._validate_draft(draft, evidence, turn)
@@ -358,8 +326,6 @@ class GroundedResponseEngine:
             return self._reject("over_words", draft)
 
         clarifying = _is_clarifying_only(body)
-        # Citation absence for non-clarifying drafts is handled in respond() as
-        # uncited_advisory (or source_copy). Do not reject no_citation here.
 
         if _is_source_copy(body, units):
             return self._reject("source_copy", draft)
@@ -414,7 +380,7 @@ class GroundedResponseEngine:
         return DraftValidation(accepted=False, reason=reason)
 
     @staticmethod
-    def _boundary(reason: str, turn: TurnContext | None = None) -> ResponseDecision:
+    def _boundary(reason: str) -> ResponseDecision:
         if reason == "frustration":
             body = (
                 "I’m sorry—that wasn’t helpful. Tell me what you need confirmed, "
@@ -430,26 +396,7 @@ class GroundedResponseEngine:
                 "I can help with screening and compliance questions. What would you like to know?"
             )
         else:
-            labels: list[str] = []
-            if turn is not None:
-                for label in turn.site_capability_labels or [
-                    unit.topic_label for unit in turn.evidence
-                ]:
-                    display = (label or "").strip().rstrip("?!.")
-                    if not display:
-                        continue
-                    if re.match(
-                        r"^(?:are|can|do|does|how|is|what|when|where|why|who)\b", display, re.I
-                    ):
-                        continue
-                    if display not in labels:
-                        labels.append(display)
-            topic = ", ".join(labels[:3]) if labels else "screening and compliance"
-            topic = topic.rstrip("?")
-            body = (
-                "I can help with screening and compliance questions. "
-                f"What would you like to know about {topic}?"
-            )
+            body = CLARIFY_SCOPE_LINE
         return ResponseDecision(
             ResponseOutcome.BOUNDARY,
             reason,

@@ -31,6 +31,10 @@ class EvidenceDoc:
     display_locator: str | None
     legal_sensitive: bool
     ordinal: int
+    aliases: tuple[str, ...] = ()
+    topic_label: str | None = None
+    risk_class: str = "general"
+    answer_mode: str = "paraphrase_allowed"
 
 
 def redact_window_body(body: str) -> str:
@@ -98,6 +102,10 @@ async def load_live_units(session: AsyncSession, snapshot_ids: list[UUID]) -> li
                 display_locator=chunk.display_locator or page.display_locator,
                 legal_sensitive=bool(chunk.legal_sensitive),
                 ordinal=chunk.ordinal,
+                aliases=tuple(chunk.aliases or ()),
+                topic_label=chunk.topic_label,
+                risk_class=chunk.risk_class,
+                answer_mode=chunk.answer_mode,
             )
         )
     _UNITS_CACHE[cache_key] = list(units)
