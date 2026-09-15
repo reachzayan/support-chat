@@ -1,6 +1,6 @@
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import exists, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.message import Message
@@ -10,6 +10,17 @@ from app.models.user import User
 class MessageRepository:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
+
+    async def has_visitor_message(self, conversation_id: UUID) -> bool:
+        result = await self._session.execute(
+            select(
+                exists().where(
+                    Message.conversation_id == conversation_id,
+                    Message.role == "visitor",
+                )
+            )
+        )
+        return bool(result.scalar())
 
     async def create(
         self,

@@ -123,3 +123,58 @@ async def test_expired_sweep_closes_stale_chats_and_leaves_fresh_ones(migrated_d
     assert conversation_state(stale_id) == "closed"
     assert conversation_state(fresh_id) == "bot"
     assert conversation_state(closed_id) == "closed"
+
+
+async def _open_prechat_form(
+    session,
+    site,
+    *,
+    when: datetime = START,
+    with_visitor_message: bool = False,
+):
+    _visitor, conversation = await insert_bot_conversation(session, site)
+    conversation.state = "prechat"
+    conversation.last_message_at = when
+    if with_visitor_message:
+        await MessageRepository(session).create(
+            conversation.id, "visitor", "how fast are results", client_message_id=uuid4()
+        )
+    await session.commit()
+    return conversation.id
+
+
+async def test_prechat_form_without_visitor_messages_is_not_idle_due(migrated_db) -> None:
+    async with session_maker()() as session:
+        easy, _bg, _timing, _fcra = await seed_brand_articles(session)
+        conversation_id = await _open_prechat_form(session, easy)
+        service = ConversationService(session)
+        conversation = await session.get(Conversation, conversation_id)
+        assert conversation is not None
+        due = await service._idle_due(conversation, START + FIVE_MIN)
+
+    assert due is False
+    assert conversation_state(conversation_id) == "prechat"
+
+
+async def test_prechat_with_visitor_message_is_idle_due_past_ttl(migrated_db) -> None:
+    async with session_maker()() as session:
+        easy, _bg, _timing, _fcra = await seed_brand_articles(session)
+        conversation_id = await _open_prechat_form(session, easy, with_visitor_message=True)
+        service = ConversationService(session)
+        conversation = await session.get(Conversation, conversation_id)
+        assert conversation is not None
+        due = await service._idle_due(conversation, START + FIVE_MIN)
+
+    assert due is True
+
+
+async def test_close_expired_skips_preform_prechat(migrated_db) -> None:
+    async with session_maker()() as session:
+        easy, _bg, _timing, _fcra = await seed_brand_articles(session)
+        form_id = await _open_prechat_form(session, easy)
+        stale_chat_id = await _open_chat(session, easy, when=START)
+        closed = await ConversationService(session).close_expired(now=START + FIVE_MIN)
+
+    assert {item.conversation.id for item in closed} == {stale_chat_id}
+    assert conversation_state(form_id) == "prechat"
+    assert conversation_state(stale_chat_id) == "closed"

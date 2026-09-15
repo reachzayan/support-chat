@@ -1,11 +1,37 @@
-import { screen } from "@testing-library/react"
-import { beforeEach, describe, expect, test, vi } from "vitest"
+import { act, screen } from "@testing-library/react"
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest"
 
 import { renderWithProviders } from "@/test/render"
 
 import { Transcript } from "./transcript"
 
 const VISITOR_LINE = "How fast are results?"
+const IDLE_WARNING = "This chat will be closed in one minute. Send any message to keep active."
+const NOW = new Date("2026-09-15T12:00:00.000Z")
+const FOUR_MIN_AGO = "2026-09-15T11:56:00.000Z"
+const THREE_MIN_AGO = "2026-09-15T11:57:00.000Z"
+const JUST_NOW = "2026-09-15T12:00:00.000Z"
+
+const IDLE_LINE_THREE_MIN = [
+  { id: 1, role: "visitor", body: VISITOR_LINE, created_at: THREE_MIN_AGO },
+]
+const IDLE_LINE_FOUR_MIN = [
+  { id: 1, role: "visitor", body: VISITOR_LINE, created_at: FOUR_MIN_AGO },
+]
+const IDLE_LINES_AT_FOUR_MIN = [
+  { id: 1, role: "visitor", body: VISITOR_LINE, created_at: FOUR_MIN_AGO },
+  {
+    id: 2,
+    role: "bot",
+    body: "Most results report within 24-48 hours.",
+    created_at: FOUR_MIN_AGO,
+  },
+]
+const IDLE_LINES_AFTER_VISITOR_REPLY = [
+  ...IDLE_LINES_AT_FOUR_MIN,
+  { id: 3, role: "visitor", body: "Thanks", created_at: JUST_NOW },
+]
+
 const VISITOR_LINES = [{ id: 1, role: "visitor", body: VISITOR_LINE }]
 const MIXED_LINES = [
   { id: 1, role: "visitor", body: VISITOR_LINE },
@@ -66,5 +92,51 @@ describe("transcript typing indicator", () => {
     rerender(<Transcript autoFollow lines={FOLLOW_UP_LINES} />)
 
     expect(scrollIntoView).toHaveBeenCalledWith({ behavior: "smooth", block: "end" })
+  })
+})
+
+describe("transcript idle close warning", () => {
+  beforeEach(() => {
+    Object.defineProperty(HTMLElement.prototype, "scrollIntoView", {
+      configurable: true,
+      value: vi.fn(),
+    })
+    vi.useFakeTimers()
+    vi.setSystemTime(NOW)
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  test("does not show the warning before four minutes of visitor idle", () => {
+    renderWithProviders(<Transcript conversationState="bot" lines={IDLE_LINE_THREE_MIN} />)
+
+    expect(screen.queryByText(IDLE_WARNING)).not.toBeInTheDocument()
+  })
+
+  test("shows the warning at four minutes of visitor idle in bot", () => {
+    renderWithProviders(<Transcript conversationState="bot" lines={IDLE_LINE_FOUR_MIN} />)
+
+    expect(screen.getByText(IDLE_WARNING)).toBeInTheDocument()
+  })
+
+  test("hides the warning after a visitor message resets idle", () => {
+    const { rerender } = renderWithProviders(
+      <Transcript conversationState="bot" lines={IDLE_LINES_AT_FOUR_MIN} />,
+    )
+    expect(screen.getByText(IDLE_WARNING)).toBeInTheDocument()
+
+    act(() => {
+      rerender(<Transcript conversationState="bot" lines={IDLE_LINES_AFTER_VISITOR_REPLY} />)
+    })
+
+    expect(screen.queryByText(IDLE_WARNING)).not.toBeInTheDocument()
+  })
+
+  test("does not show the warning in prechat", () => {
+    renderWithProviders(<Transcript conversationState="prechat" lines={IDLE_LINE_FOUR_MIN} />)
+
+    expect(screen.queryByText(IDLE_WARNING)).not.toBeInTheDocument()
   })
 })

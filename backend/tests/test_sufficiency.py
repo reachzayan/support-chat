@@ -2,10 +2,12 @@ import uuid
 
 import pytest
 
+from app.chat.outcome_copy import INSUFFICIENT_HUMAN, UNCITED_ADVISORY_SUFFIX
 from app.services.grounded_response import (
     EvidenceUnit,
     GroundedResponseEngine,
     ModelDraft,
+    ProviderStatus,
     ResponseOutcome,
     TurnContext,
 )
@@ -22,10 +24,10 @@ TIMING = EvidenceUnit(
 
 
 @pytest.mark.asyncio
-async def test_model_authored_question_without_citations_falls_back_extractively() -> None:
+async def test_model_authored_clarification_without_citations_is_accepted() -> None:
     async def complete(_turn: TurnContext, _units: list[EvidenceUnit]) -> ModelDraft:
         return ModelDraft(
-            body="Are you setting up pre-employment screens, a random program, or DOT testing?",
+            body="Are you setting up pre-employment screens, a random program, or occupational health?",
             citations=[],
         )
 
@@ -33,13 +35,15 @@ async def test_model_authored_question_without_citations_falls_back_extractively
         TurnContext(visitor_text="How fast are results?", evidence=[TIMING])
     )
 
-    assert decision.outcome is ResponseOutcome.SYNTHESIZED_ANSWER
-    assert decision.reason_code == "extractive_fallback"
-    assert decision.body == TIMING.answer_verbatim
+    assert decision.outcome is ResponseOutcome.CLARIFICATION
+    assert decision.body.endswith("?")
+    assert decision.offer_handoff is False
 
 
 @pytest.mark.asyncio
-async def test_factual_claim_without_citations_falls_back_extractively() -> None:
+async def test_source_copy_without_citations_still_rejects() -> None:
+    """Exact FAQ paste stays a hard reject even when Claude emits no citations."""
+
     async def complete(_turn: TurnContext, _units: list[EvidenceUnit]) -> ModelDraft:
         return ModelDraft(body=TIMING.answer_verbatim, citations=[])
 
@@ -47,6 +51,27 @@ async def test_factual_claim_without_citations_falls_back_extractively() -> None
         TurnContext(visitor_text="How fast are results?", evidence=[TIMING])
     )
 
+    assert decision.outcome is ResponseOutcome.KNOWLEDGE_GAP
+    assert decision.reason_code == "grounding_reject"
+    assert decision.body == INSUFFICIENT_HUMAN
+    assert decision.offer_handoff is True
+    assert decision.provider_status is ProviderStatus.OK
+
+
+@pytest.mark.asyncio
+async def test_paraphrased_uncited_claim_gets_advisory_suffix() -> None:
+    body = "Negative panels are usually available within a business day or two."
+
+    async def complete(_turn: TurnContext, _units: list[EvidenceUnit]) -> ModelDraft:
+        return ModelDraft(body=body, citations=[], request_id="req_advisory")
+
+    decision = await GroundedResponseEngine(complete=complete).respond(
+        TurnContext(visitor_text="How fast are results?", evidence=[TIMING])
+    )
+
     assert decision.outcome is ResponseOutcome.SYNTHESIZED_ANSWER
-    assert decision.reason_code == "extractive_fallback"
-    assert decision.body == TIMING.answer_verbatim
+    assert decision.reason_code == "uncited_advisory"
+    assert decision.body.startswith(body)
+    assert decision.body.endswith(UNCITED_ADVISORY_SUFFIX)
+    assert decision.offer_handoff is True
+    assert decision.provider_status is ProviderStatus.OK

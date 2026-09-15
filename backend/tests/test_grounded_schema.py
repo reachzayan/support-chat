@@ -39,7 +39,7 @@ def test_grounded_response_schema_is_unconditional_and_supports_span_citations(c
                 connection.scalar(
                     text("SELECT 1 FROM pg_indexes WHERE indexname = 'ix_kb_chunks_grounded_trgm'")
                 )
-                is None
+                == 1
             )
             site_flag = connection.scalar(
                 text(

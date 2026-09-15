@@ -46,6 +46,7 @@ describe("visitor session view", () => {
         id: 12,
         role: "visitor",
         body: "still there?",
+        created_at: null,
         source_chunk_ids: null,
         source_urls: null,
         display_locator: null,

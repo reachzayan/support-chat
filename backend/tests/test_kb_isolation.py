@@ -29,9 +29,28 @@ def _fake_anthropic(captured: dict, answer: str = SCRIPTED_ANSWER):
     class FakeMessages:
         async def create(self, **kwargs):
             captured.update(kwargs)
-            citation = type("Citation", (), {"document_index": 0})()
+
+            # Documents are EvidenceUnit-like; cited_text must match the redacted body.
+            docs = []
+            for message in kwargs.get("messages") or []:
+                content = message.get("content")
+                if isinstance(content, list):
+                    for block in content:
+                        if isinstance(block, dict) and block.get("type") == "document":
+                            docs.append(block["source"]["data"])
+            source = docs[0] if docs else answer
+            citation = type(
+                "Citation",
+                (),
+                {
+                    "document_index": 0,
+                    "start_char_index": 0,
+                    "end_char_index": len(source),
+                    "cited_text": source,
+                },
+            )()
             block = type("Block", (), {"type": "text", "text": answer, "citations": [citation]})()
-            return type("Response", (), {"content": [block]})()
+            return type("Response", (), {"content": [block], "_request_id": "req_test"})()
 
     class FakeClient:
         def __init__(self, *args, **kwargs) -> None:

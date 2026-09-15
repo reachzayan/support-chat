@@ -1,4 +1,5 @@
 import re
+import time
 from dataclasses import dataclass, field, replace
 from uuid import UUID
 
@@ -261,21 +262,26 @@ class BotResponder:
         return cls._shared_client
 
     async def generate_grounded_draft(
-        self, turn: TurnContext, documents: list[EvidenceUnit]
+        self,
+        turn: TurnContext,
+        documents: list[EvidenceUnit],
+        stage_timings: dict[str, int] | None = None,
     ) -> ModelDraft | None:
         documents = _scan_documents_for_injection(list(documents))
         if not documents:
             return None
         try:
-            body, citations = await self._complete_grounded_documents(
+            body, citations, request_id = await self._complete_grounded_documents(
                 site_name=turn.site_name,
                 visitor_text=turn.visitor_text,
                 documents=documents,
+                prior_messages=turn.prior_messages,
+                stage_timings=stage_timings,
             )
         except Exception as exc:
             _log_provider_error(exc)
             return None
-        return ModelDraft(body=body, citations=citations)
+        return ModelDraft(body=body, citations=citations, request_id=request_id)
 
     async def generate(self, site: Site, visitor_text: str, hits: list) -> BufferedAnswer:
         if not hits:
@@ -456,12 +462,33 @@ class BotResponder:
         site_name: str,
         visitor_text: str,
         documents: list[EvidenceUnit],
-    ) -> tuple[str, list[Citation]]:
+        prior_messages: tuple[dict[str, str], ...],
+        stage_timings: dict[str, int] | None = None,
+    ) -> tuple[str, list[Citation], str | None]:
         client = self._shared_anthropic_client()
         content = [
             _document_block(item, cache_control=index == len(documents) - 1)
             for index, item in enumerate(documents)
         ]
+        messages: list[dict] = []
+        for item in prior_messages:
+            role = item.get("role")
+            text = item.get("content")
+            if role not in {"user", "assistant"}:
+                continue
+            if not isinstance(text, str) or not text.strip():
+                continue
+            if not messages and role == "assistant":
+                continue
+            messages.append({"role": role, "content": text})
+        messages.append({"role": "user", "content": content})
+        messages.append(
+            {
+                "role": "user",
+                "content": visitor_turn_text(site_name, redact_for_model(visitor_text)),
+            }
+        )
+        started = time.perf_counter_ns()
         response = await client.messages.create(
             model=get_settings().anthropic_model,
             max_tokens=500,
@@ -472,12 +499,19 @@ class BotResponder:
                     "cache_control": {"type": "ephemeral"},
                 }
             ],
-            messages=[
-                {"role": "user", "content": content},
-                {
-                    "role": "user",
-                    "content": visitor_turn_text(site_name, redact_for_model(visitor_text)),
-                },
-            ],
+            messages=messages,
         )
-        return extract_native_citations(list(response.content), documents)
+        if stage_timings is not None:
+            stage_timings["provider"] = (time.perf_counter_ns() - started) // 1_000_000
+        request_id = getattr(response, "_request_id", None)
+        request_id_str = request_id if isinstance(request_id, str) else None
+        log.info(
+            "grounded_provider",
+            request_id=request_id_str,
+            document_count=len(documents),
+        )
+        started = time.perf_counter_ns()
+        body, citations = extract_native_citations(list(response.content), documents)
+        if stage_timings is not None:
+            stage_timings["citation_parse"] = (time.perf_counter_ns() - started) // 1_000_000
+        return body, citations, request_id_str

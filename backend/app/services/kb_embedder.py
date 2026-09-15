@@ -310,17 +310,11 @@ def cosine(left: list[float], right: list[float]) -> float:
 RRF_K = 60
 
 
-def rrf_merge(
-    fts_ids: list[UUID],
-    dense_ids: list[UUID],
-    overview_ids: list[UUID] | None = None,
-    k: int = RRF_K,
-) -> list[tuple[UUID, float]]:
+def rrf_merge(*rank_lists: list[UUID], k: int = RRF_K) -> list[tuple[UUID, float]]:
     scores: dict[UUID, float] = {}
-    for rank, chunk_id in enumerate(fts_ids, start=1):
-        scores[chunk_id] = scores.get(chunk_id, 0.0) + 1.0 / (k + rank)
-    for rank, chunk_id in enumerate(dense_ids, start=1):
-        scores[chunk_id] = scores.get(chunk_id, 0.0) + 1.0 / (k + rank)
-    for rank, chunk_id in enumerate(overview_ids or [], start=1):
-        scores[chunk_id] = scores.get(chunk_id, 0.0) + 1.0 / (k + rank)
+    for rank_list in rank_lists:
+        if not rank_list:
+            continue
+        for rank, chunk_id in enumerate(rank_list, start=1):
+            scores[chunk_id] = scores.get(chunk_id, 0.0) + 1.0 / (k + rank)
     return sorted(scores.items(), key=lambda item: (-item[1], str(item[0])))

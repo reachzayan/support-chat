@@ -102,6 +102,7 @@ async def test_bot_responder_uses_supported_sdk_parameters_and_fixed_token_cap(m
 
 async def test_grounded_responder_uses_the_installed_sdk_request_contract(monkeypatch) -> None:
     captured: dict = {}
+    paraphrase = "Most negative results come back within 24-48 hours."
 
     class FakeMessages:
         async def create(self, *, model, max_tokens, system, messages):
@@ -117,7 +118,7 @@ async def test_grounded_responder_uses_the_installed_sdk_request_contract(monkey
                 end_char_index=len(EASY_BODY),
                 cited_text=EASY_BODY,
             )
-            block = SimpleNamespace(type="text", text=EASY_BODY, citations=[citation])
+            block = SimpleNamespace(type="text", text=paraphrase, citations=[citation])
             return SimpleNamespace(content=[block])
 
     class FakeClient:
@@ -144,7 +145,7 @@ async def test_grounded_responder_uses_the_installed_sdk_request_contract(monkey
     )
 
     assert draft is not None
-    assert draft.body == EASY_BODY
+    assert draft.body == paraphrase
     assert draft.citations[0].source_title == evidence.source_title
     assert draft.citations[0].source_url == evidence.source_url
     validation = GroundedResponseEngine()._validate_draft(
