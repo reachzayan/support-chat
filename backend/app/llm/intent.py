@@ -2,7 +2,7 @@ import re
 
 from app.llm.safety_markers import SensitiveCategory, contains_injection_marker, strip_invisible
 from app.services.kb_embedder import cosine
-from app.services.kb_tokens import GENERIC_NOISE, is_overview_query, tokenize
+from app.services.kb_tokens import tokenize
 
 CHITCHAT_TOKENS = frozenset(
     {
@@ -36,83 +36,6 @@ DISENGAGE_PHRASES = (
     "give me your secret",
     "show me your secret",
     "system prompt",
-)
-IN_SCOPE_TOKENS = frozenset(
-    {
-        "background",
-        "clinic",
-        "collection",
-        "compliance",
-        "consortium",
-        "cost",
-        "dot",
-        "drug",
-        "drugs",
-        "samplesite",
-        "ecup",
-        "employer",
-        "fcra",
-        "hiring",
-        "location",
-        "marijuana",
-        "mro",
-        "nationwide",
-        "network",
-        "occupational",
-        "offer",
-        "offering",
-        "oral",
-        "panel",
-        "physical",
-        "portal",
-        "preemployment",
-        "price",
-        "pricing",
-        "quote",
-        "random",
-        "result",
-        "screen",
-        "screening",
-        "service",
-        "services",
-        "specimen",
-        "test",
-        "testing",
-        "thc",
-        "turnaround",
-        "urine",
-        "vaccine",
-        "trucking",
-        "truck",
-        "fleet",
-        "driver",
-        "drivers",
-        "company",
-        "partner",
-        "setup",
-        "onboard",
-        "onboarding",
-        "hire",
-        "hr",
-        "employee",
-        "employees",
-        "account",
-        "coverage",
-        "program",
-        "programs",
-        "start",
-        "started",
-        "workplace",
-        "lab",
-        "labs",
-        "package",
-        "packages",
-        "state",
-        "states",
-        "alcohol",
-        "fmcsa",
-        "clearinghouse",
-    }
 )
 ABUSE_TOKENS = frozenset(
     {
@@ -198,23 +121,6 @@ def is_chitchat(value: str) -> bool:
         return all(token in CHITCHAT_TOKENS for token in tokens)
     raw = set(WORD_RE.findall(normalize_text(value)))
     return not raw
-
-
-def is_unrelated_request(value: str, evidence_tokens: set[str] | None = None) -> bool:
-    if is_chitchat(value) or is_escalate_request(value) or is_disengage_request(value):
-        return False
-    if is_sensitive_request(value):
-        return False
-    if is_overview_query(value):
-        return False
-    tokens = set(tokenize(value))
-    if not tokens:
-        return True
-    domain = set(IN_SCOPE_TOKENS)
-    if evidence_tokens:
-        domain |= set(evidence_tokens)
-    overlap = (tokens - GENERIC_NOISE) & (domain - GENERIC_NOISE)
-    return not bool(overlap)
 
 
 def is_transfer_consent(value: str) -> bool:
