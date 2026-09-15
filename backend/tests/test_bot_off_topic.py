@@ -22,6 +22,7 @@ from tests.bot_fixtures import (
 from tests.ws_helpers import HOST_ORIGIN, conversation_state, message_count
 
 OFF_TOPIC = "I can't help with that here."
+MODEL_REDIRECT = "What would you like to know about screening or compliance?"
 DOT_YES = (
     "Yes. We support employers with DOT drug and alcohol testing, random pool management, "
     "MIS reporting, and DOT physicals, all performed in line with 49 CFR Part 40 requirements."
@@ -59,33 +60,36 @@ def _assert_stays_bot_without_handoff(conversation_id: uuid.UUID) -> None:
 
 
 async def test_sad_message_stays_with_bot_and_does_not_queue(migrated_db) -> None:
-    responder = RecordingResponder()
+    responder = RecordingResponder(answer=MODEL_REDIRECT, selected_ids=[])
     async with session_maker()() as session:
         easy, _bg, _timing, _fcra = await seed_brand_articles(session)
         conversation_id, _service = await _turn(session, easy, "I am sad", responder)
 
     _assert_stays_bot_without_handoff(conversation_id)
-    assert responder.calls == []
+    assert message_count(conversation_id, role="bot", body=MODEL_REDIRECT) == 1
+    assert len(responder.calls) == 1
 
 
 async def test_fuel_prices_stay_with_bot_and_do_not_queue(migrated_db) -> None:
-    responder = RecordingResponder()
+    responder = RecordingResponder(answer=MODEL_REDIRECT, selected_ids=[])
     async with session_maker()() as session:
         easy, _bg, _timing, _fcra = await seed_brand_articles(session)
         conversation_id, _service = await _turn(session, easy, "What's the fuel prices", responder)
 
     _assert_stays_bot_without_handoff(conversation_id)
-    assert responder.calls == []
+    assert message_count(conversation_id, role="bot", body=MODEL_REDIRECT) == 1
+    assert len(responder.calls) == 1
 
 
 async def test_gender_question_stays_with_bot_and_does_not_queue(migrated_db) -> None:
-    responder = RecordingResponder()
+    responder = RecordingResponder(answer=MODEL_REDIRECT, selected_ids=[])
     async with session_maker()() as session:
         easy, _bg, _timing, _fcra = await seed_brand_articles(session)
         conversation_id, _service = await _turn(session, easy, "are you a male", responder)
 
     _assert_stays_bot_without_handoff(conversation_id)
-    assert responder.calls == []
+    assert message_count(conversation_id, role="bot", body=MODEL_REDIRECT) == 1
+    assert len(responder.calls) == 1
 
 
 async def test_specialist_request_queues_for_a_human(migrated_db) -> None:

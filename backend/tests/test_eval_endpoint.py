@@ -1,12 +1,9 @@
 from tests.ws_helpers import EASY_PUBLIC_KEY, EASY_SITE_KEY, insert_site
 
-OFF_TOPIC_BOUNDARY = (
-    "I can help with screening and compliance questions. "
-    "What would you like to know about screening and compliance?"
-)
+CLARIFY_SCOPE = "What would you like to know about screening or compliance?"
 
 
-def test_eval_turn_endpoint_runs_off_topic_without_widget_bootstrap(client) -> None:
+def test_eval_turn_endpoint_returns_neutral_clarification_without_widget_bootstrap(client) -> None:
     insert_site(EASY_SITE_KEY, "SampleSite", EASY_PUBLIC_KEY)
     response = client.post(
         "/api/internal/eval/turn",
@@ -15,5 +12,5 @@ def test_eval_turn_endpoint_runs_off_topic_without_widget_bootstrap(client) -> N
     assert response.status_code == 200
     payload = response.json()
     assert payload["state"] == "bot"
-    assert payload["body"] == OFF_TOPIC_BOUNDARY
-    assert payload["system_reason"] == "off_topic"
+    assert payload["body"] == CLARIFY_SCOPE
+    assert payload["system_reason"] == "clarify"

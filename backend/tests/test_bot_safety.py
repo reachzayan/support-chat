@@ -176,4 +176,4 @@ def test_system_rules_forbid_talking_about_documents() -> None:
 
     rules = system_rules_for("SampleSite").casefold()
     assert "never mention documents" in rules
-    assert "do not offer a specialist for off-topic" in rules
+    assert "do not answer the unrelated question or offer a specialist" in rules
