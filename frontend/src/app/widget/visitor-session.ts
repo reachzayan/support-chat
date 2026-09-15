@@ -95,12 +95,14 @@ const applyMessage = (view: ChatView, frame: Record<string, unknown>): ChatView 
   const systemReason = nullableString(frame.system_reason)
   const responseOutcome = nullableString(frame.response_outcome)
   const reasonCode = nullableString(frame.reason_code)
+  const createdAt = nullableString(frame.created_at)
   const lines = [
     ...view.lines,
     {
       id: frame.id,
       role: frame.role,
       body: frame.body,
+      created_at: createdAt,
       source_chunk_ids: sourceChunkIds,
       source_urls: sourceUrls,
       display_locator: displayLocator,

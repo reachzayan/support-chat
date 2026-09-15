@@ -126,6 +126,7 @@ const ActiveChat = ({
         autoFollow
         muted={visitorClosed}
         notice={notice}
+        conversationState={state}
       />
       {visitorClosed ? (
         <ClosedFooter onRestart={onRestart} />

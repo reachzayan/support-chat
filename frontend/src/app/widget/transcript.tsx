@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useRef } from "react"
+import { useEffect, useRef, useState } from "react"
 
 import { SourceHoverCard, type SourceCitation } from "./source-hovercard"
 
@@ -8,6 +8,7 @@ export type TranscriptLine = {
   id: number
   role: string
   body: string
+  created_at?: string | null
   source_chunk_ids?: string[] | null
   source_urls?: string[] | null
   display_locator?: string | null
@@ -20,6 +21,8 @@ export type TranscriptLine = {
 
 export type TranscriptSelfRole = "visitor" | "agent"
 
+type TranscriptConversationState = "prechat" | "bot" | "queued" | "human" | "closed"
+
 type TranscriptProps = {
   lines: TranscriptLine[]
   typing?: boolean
@@ -28,7 +31,14 @@ type TranscriptProps = {
   logLabel?: string
   autoFollow?: boolean
   muted?: boolean
+  conversationState?: TranscriptConversationState | null
 }
+
+const IDLE_WARNING = "This chat will be closed in one minute. Send any message to keep active."
+
+const IDLE_WARN_MS = 4 * 60 * 1000
+const IDLE_CLOSE_MS = 5 * 60 * 1000
+const IDLE_TICK_MS = 15_000
 
 export const isClosedNotice = (line: TranscriptLine) => {
   if (line.role !== "system") {
@@ -54,6 +64,8 @@ const otherBubble =
   "mr-auto max-w-[82%] rounded-[20px] rounded-bl-[6px] border border-line bg-paper px-4 py-2 text-sm leading-5 text-ink shadow-[0_1px_2px_rgba(13,31,58,0.04)]"
 const noticeClass =
   "mx-auto max-w-[92%] rounded-full border border-line bg-paper px-3 py-1 text-center text-[11px] leading-5 text-mute"
+const idleWarningClass =
+  "mx-auto max-w-[92%] rounded-[8px] border border-line bg-ice-2 px-3 py-2 text-center text-xs leading-5 text-mute motion-safe:transition-opacity motion-safe:duration-200"
 
 const useAutoFollow = (enabled: boolean, latestLineId: number | undefined) => {
   const latestRef = useRef<HTMLDivElement>(null)
@@ -68,6 +80,54 @@ const useAutoFollow = (enabled: boolean, latestLineId: number | undefined) => {
     })
   }, [enabled, latestLineId])
   return latestRef
+}
+
+const lastVisitorCreatedAt = (lines: TranscriptLine[]) => {
+  for (let index = lines.length - 1; index >= 0; index -= 1) {
+    const line = lines[index]
+    if (line.role === "visitor" && line.created_at) {
+      return line.created_at
+    }
+  }
+  return null
+}
+
+const isIdleWarningDue = (
+  conversationState: TranscriptConversationState | null | undefined,
+  lines: TranscriptLine[],
+  nowMs: number,
+) => {
+  if (conversationState !== "bot" && conversationState !== "human") {
+    return false
+  }
+  const createdAt = lastVisitorCreatedAt(lines)
+  if (!createdAt) {
+    return false
+  }
+  const createdMs = Date.parse(createdAt)
+  if (Number.isNaN(createdMs)) {
+    return false
+  }
+  const idleMs = nowMs - createdMs
+  return idleMs >= IDLE_WARN_MS && idleMs < IDLE_CLOSE_MS
+}
+
+const useIdleWarning = (
+  conversationState: TranscriptConversationState | null | undefined,
+  lines: TranscriptLine[],
+) => {
+  const [visible, setVisible] = useState(() =>
+    isIdleWarningDue(conversationState, lines, Date.now()),
+  )
+  useEffect(() => {
+    const refresh = () => {
+      setVisible(isIdleWarningDue(conversationState, lines, Date.now()))
+    }
+    refresh()
+    const timer = window.setInterval(refresh, IDLE_TICK_MS)
+    return () => window.clearInterval(timer)
+  }, [conversationState, lines])
+  return visible
 }
 
 const bubbleClass = (line: TranscriptLine, selfRole: TranscriptSelfRole) => {
@@ -161,6 +221,8 @@ const TypingNotice = () => (
   </p>
 )
 
+const IdleWarningPill = () => <output className={idleWarningClass}>{IDLE_WARNING}</output>
+
 const isEmptyTranscript = (
   lines: TranscriptLine[],
   typing: boolean,
@@ -176,18 +238,21 @@ const TranscriptContent = ({
   notice,
   selfRole,
   latestRef,
+  showIdleWarning,
 }: {
   lines: TranscriptLine[]
   typing: boolean
   notice?: string
   selfRole: TranscriptSelfRole
   latestRef: ReturnType<typeof useAutoFollow>
+  showIdleWarning: boolean
 }) => (
   <>
     {lines.map((line) => (
       <TranscriptRow key={line.id} line={line} selfRole={selfRole} />
     ))}
     {notice === undefined ? null : <p className={`${noticeClass} widget-bubble`}>{notice}</p>}
+    {showIdleWarning ? <IdleWarningPill /> : null}
     {typing ? <TypingNotice /> : null}
     <div ref={latestRef} aria-hidden="true" />
   </>
@@ -201,8 +266,10 @@ export const Transcript = ({
   logLabel,
   autoFollow = false,
   muted = false,
+  conversationState = null,
 }: TranscriptProps) => {
   const latestRef = useAutoFollow(autoFollow, lines.at(-1)?.id)
+  const showIdleWarning = useIdleWarning(conversationState, lines)
   const surface = transcriptSurface(muted)
   if (isEmptyTranscript(lines, typing, notice, logLabel)) {
     return <div aria-live="polite" className={`min-h-0 flex-1 ${surface}`} />
@@ -221,6 +288,7 @@ export const Transcript = ({
         notice={notice}
         selfRole={selfRole}
         latestRef={latestRef}
+        showIdleWarning={showIdleWarning}
       />
     </div>
   )
