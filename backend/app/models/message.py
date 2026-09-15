@@ -44,7 +44,7 @@ class Message(Base):
             "(source_chunk_ids IS NOT NULL AND cardinality(source_chunk_ids) > 0) OR "
             "system_reason IN ("
             "'clarify','insufficient','tech_fail','policy_boundary',"
-            "'off_topic','out_of_scope','sensitive'"
+            "'off_topic','out_of_scope','sensitive','uncited_advisory'"
             ")"
             ")) OR "
             "(role <> 'bot' AND source_article_ids IS NULL AND source_chunk_ids IS NULL)",
@@ -64,7 +64,7 @@ class Message(Base):
             "'out_of_scope','insufficient','sensitive',"
             "'visitor_request','individual_case','retrieval_miss',"
             "'sufficiency_fail','provider_timeout','repeated_miss',"
-            "'rate_ceiling','off_topic')",
+            "'rate_ceiling','off_topic','uncited_advisory')",
             name="ck_messages_system_reason",
         ),
         CheckConstraint(
