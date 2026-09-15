@@ -49,7 +49,7 @@ describe("sites copy snippet", () => {
     const copyButton = screen.getByRole("button", { name: "Copy snippet" })
     fireEvent.click(copyButton)
     await waitFor(() => expect(writeText).toHaveBeenCalledWith(SNIPPET))
-    expect(screen.getByRole("button", { name: "Copied" })).toBeInTheDocument()
+    await waitFor(() => expect(screen.getByRole("button", { name: "Copied" })).toBeInTheDocument())
     expect(SNIPPET.includes("YOUR_KEY")).toBe(false)
     expect(SNIPPET.includes("bootstrap_token")).toBe(false)
     expect(SNIPPET.includes("access_token")).toBe(false)

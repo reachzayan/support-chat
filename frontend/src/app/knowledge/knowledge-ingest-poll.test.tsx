@@ -22,15 +22,16 @@ describe("knowledge ingest queued", () => {
     vi.useFakeTimers({ shouldAdvanceTime: true })
     try {
       renderWithProviders(<KnowledgeConsole isAdmin={true} displayName="Riley Chen" />)
-      await waitFor(() => expect(screen.getByText("queued")).toBeInTheDocument())
+      await waitFor(() => expect(screen.getByText("Queued")).toBeInTheDocument())
       expect(screen.queryByText(PAGE_TITLE)).not.toBeInTheDocument()
       markIngested()
       await vi.advanceTimersByTimeAsync(2_000)
-      await waitFor(() => expect(screen.getByText("ready")).toBeInTheDocument())
-      expect(screen.getByRole("button", { name: PAGE_TITLE })).toBeInTheDocument()
-      expect(screen.getByText("indexed for this site").previousElementSibling).toHaveTextContent(
-        "1",
+      await waitFor(() => expect(screen.getByText("Ready")).toBeInTheDocument())
+      await waitFor(() =>
+        expect(screen.getByRole("button", { name: PAGE_TITLE })).toBeInTheDocument(),
       )
+      const indexedLabel = screen.getByText("Indexed pages")
+      expect(indexedLabel.parentElement?.querySelector(".tabular-nums")).toHaveTextContent("1")
     } finally {
       vi.useRealTimers()
     }

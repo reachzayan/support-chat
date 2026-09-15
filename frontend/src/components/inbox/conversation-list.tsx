@@ -75,9 +75,9 @@ const ConversationRow = ({ item, selected, onSelect }: RowProps) => {
         type="button"
         onClick={handleSelect}
         aria-current={selected ? "true" : undefined}
-        className={`flex w-full flex-col gap-1 px-3 py-3 text-left ${
+        className={`flex w-full flex-col gap-1 px-3 py-3 text-left transition-[background-color,color,border-color,transform,box-shadow] duration-150 ease-out hover:-translate-y-px ${
           selected
-            ? "border-ember bg-navy-mid border-l-2"
+            ? "border-ember bg-ice-2 border-l-2"
             : "hover:bg-ice-2 bg-paper border-l-2 border-transparent"
         }`}
       >
@@ -189,8 +189,8 @@ const InboxFilterButton = ({
       aria-label={item.label}
       aria-pressed={active}
       onClick={handleClick}
-      className={`flex min-h-10 w-full items-center justify-between rounded-[8px] px-3 text-left text-xs font-bold ${
-        active ? "bg-navy-mid text-navy" : "text-mute hover:bg-ice-2 hover:text-ink"
+      className={`flex min-h-10 w-full items-center justify-between rounded-[8px] px-3 text-left text-xs font-bold transition-[background-color,color,transform,box-shadow] duration-150 ease-out hover:-translate-y-px ${
+        active ? "bg-ice-2 text-navy" : "text-mute hover:bg-ice-2 hover:text-ink"
       }`}
     >
       <span className="flex items-center gap-2">
@@ -270,7 +270,7 @@ const ConversationRows = ({
           <button
             type="button"
             onClick={onLoadMore}
-            className="text-steel hover:text-navy w-full rounded-[6px] px-2 py-2 text-sm font-semibold"
+            className="text-steel hover:text-navy w-full rounded-[6px] px-2 py-2 text-sm font-semibold transition-[color,transform] duration-150 ease-out hover:-translate-y-px"
           >
             Load more
           </button>

@@ -109,8 +109,10 @@ describe("widget panel resume", () => {
       expect(screen.getByRole("dialog", { name: "SupportChat" })).toBeInTheDocument()
     })
     expect(screen.queryByRole("button", { name: "Start the chat" })).not.toBeInTheDocument()
-    expect(screen.getByText(VISITOR_LINE)).toBeInTheDocument()
-    expect(screen.getByText(JOIN_LINE)).toBeInTheDocument()
+    await waitFor(() => {
+      expect(screen.getByText(VISITOR_LINE)).toBeInTheDocument()
+      expect(screen.getByText(JOIN_LINE)).toBeInTheDocument()
+    })
     expect(screen.queryByRole("button", { name: "Talk to a person" })).not.toBeInTheDocument()
     expect(screen.getByRole("dialog", { name: "SupportChat" })).toBeInTheDocument()
   })

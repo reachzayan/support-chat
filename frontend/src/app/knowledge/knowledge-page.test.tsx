@@ -75,9 +75,10 @@ describe("knowledge add website", () => {
   test("add website posts the typed urls", async () => {
     const user = userEvent.setup()
     renderWithProviders(<KnowledgeConsole isAdmin={true} displayName="Riley Chen" />)
-    await waitFor(() => expect(screen.getByLabelText("Page URLs")).toBeInTheDocument())
-    await user.type(screen.getByLabelText("Page URLs"), "https://sample-site.example.com/dot")
-    await user.click(screen.getByRole("button", { name: "Add website" }))
+    await user.click(await screen.findByRole("button", { name: "Add website" }))
+    const urlField = await screen.findByLabelText("Website URL")
+    await user.type(urlField, "https://sample-site.example.com/dot")
+    await user.click(screen.getByRole("button", { name: "Add pages" }))
     const posted = vi
       .mocked(fetch)
       .mock.calls.find(
@@ -98,9 +99,10 @@ describe("knowledge add website", () => {
   test("add website shows an inline error for a non-https URL", async () => {
     const user = userEvent.setup()
     renderWithProviders(<KnowledgeConsole isAdmin={true} displayName="Riley Chen" />)
-    await waitFor(() => expect(screen.getByLabelText("Page URLs")).toBeInTheDocument())
-    await user.type(screen.getByLabelText("Page URLs"), "javascript:alert(1)")
-    await user.click(screen.getByRole("button", { name: "Add website" }))
+    await user.click(await screen.findByRole("button", { name: "Add website" }))
+    const urlField = await screen.findByLabelText("Website URL")
+    await user.type(urlField, "javascript:alert(1)")
+    await user.click(screen.getByRole("button", { name: "Add pages" }))
 
     expect(screen.getByText("Use one valid https:// URL per line.")).toBeInTheDocument()
     expect(screen.queryByText("Loading changes.")).not.toBeInTheDocument()
@@ -119,14 +121,12 @@ describe("knowledge page detail", () => {
       expect(screen.getByRole("button", { name: PAGE_TITLE })).toBeInTheDocument(),
     )
     await user.click(screen.getByRole("button", { name: PAGE_TITLE }))
-    await waitFor(() =>
-      expect(screen.getByRole("heading", { name: "Indexed copy" })).toBeInTheDocument(),
-    )
-    const panel = screen.getByRole("heading", { name: "Indexed copy" }).closest("section")
+    await waitFor(() => expect(screen.getByText("Indexed copy")).toBeInTheDocument())
+    const panel = screen.getByText("Indexed copy").closest("section")
     if (panel === null) {
       throw new Error("expected indexed copy panel")
     }
-    expect(within(panel).getAllByText(TIMING_BODY)).toHaveLength(2)
+    expect(within(panel).getByText(TIMING_BODY)).toBeInTheDocument()
   })
 })
 

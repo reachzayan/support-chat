@@ -17,19 +17,19 @@ export const useKnowledgeAddHandler = (
   const clearError = useCallback(() => setError(null), [])
   const handleAdd = useCallback(async () => {
     if (!siteId || !isAdmin) {
-      return
+      return false
     }
     const validationError = httpsUrlsError(urls)
     if (validationError) {
       setError(validationError)
-      return
+      return false
     }
     const seed = urls
       .split("\n")
       .map((line) => line.trim())
       .filter((line) => line.length > 0)
     if (seed.length === 0) {
-      return
+      return false
     }
     const response = await staffWrite(`/api/sites/${siteId}/kb-sources`, "POST", {
       mode: "list",
@@ -38,13 +38,14 @@ export const useKnowledgeAddHandler = (
     })
     if (!response.ok) {
       setError("Could not add this page. Check the URL and try again.")
-      return
+      return false
     }
     const created = (await response.json()) as KbSourceRecord
     setSources((current) => [...current, created])
     setSourceId(created.id)
     setUrls("")
     setError(null)
+    return true
   }, [isAdmin, setSourceId, setSources, setUrls, siteId, urls])
   return { handleAdd, error, clearError }
 }
