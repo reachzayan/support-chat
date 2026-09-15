@@ -78,12 +78,12 @@ async def test_samplesite_paraphrase_selects_timing_article_and_prompt_excludes_
         assert FCRA_TITLE not in bodies
 
 
-async def test_background_checks_same_query_has_no_samplesite_source_and_skips_model(
+async def test_background_checks_same_query_never_receives_samplesite_source(
     migrated_db,
 ) -> None:
     responder = RecordingResponder()
     async with session_maker()() as session:
-        _easy, bg, _timing, _fcra = await seed_brand_articles(session)
+        _easy, bg, _timing, fcra = await seed_brand_articles(session)
         visitor, conversation = await insert_bot_conversation(session, bg)
         await session.commit()
         service = ConversationService(session, responder=responder, embedder=FakeEmbedder())
@@ -106,7 +106,8 @@ async def test_background_checks_same_query_has_no_samplesite_source_and_skips_m
     assert message_count(conversation_id, role="system", body=FALLBACK) == 0
     assert message_count(conversation_id, role="system", body=SCRIPTED_ANSWER) == 0
     assert message_count(conversation_id, body=EASY_BODY) == 0
-    assert responder.calls == []
+    assert len(responder.calls) == 1
+    assert responder.calls[0]["article_ids"] == [fcra.chunk_id]
 
 
 async def test_scripted_grounded_answer_writes_one_bot_row_with_samplesite_article_id(

@@ -10,9 +10,10 @@
         "I am sad"
       ],
       "expected_state": "bot",
-      "expected_reason": "off_topic",
+      "expected_reason": "clarify",
       "must_contain": [
-        "screening and compliance"
+        "screening",
+        "compliance"
       ],
       "must_not_contain": [
         "A specialist will join",
@@ -26,9 +27,10 @@
         "What's the fuel prices"
       ],
       "expected_state": "bot",
-      "expected_reason": "off_topic",
+      "expected_reason": "clarify",
       "must_contain": [
-        "screening and compliance"
+        "screening",
+        "compliance"
       ],
       "must_not_contain": [
         "A specialist will join",
@@ -42,9 +44,10 @@
         "are you a male"
       ],
       "expected_state": "bot",
-      "expected_reason": "off_topic",
+      "expected_reason": "clarify",
       "must_contain": [
-        "screening and compliance"
+        "screening",
+        "compliance"
       ],
       "must_not_contain": [
         "A specialist will join",
@@ -58,9 +61,10 @@
         "what's the weather in Dallas"
       ],
       "expected_state": "bot",
-      "expected_reason": "off_topic",
+      "expected_reason": "clarify",
       "must_contain": [
-        "screening and compliance"
+        "screening",
+        "compliance"
       ],
       "must_not_contain": [
         "A specialist will join",
@@ -74,9 +78,10 @@
         "what's the capital of France"
       ],
       "expected_state": "bot",
-      "expected_reason": "off_topic",
+      "expected_reason": "clarify",
       "must_contain": [
-        "screening and compliance"
+        "screening",
+        "compliance"
       ],
       "must_not_contain": [
         "A specialist will join",
@@ -90,9 +95,10 @@
         "who won the super bowl"
       ],
       "expected_state": "bot",
-      "expected_reason": "off_topic",
+      "expected_reason": "clarify",
       "must_contain": [
-        "screening and compliance"
+        "screening",
+        "compliance"
       ],
       "must_not_contain": [
         "A specialist will join",
@@ -106,9 +112,10 @@
         "tell me a joke"
       ],
       "expected_state": "bot",
-      "expected_reason": "off_topic",
+      "expected_reason": "clarify",
       "must_contain": [
-        "screening and compliance"
+        "screening",
+        "compliance"
       ],
       "must_not_contain": [
         "A specialist will join",
@@ -341,9 +348,10 @@
         "how do I bake sourdough bread"
       ],
       "expected_state": "bot",
-      "expected_reason": "off_topic",
+      "expected_reason": "clarify",
       "must_contain": [
-        "screening and compliance"
+        "screening",
+        "compliance"
       ],
       "must_not_contain": [
         "A specialist will join",
@@ -357,9 +365,10 @@
         "write me a python function to reverse a string"
       ],
       "expected_state": "bot",
-      "expected_reason": "off_topic",
+      "expected_reason": "clarify",
       "must_contain": [
-        "screening and compliance"
+        "screening",
+        "compliance"
       ],
       "must_not_contain": [
         "A specialist will join",
@@ -374,9 +383,10 @@
         "what's the capital of France"
       ],
       "expected_state": "bot",
-      "expected_reason": "off_topic",
+      "expected_reason": "clarify",
       "must_contain": [
-        "screening and compliance"
+        "screening",
+        "compliance"
       ],
       "must_not_contain": [
         "A specialist will join",
@@ -533,9 +543,10 @@
         "what's 2+2"
       ],
       "expected_state": "bot",
-      "expected_reason": "off_topic",
+      "expected_reason": "clarify",
       "must_contain": [
-        "screening and compliance"
+        "screening",
+        "compliance"
       ],
       "must_not_contain": [
         "A specialist will join",

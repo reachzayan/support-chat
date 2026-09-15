@@ -85,7 +85,14 @@ async def test_bot_responder_sends_redacted_prior_turns(migrated_db, monkeypatch
 
     messages = captured.get("messages") or []
     roles = [item.get("role") for item in messages if isinstance(item, dict)]
-    assert roles[:2] == ["user", "assistant"]
+    assert roles == ["user", "user", "assistant", "user"]
+    assert isinstance(messages[0]["content"], list)
+    assert messages[1] == {"role": "user", "content": redact_for_model(PRIOR_VISITOR_LINE)}
+    assert messages[2] == {
+        "role": "assistant",
+        "content": "Earlier bot reply must not leak either.",
+    }
+    assert CURRENT_VISITOR_LINE in messages[3]["content"]
     serialized = str(messages)
     assert "Earlier bot reply must not leak either." in serialized
     assert CURRENT_VISITOR_LINE in serialized
@@ -156,13 +163,16 @@ async def test_grounded_draft_redacts_visitor_text_before_provider(
         rows = (
             (
                 await session.execute(
-                    select(Message).where(Message.conversation_id == conversation.id)
+                    select(Message)
+                    .where(Message.conversation_id == conversation.id)
+                    .order_by(Message.id)
                 )
             )
             .scalars()
             .all()
         )
-        assert conversation_window_messages(rows)
+        prior_messages = tuple(conversation_window_messages(rows))
+        assert prior_messages
         chunk = await session.get(KbChunk, timing.chunk_id)
         assert chunk is not None
         unit = EvidenceUnit(
@@ -180,11 +190,20 @@ async def test_grounded_draft_redacts_visitor_text_before_provider(
                 visitor_text=CURRENT_VISITOR_LINE,
                 evidence=[unit],
                 site_name=easy.name,
+                prior_messages=prior_messages,
             ),
             [unit],
         )
 
-    serialized = str(captured.get("messages") or [])
+    messages = captured.get("messages") or []
+    assert [message["role"] for message in messages] == [
+        "user",
+        "user",
+        "assistant",
+        "user",
+    ]
+    assert isinstance(messages[0]["content"], list)
+    serialized = str(messages)
     assert PRIOR_VISITOR_LINE not in serialized
     assert "ada@example.com" not in serialized
     assert CURRENT_VISITOR_LINE in serialized

@@ -12,7 +12,7 @@ def test_system_rules_include_site_name_and_contract_blocks() -> None:
 def test_system_rules_forbids_uncited_assertions() -> None:
     assert (
         "Never state facts, numbers, prices, durations, regulations, or program names "
-        "unless they come from a provided source and you emit a `<citation>` block for them"
+        "unless they come from a provided source and you cite that source using native citations"
     ) in SYSTEM_RULES
     assert (
         "If evidence is insufficient, ask a single clarifying question ending in `?` — do not guess"

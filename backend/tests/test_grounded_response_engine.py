@@ -3,7 +3,7 @@ import uuid
 import pytest
 from structlog.testing import capture_logs
 
-from app.chat.outcome_copy import INSUFFICIENT_HUMAN, TECH_FAIL_HUMAN, UNCITED_ADVISORY_SUFFIX
+from app.chat.outcome_copy import INSUFFICIENT_HUMAN, TECH_FAIL_HUMAN
 from app.services.grounded_response import (
     Citation,
     EvidenceUnit,
@@ -12,6 +12,7 @@ from app.services.grounded_response import (
     ProviderStatus,
     ResponseOutcome,
     TurnContext,
+    contextual_grounding_query,
 )
 
 DOT_EVIDENCE = EvidenceUnit(
@@ -38,6 +39,8 @@ TIMING_EVIDENCE = EvidenceUnit(
     snapshot_id=uuid.UUID("20000000-0000-4000-8000-000000000002"),
 )
 
+CLARIFY_SCOPE_LINE = "What would you like to know about screening or compliance?"
+
 
 def _citation(unit: EvidenceUnit, body: str) -> Citation:
     return Citation(
@@ -51,6 +54,36 @@ def _citation(unit: EvidenceUnit, body: str) -> Citation:
         source_title=unit.source_title,
         source_url=unit.source_url,
     )
+
+
+@pytest.mark.parametrize(
+    ("visitor_text", "assistant_text"),
+    [
+        (
+            "standard",
+            "Are you looking for DOT-regulated testing or a standard workplace program? "
+            "I can help with either.",
+        ),
+        ("huh?", "A specialist can confirm the timeline."),
+        ("what did you say?", "We can help with workplace screening."),
+        (
+            "How quickly are non-negative results reported?",
+            "Negative results are usually reported before non-negative results.",
+        ),
+    ],
+)
+def test_retrieval_query_keeps_context_for_every_followup(
+    visitor_text: str, assistant_text: str
+) -> None:
+    query = contextual_grounding_query(
+        visitor_text,
+        (
+            {"role": "user", "content": "I need drug screening for 10 employees."},
+            {"role": "assistant", "content": assistant_text},
+        ),
+    )
+
+    assert query == f"{assistant_text} {visitor_text}"
 
 
 @pytest.mark.asyncio
@@ -100,14 +133,17 @@ async def test_clarifying_question_still_bypasses_citation_requirement() -> None
     async def complete(_turn: TurnContext, _units: list[EvidenceUnit]) -> ModelDraft:
         return ModelDraft(body=body, citations=[], request_id="req_clarify")
 
+    assistant_text = "We support several DOT testing services."
     decision = await GroundedResponseEngine(complete=complete).respond(
-        TurnContext(visitor_text="tell me more", evidence=[DOT_EVIDENCE])
+        TurnContext(
+            visitor_text="tell me more",
+            prior_messages=({"role": "assistant", "content": assistant_text},),
+            evidence=[DOT_EVIDENCE],
+        )
     )
 
     assert decision.outcome is ResponseOutcome.CLARIFICATION
     assert decision.body == body
-    assert not decision.body.endswith(UNCITED_ADVISORY_SUFFIX)
-    assert UNCITED_ADVISORY_SUFFIX not in decision.body
     assert decision.offer_handoff is False
     assert decision.reason_code is None
     assert decision.provider_status is ProviderStatus.OK
@@ -145,7 +181,7 @@ async def test_unsupported_regulated_still_rejects_to_insufficient() -> None:
 
     with capture_logs() as events:
         decision = await GroundedResponseEngine(complete=complete).respond(
-            TurnContext(visitor_text="Do you handle privacy rules?", evidence=[DOT_EVIDENCE])
+            TurnContext(visitor_text="Do you handle DOT privacy rules?", evidence=[DOT_EVIDENCE])
         )
 
     assert decision.reason_code == "grounding_reject"
@@ -160,7 +196,7 @@ async def test_unsupported_regulated_still_rejects_to_insufficient() -> None:
 
 
 @pytest.mark.asyncio
-async def test_no_citation_returns_advisory_not_reject() -> None:
+async def test_no_citation_rejects_factual_draft() -> None:
     body = (
         "We provide DOT drug testing for small employers. "
         "A specialist can confirm details for your specific case."
@@ -173,15 +209,13 @@ async def test_no_citation_returns_advisory_not_reject() -> None:
         TurnContext(visitor_text="Do you provide drug screening?", evidence=[DOT_EVIDENCE])
     )
 
-    assert decision.body.startswith("We provide DOT drug testing for small employers.")
-    assert decision.body.endswith(UNCITED_ADVISORY_SUFFIX)
-    assert "\n\n" in decision.body
+    assert decision.body == INSUFFICIENT_HUMAN
     assert decision.offer_handoff is True
-    assert decision.reason_code == "uncited_advisory"
+    assert decision.reason_code == "grounding_reject"
     assert decision.provider_status is ProviderStatus.OK
     assert decision.citations == []
     assert decision.request_id == "req_test"
-    assert decision.outcome is ResponseOutcome.SYNTHESIZED_ANSWER
+    assert decision.outcome is ResponseOutcome.KNOWLEDGE_GAP
 
 
 @pytest.mark.asyncio
@@ -224,7 +258,7 @@ async def test_stale_source_helper_still_routes_to_tech_fail() -> None:
 
 
 @pytest.mark.asyncio
-async def test_no_evidence_skips_provider_and_offers_handoff() -> None:
+async def test_first_no_evidence_miss_asks_neutral_clarification() -> None:
     calls = {"count": 0}
 
     async def complete(_turn: TurnContext, _units: list[EvidenceUnit]) -> ModelDraft:
@@ -235,7 +269,8 @@ async def test_no_evidence_skips_provider_and_offers_handoff() -> None:
         TurnContext(visitor_text="Do you provide drug screening?", evidence=[])
     )
 
-    assert decision.outcome is ResponseOutcome.KNOWLEDGE_GAP
-    assert decision.offer_handoff is True
-    assert decision.body == INSUFFICIENT_HUMAN
+    assert decision.outcome is ResponseOutcome.CLARIFICATION
+    assert decision.reason_code == "no_evidence"
+    assert decision.offer_handoff is False
+    assert decision.body == CLARIFY_SCOPE_LINE
     assert calls["count"] == 0

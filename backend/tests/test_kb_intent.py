@@ -49,38 +49,14 @@ def test_greetings_and_signoff_are_chitchat_not_escalation() -> None:
     assert is_chitchat("how fast are results") is False
 
 
-def test_sad_fuel_and_gender_are_unrelated_not_escalation() -> None:
-    from app.llm.intent import is_unrelated_request
-
-    assert is_unrelated_request("I am sad") is True
-    assert is_unrelated_request("What's the fuel prices") is True
-    assert is_unrelated_request("are you a male") is True
-    assert is_unrelated_request("what's the capital of France") is True
-    assert is_unrelated_request("who won the super bowl") is True
-    assert is_unrelated_request("what services do you offer") is False
-    assert is_unrelated_request("how fast are results") is False
-    assert is_unrelated_request("and the pricing") is False
-    assert is_unrelated_request("what is your unpublished internal pricing matrix") is False
-    assert is_unrelated_request("we're a trucking company looking for a partner") is False
-    assert is_unrelated_request("can you help us get set up") is False
+def test_sad_message_is_not_escalation() -> None:
     assert is_escalate_request("I am sad") is False
 
 
-def test_contraction_does_not_count_as_ehs_corpus_overlap() -> None:
-    from app.llm.intent import is_unrelated_request
+def test_contraction_token_does_not_include_possessive_suffix() -> None:
     from app.services.kb_tokens import tokenize
 
-    evidence = set(tokenize("HR and EH&S Compliance Simplify operations"))
     assert "s" not in tokenize("what's the capital of France")
-    assert "s" not in evidence
-    assert (
-        is_unrelated_request(
-            "what's the capital of France",
-            evidence_tokens=evidence,
-        )
-        is True
-    )
-    assert is_unrelated_request("What's the fuel prices", evidence_tokens=evidence) is True
 
 
 def test_first_person_result_question_is_sensitive() -> None:
@@ -90,41 +66,11 @@ def test_first_person_result_question_is_sensitive() -> None:
     assert is_sensitive_request("will marijuana show up on a pre-employment screen") is False
 
 
-def test_arithmetic_is_off_topic_not_silent_chitchat() -> None:
-    from app.llm.intent import is_unrelated_request
+def test_arithmetic_is_not_silent_chitchat() -> None:
     from app.services.kb_tokens import is_overview_query
 
     assert is_chitchat("what's 2+2") is False
-    assert is_unrelated_request("what's 2+2") is True
     assert is_overview_query("what do you guys do") is True
-    assert is_unrelated_request("what do you guys do") is False
-
-
-def test_live_corpus_tokens_keep_partner_and_lab_questions_in_scope() -> None:
-    from app.llm.intent import is_unrelated_request
-
-    evidence = {"quest", "labcorp", "concentra", "samplelab", "nationwide", "negatives"}
-    assert (
-        is_unrelated_request(
-            "do you work with Quest or LabCorp",
-            evidence_tokens=evidence,
-        )
-        is False
-    )
-    assert (
-        is_unrelated_request(
-            "does that include non-negatives?",
-            evidence_tokens=evidence,
-        )
-        is False
-    )
-    assert (
-        is_unrelated_request(
-            "what's the capital of France",
-            evidence_tokens=evidence,
-        )
-        is True
-    )
 
 
 def test_yes_is_transfer_consent_and_no_is_decline() -> None:

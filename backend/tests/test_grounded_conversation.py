@@ -1,10 +1,10 @@
 import uuid
 
 from sqlalchemy import select
-from structlog.testing import capture_logs
 
-from app.chat.outcome_copy import TECH_FAIL_HUMAN, UNCITED_ADVISORY_SUFFIX
+from app.chat.outcome_copy import INSUFFICIENT_HUMAN, TECH_FAIL_HUMAN
 from app.db import session_maker
+from app.models.kb_page import KbPage
 from app.models.message import Message
 from app.models.message_citation import MessageCitation
 from app.services.conversation_service import ConversationService
@@ -50,8 +50,6 @@ async def test_yes_no_factual_answer_commits_message_and_citation(migrated_db) -
             cited_text=ANSWER_VERBATIM,
         )
         # Align citation metadata with the live page URL/title from insert_chunk.
-        from app.models.kb_page import KbPage
-
         page = await session.get(KbPage, chunk.page_id)
         assert page is not None
         responder.source_title = page.title
@@ -90,6 +88,47 @@ async def test_yes_no_factual_answer_commits_message_and_citation(migrated_db) -
     assert len(citations) == 1
     assert citations[0].response_start == 0
     assert citations[0].response_end == len(PARAPHRASE_BODY)
+
+
+async def test_small_corpus_sends_every_live_unit_to_responder(migrated_db) -> None:
+    async with session_maker()() as session:
+        site = await insert_site(session, "small-corpus-site", "Small Corpus Site")
+        chunks = [
+            await insert_chunk(
+                session,
+                site,
+                f"Screening service {index}",
+                f"Service {index} supports a workplace screening option.",
+            )
+            for index in range(6)
+        ]
+        selected = chunks[-1]
+        visitor, conversation = await insert_bot_conversation(session, site)
+        await session.commit()
+
+        page = await session.get(KbPage, selected.page_id)
+        assert page is not None
+        responder = RecordingGroundedResponder(
+            body="Yes. That workplace screening option is available.",
+            evidence_id=selected.id,
+            snapshot_id=selected.snapshot_id,
+            source_title=page.title,
+            source_url=page.url,
+            cited_text=selected.answer_verbatim,
+        )
+        service = ConversationService(session, responder=responder, embedder=FakeEmbedder())
+        result = await service.visitor_message(
+            conversation.id,
+            visitor.id,
+            HOST_ORIGIN,
+            uuid.uuid4(),
+            "Which workplace screening options are available?",
+        )
+        assert result.generation_id is not None
+        await service.run_bot_turn(conversation.id, result.generation_id)
+
+    assert len(responder.calls) == 1
+    assert set(responder.calls[0]["document_ids"]) == {chunk.id for chunk in chunks}
 
 
 async def test_misspelled_durg_screening_retrieves_same_evidence(migrated_db) -> None:
@@ -422,7 +461,7 @@ async def test_grounded_turn_log_contains_expected_timing_keys(migrated_db) -> N
     assert all(isinstance(value, int) for value in timings.values())
 
 
-async def test_no_citation_persists_uncited_advisory_and_logs_event(migrated_db) -> None:
+async def test_no_citation_never_persists_provider_claim(migrated_db) -> None:
     uncited_body = (
         "We provide DOT drug testing for small employers. "
         "A specialist can confirm details for your specific case."
@@ -445,16 +484,15 @@ async def test_no_citation_persists_uncited_advisory_and_logs_event(migrated_db)
                 return ModelDraft(body=uncited_body, citations=[], request_id="req_no_cite")
 
         service = ConversationService(session, responder=UncitedDraft(), embedder=FakeEmbedder())
-        with capture_logs() as events:
-            result = await service.visitor_message(
-                conversation.id,
-                visitor.id,
-                HOST_ORIGIN,
-                uuid.uuid4(),
-                "I have a company of 10 employees and I want drug testing for all of them",
-            )
-            assert result.generation_id is not None
-            await service.run_bot_turn(conversation.id, result.generation_id)
+        result = await service.visitor_message(
+            conversation.id,
+            visitor.id,
+            HOST_ORIGIN,
+            uuid.uuid4(),
+            "I have a company of 10 employees and I want drug testing for all of them",
+        )
+        assert result.generation_id is not None
+        await service.run_bot_turn(conversation.id, result.generation_id)
         message = await session.scalar(
             select(Message)
             .where(Message.conversation_id == conversation.id, Message.role == "bot")
@@ -470,16 +508,9 @@ async def test_no_citation_persists_uncited_advisory_and_logs_event(migrated_db)
         )
 
     assert message is not None
-    assert message.body.startswith(uncited_body)
-    assert message.body.endswith(UNCITED_ADVISORY_SUFFIX)
-    assert message.system_reason == "uncited_advisory"
-    assert message.response_reason_code == "uncited_advisory"
-    assert message.response_outcome == "synthesized_answer"
+    assert message.body == INSUFFICIENT_HUMAN
+    assert uncited_body not in message.body
+    assert message.system_reason == "insufficient"
+    assert message.response_reason_code == "grounding_reject"
+    assert message.response_outcome == "knowledge_gap"
     assert citations == []
-    advisory_events = [
-        event for event in events if event.get("event") == "grounded_uncited_advisory"
-    ]
-    assert len(advisory_events) == 1
-    assert advisory_events[0]["request_id"] == "req_no_cite"
-    assert advisory_events[0]["generation_id"] == str(result.generation_id)
-    assert advisory_events[0]["body_chars"] == len(uncited_body)

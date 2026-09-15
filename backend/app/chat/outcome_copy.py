@@ -12,6 +12,7 @@ CONTACT_OFFER = (
     "Would you like to be contacted by one of our representatives?"
 )
 KEEP_HELPING_LINE = "I can help with screening and compliance questions here. What do you need?"
+CLARIFY_SCOPE_LINE = "What would you like to know about screening or compliance?"
 GREET_LINE = "Hi. I can help with screening and compliance questions. What do you need?"
 THANKS_LINE = "You're welcome. Anything else on screening or compliance?"
 BYE_LINE = "Take care. Come back if you have screening or compliance questions."
@@ -22,7 +23,6 @@ INSUFFICIENT_HUMAN = "I want to get you an accurate answer. A specialist can pic
 INSUFFICIENT_SOLO = "I want to get you an accurate answer."
 TECH_FAIL_HUMAN = "Sorry, I hit a temporary issue. A specialist can take it from here."
 TECH_FAIL_SOLO = "Sorry, I hit a temporary issue. We'll follow up shortly."
-UNCITED_ADVISORY_SUFFIX = "For a tailored answer, I'd suggest speaking with a specialist."
 POLICY_BOUNDARY = (
     "I can't share that in chat. A specialist can walk you through it in the right channel."
 )
