@@ -1,4 +1,5 @@
 import asyncio
+import time
 import unicodedata
 from dataclasses import dataclass
 from uuid import UUID
@@ -24,6 +25,16 @@ FTS_LIMIT = 8
 DENSE_LIMIT = 8
 PER_PAGE = 2
 KEEP = 5
+TRGM_SKIP_EMBED_FLOOR = 0.60
+
+_TRGM_EXPR = (
+    "lower("
+    "coalesce(canonical_question, '') || ' ' || "
+    "kb_aliases_as_text(aliases) || ' ' || "
+    "coalesce(heading, '') || ' ' || "
+    "coalesce(topic_label, '')"
+    ")"
+)
 
 
 @dataclass(frozen=True)
@@ -54,6 +65,10 @@ def _normalized(value: str) -> str:
     return " ".join(text_value.split())
 
 
+def _elapsed_ms(started_ns: int) -> int:
+    return (time.perf_counter_ns() - started_ns) // 1_000_000
+
+
 class HybridKbSearch:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
@@ -72,9 +87,10 @@ class HybridKbSearch:
             )
             return [exact]
 
-        fts_ids, dense_ids, cosine_by_id = await self._retrieve_arms(
+        fts_scored, dense_ids, cosine_by_id = await self._retrieve_arms(
             site_id, visitor_text, query_vector
         )
+        fts_ids = [chunk_id for chunk_id, _score in fts_scored]
         overview_ids: list[UUID] = []
         overview_merged = False
         if is_overview_query(visitor_text):
@@ -96,6 +112,104 @@ class HybridKbSearch:
             return []
         hits = await self._load(site_id, [chunk_id for chunk_id, _score in ranked])
         diversified = self._diversify(ranked, hits, fts_ids, cosine_by_id)
+        if diversified:
+            log.info(
+                "grounded_retrieve",
+                hit_ids=[str(hit.id) for hit in diversified],
+                exact_match=False,
+                overview_merged=overview_merged,
+                dense_used=bool(dense_ids),
+            )
+            return diversified
+        if is_overview_query(visitor_text):
+            return await self._overview(site_id)
+        return []
+
+    async def search_with_deferred_embed(
+        self,
+        embedder,
+        site_id: UUID,
+        visitor_text: str,
+        stage_timings: dict[str, int] | None = None,
+    ) -> list[ChunkHit]:
+        timings = stage_timings if stage_timings is not None else {}
+        exact = await self._exact_match(site_id, visitor_text)
+        if exact is not None:
+            timings.setdefault("lexical_retrieve", 0)
+            timings.setdefault("trigram_retrieve", 0)
+            timings.setdefault("embed", 0)
+            timings.setdefault("dense_retrieve", 0)
+            log.info(
+                "grounded_retrieve",
+                hit_ids=[str(exact.id)],
+                exact_match=True,
+                overview_merged=False,
+                dense_used=False,
+            )
+            return [exact]
+
+        started = time.perf_counter_ns()
+        async with session_maker()() as trgm_session:
+            fts_scored, trgm_scored = await asyncio.gather(
+                self._fts(site_id, visitor_text),
+                HybridKbSearch(trgm_session)._trigram(site_id, visitor_text),
+            )
+        # Split wall time evenly across the concurrent lexical arms for observability.
+        lexical_ms = _elapsed_ms(started)
+        timings["lexical_retrieve"] = lexical_ms
+        timings["trigram_retrieve"] = lexical_ms
+
+        fts_ids = [chunk_id for chunk_id, _score in fts_scored]
+        trgm_ids = [chunk_id for chunk_id, _score in trgm_scored]
+        skip_embed = bool(
+            trgm_scored
+            and trgm_scored[0][1] >= TRGM_SKIP_EMBED_FLOOR
+            and trgm_scored[0][0] in fts_ids[:3]
+        )
+
+        dense_ids: list[UUID] = []
+        cosine_by_id: dict[UUID, float] = {}
+        if skip_embed:
+            timings["embed"] = 0
+            timings["dense_retrieve"] = 0
+        else:
+            started = time.perf_counter_ns()
+            query_vector: list[float] | None = None
+            try:
+                query_vector = await embedder.embed_query(visitor_text)
+            except Exception:
+                log.info("grounded_embed_failed", site_id=str(site_id))
+            timings["embed"] = _elapsed_ms(started)
+            if query_vector is not None:
+                started = time.perf_counter_ns()
+                dense_ids, cosine_by_id = await self._dense(site_id, query_vector)
+                timings["dense_retrieve"] = _elapsed_ms(started)
+            else:
+                timings["dense_retrieve"] = 0
+
+        overview_ids: list[UUID] = []
+        overview_merged = False
+        if is_overview_query(visitor_text):
+            overview_hits = await self._overview(site_id)
+            overview_ids = [hit.id for hit in overview_hits]
+            overview_merged = bool(overview_ids)
+
+        ranked = rrf_merge(fts_ids, trgm_ids, dense_ids, overview_ids)
+        if not ranked:
+            if overview_ids:
+                hits = await self._load(site_id, overview_ids[:KEEP])
+                log.info(
+                    "grounded_retrieve",
+                    hit_ids=[str(hit.id) for hit in hits],
+                    exact_match=False,
+                    overview_merged=True,
+                    dense_used=bool(dense_ids),
+                )
+                return hits
+            return []
+        hits = await self._load(site_id, [chunk_id for chunk_id, _score in ranked])
+        lexical_ids = list(dict.fromkeys([*fts_ids, *trgm_ids]))
+        diversified = self._diversify(ranked, hits, lexical_ids, cosine_by_id)
         if diversified:
             log.info(
                 "grounded_retrieve",
@@ -155,16 +269,16 @@ class HybridKbSearch:
         site_id: UUID,
         visitor_text: str,
         query_vector: list[float] | None,
-    ) -> tuple[list[UUID], list[UUID], dict[UUID, float]]:
+    ) -> tuple[list[tuple[UUID, float]], list[UUID], dict[UUID, float]]:
         if query_vector is None:
             return await self._fts(site_id, visitor_text), [], {}
         async with session_maker()() as dense_session:
-            fts_ids, dense_result = await asyncio.gather(
+            fts_scored, dense_result = await asyncio.gather(
                 self._fts(site_id, visitor_text),
                 HybridKbSearch(dense_session)._dense(site_id, query_vector),
             )
             dense_ids, cosine_by_id = dense_result
-            return fts_ids, dense_ids, cosine_by_id
+            return fts_scored, dense_ids, cosine_by_id
 
     def _diversify(
         self,
@@ -214,14 +328,15 @@ class HybridKbSearch:
                 break
         return diversified
 
-    async def _fts(self, site_id: UUID, visitor_text: str) -> list[UUID]:
+    async def _fts(self, site_id: UUID, visitor_text: str) -> list[tuple[UUID, float]]:
         tokens = search_tokens(visitor_text)
         if not tokens:
             return []
         query = " OR ".join(tokens)
         ts = func.websearch_to_tsquery("english", query)
+        rank = func.ts_rank(KbChunk.search_document, ts)
         result = await self._session.execute(
-            select(KbChunk.id, KbChunk.heading, KbChunk.answer_verbatim, KbChunk.aliases)
+            select(KbChunk.id, rank, KbChunk.heading, KbChunk.answer_verbatim, KbChunk.aliases)
             .join(KbPage, KbPage.id == KbChunk.page_id)
             .join(KbSnapshot, KbSnapshot.id == KbChunk.snapshot_id)
             .join(KbSource, KbSource.id == KbPage.source_id)
@@ -234,16 +349,54 @@ class HybridKbSearch:
                 KbSnapshot.state == "live",
                 KbChunk.search_document.op("@@")(ts),
             )
-            .order_by(func.ts_rank(KbChunk.search_document, ts).desc(), KbChunk.id)
+            .order_by(rank.desc(), KbChunk.id)
             .limit(FTS_LIMIT)
         )
-        ids: list[UUID] = []
-        for chunk_id, heading, answer, aliases in result.all():
+        scored: list[tuple[UUID, float]] = []
+        for chunk_id, score, heading, answer, aliases in result.all():
             blob = f"{heading or ''} {answer or ''} {' '.join(aliases or [])}"
             if contains_injection_marker(blob) or is_marketing_cta(answer or ""):
                 continue
-            ids.append(chunk_id)
-        return ids
+            scored.append((chunk_id, float(score or 0.0)))
+        return scored
+
+    async def _trigram(self, site_id: UUID, visitor_text: str) -> list[tuple[UUID, float]]:
+        query = (visitor_text or "").strip()
+        if len(query) < 3:
+            return []
+        await self._session.execute(text("SET LOCAL pg_trgm.similarity_threshold = 0.30"))
+        sql = text(
+            f"""
+            SELECT kb_chunks.id,
+                   similarity({_TRGM_EXPR}, lower(:q)) AS score,
+                   kb_chunks.heading,
+                   kb_chunks.answer_verbatim,
+                   kb_chunks.aliases
+              FROM kb_chunks
+              JOIN kb_pages ON kb_pages.id = kb_chunks.page_id
+              JOIN kb_snapshots ON kb_snapshots.id = kb_chunks.snapshot_id
+              JOIN kb_sources ON kb_sources.id = kb_pages.source_id
+             WHERE kb_chunks.site_id = :site_id
+               AND kb_chunks.enabled IS TRUE
+               AND kb_chunks.kind <> 'refusal'
+               AND kb_pages.enabled IS TRUE
+               AND kb_sources.enabled IS TRUE
+               AND kb_snapshots.state = 'live'
+               AND {_TRGM_EXPR} % lower(:q)
+             ORDER BY score DESC, kb_chunks.id
+             LIMIT :fts_limit
+            """
+        )
+        result = await self._session.execute(
+            sql, {"q": query, "site_id": site_id, "fts_limit": FTS_LIMIT}
+        )
+        scored: list[tuple[UUID, float]] = []
+        for chunk_id, score, heading, answer, aliases in result.all():
+            blob = f"{heading or ''} {answer or ''} {' '.join(aliases or [])}"
+            if contains_injection_marker(blob) or is_marketing_cta(answer or ""):
+                continue
+            scored.append((chunk_id, float(score or 0.0)))
+        return scored
 
     async def _dense(
         self, site_id: UUID, query_vector: list[float]

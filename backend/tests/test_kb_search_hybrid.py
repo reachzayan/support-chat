@@ -1,7 +1,7 @@
 import uuid
 
 from app.db import session_maker
-from app.services.kb_embedder import rrf_merge, unit_vector
+from app.services.kb_embedder import FakeEmbedder, rrf_merge, unit_vector
 from app.services.kb_search import KbSearch
 from tests.bot_fixtures import (
     EASY_BODY,
@@ -142,3 +142,89 @@ async def test_injection_marked_chunk_is_absent_from_hits(migrated_db) -> None:
             query_vector=None,
         )
     assert all(hit.id != poisoned.id for hit in hits)
+
+
+async def test_trigram_misspelling_uses_grounded_trgm_index(migrated_db) -> None:
+    from sqlalchemy import text
+
+    from app.services.kb_hybrid import HybridKbSearch
+    from tests.bot_fixtures import insert_site
+
+    async with session_maker()() as session:
+        site = await insert_site(session, "trgm-site", "Trigram Site")
+        faq = await insert_chunk(
+            session,
+            site,
+            "How quickly are results available?",
+            "Most negative results are reported within 24-48 hours.",
+            slug="trgm-timing",
+        )
+        await session.commit()
+        hits = await HybridKbSearch(session).search_with_deferred_embed(
+            FakeEmbedder(),
+            site.id,
+            "how quikly are ressults availble",
+        )
+        assert any(hit.id == faq.id for hit in hits)
+
+        await session.execute(text("SET LOCAL enable_seqscan = off"))
+        plan = (
+            await session.execute(
+                text(
+                    "EXPLAIN (FORMAT JSON) "
+                    "SELECT kb_chunks.id FROM kb_chunks "
+                    "WHERE lower("
+                    "coalesce(canonical_question, '') || ' ' || "
+                    "kb_aliases_as_text(aliases) || ' ' || "
+                    "coalesce(heading, '') || ' ' || "
+                    "coalesce(topic_label, '')"
+                    ") % lower(:q)"
+                ),
+                {"q": "how quikly are ressults availble"},
+            )
+        ).scalar_one()
+    plan_text = str(plan)
+    assert "ix_kb_chunks_grounded_trgm" in plan_text
+    assert "Bitmap Index Scan" in plan_text
+
+
+async def test_exact_canonical_match_skips_embedder(migrated_db) -> None:
+    from app.services.kb_hybrid import HybridKbSearch
+
+    class SpyEmbedder(FakeEmbedder):
+        def __init__(self) -> None:
+            super().__init__()
+            self.embed_query_calls = 0
+
+        async def embed_query(self, text: str):
+            self.embed_query_calls += 1
+            return await super().embed_query(text)
+
+    async with session_maker()() as session:
+        easy, _bg, _timing, _fcra = await seed_brand_articles(session)
+        chunk = await insert_chunk(
+            session,
+            easy,
+            "What DOT services do you provide?",
+            "We support DOT drug and alcohol testing.",
+            slug="exact-skip-embed",
+        )
+        chunk.canonical_question = "What DOT services do you provide?"
+        await session.commit()
+
+        spy = SpyEmbedder()
+        hits = await HybridKbSearch(session).search_with_deferred_embed(
+            spy,
+            easy.id,
+            "What DOT services do you provide?",
+        )
+        assert [hit.id for hit in hits] == [chunk.id]
+        assert spy.embed_query_calls == 0
+
+        spy_miss = SpyEmbedder()
+        await HybridKbSearch(session).search_with_deferred_embed(
+            spy_miss,
+            easy.id,
+            "zzzz not a real FAQ about quantum banana shipping",
+        )
+        assert spy_miss.embed_query_calls == 1
