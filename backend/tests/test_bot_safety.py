@@ -129,6 +129,7 @@ async def test_ssn_like_body_is_stored_once_stays_bot_and_warning_omits_digits(
 async def test_unattributed_model_text_is_not_persisted_as_a_bot_row(
     migrated_db,
 ) -> None:
+    from app.chat.outcome_copy import TECH_FAIL_HUMAN
     from app.llm.bot_responder import BotResponder
 
     async def complete(_prompt: str) -> str:
@@ -149,7 +150,9 @@ async def test_unattributed_model_text_is_not_persisted_as_a_bot_row(
         await service.run_bot_turn(conversation.id, result.generation_id)
         conversation_id = conversation.id
 
-    assert message_count(conversation_id, role="bot", body=EASY_BODY) == 1
+    # Unattributed FAQ paste (no native citations) is rejected; safe failure copy is persisted.
+    assert message_count(conversation_id, role="bot", body=EASY_BODY) == 0
+    assert message_count(conversation_id, role="bot", body=TECH_FAIL_HUMAN) == 1
 
 
 def test_document_body_keeps_payload_text_out_of_system_rules() -> None:

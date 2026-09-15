@@ -160,9 +160,10 @@ async def _insert_faq(session, site, question: str, answer: str, *, kind: str = 
     return chunk
 
 
-async def test_background_section_is_answered_verbatim_without_the_model(migrated_db) -> None:
-    responder = RecordingResponder()
+async def test_background_section_is_answered_via_grounded_provider(migrated_db) -> None:
     body = "Complete your hiring by bundling background screening with drug testing."
+    paraphrase = "Yes. We bundle background screening with drug testing for hiring."
+    responder = RecordingResponder(answer=paraphrase)
     async with session_maker()() as session:
         easy, _bg, _timing, _fcra = await seed_brand_articles(session)
         chunk = await _insert_faq(
@@ -180,9 +181,9 @@ async def test_background_section_is_answered_verbatim_without_the_model(migrate
         )
 
     assert conversation_state(conversation_id) == "bot"
-    assert message_count(conversation_id, role="bot", body=body) == 1
+    assert message_count(conversation_id, role="bot", body=paraphrase) == 1
     assert message_count(conversation_id, role="system", body=WAITING_LINE) == 0
-    assert responder.calls == []
+    assert len(responder.calls) == 1
 
 
 async def test_services_overview_does_not_paste_dot_yes_faq(migrated_db) -> None:

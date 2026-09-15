@@ -1,3 +1,4 @@
+import time
 from base64 import urlsafe_b64decode, urlsafe_b64encode
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -17,6 +18,7 @@ from app.chat.outcome_copy import (
     DISENGAGE_LINE,
     KEEP_HELPING_LINE,
     OFF_TOPIC_LINE,
+    UNCITED_ADVISORY_SUFFIX,
     chitchat_reply,
     is_transfer_offer_body,
     transfer_offer_line,
@@ -60,16 +62,17 @@ from app.services.grounded_response import (
     ResponseDecision,
     ResponseOutcome,
     TurnContext,
-    extractive_fallback_decision,
-    technical_failure_decision,
+    _safe_technical_failure,
+    contextual_grounding_query,
 )
 from app.services.handoff_service import EscalationReason, HandoffService, HandoffTrigger
 from app.services.kb_embedder import default_embedder
-from app.services.kb_search import KbSearch
+from app.services.kb_hybrid import HybridKbSearch
 from app.services.pii_redactor import redact_for_log
 from app.services.rate_limit import RateLimiter, RateLimitExceeded, RateLimitUnavailable
 from app.services.refusal_library import lookup_refusal
 from app.services.route_decision import live_snapshots_for_site
+from app.settings import get_settings
 
 log = structlog.get_logger("chat")
 
@@ -559,7 +562,7 @@ class ConversationService:
     ) -> CommandResult | None:
         moment = now or datetime.now(UTC)
         conversation = await self._conversations.lock_by_id(conversation_id)
-        if not self._idle_due(conversation, moment):
+        if not await self._idle_due(conversation, moment):
             await self._session.commit()
             return None
         site = await self._sites.get_by_id(conversation.site_id)
@@ -576,7 +579,7 @@ class ConversationService:
         rows = await self._conversations.list_expired_open(cutoff, limit=limit)
         results: list[CommandResult] = []
         for conversation in rows:
-            if not self._idle_due(conversation, moment):
+            if not await self._idle_due(conversation, moment):
                 continue
             site = await self._sites.get_by_id(conversation.site_id)
             site_key = site.key if site is not None else ""
@@ -585,10 +588,14 @@ class ConversationService:
         await self._session.commit()
         return results
 
-    def _idle_due(self, conversation: Conversation | None, moment: datetime) -> bool:
+    async def _idle_due(self, conversation: Conversation | None, moment: datetime) -> bool:
         if conversation is None or conversation.state not in OPEN_IDLE_STATES:
             return False
         if conversation.active_generation_id is not None:
+            return False
+        if conversation.state == "prechat" and not await self._messages.has_visitor_message(
+            conversation.id
+        ):
             return False
         last_at = conversation.last_message_at
         if last_at is None:
@@ -787,6 +794,10 @@ class ConversationService:
             return True
         if prior.role != "bot":
             return False
+        from app.chat.outcome_copy import INSUFFICIENT_HUMAN, TECH_FAIL_HUMAN
+
+        if prior.body in {INSUFFICIENT_HUMAN, TECH_FAIL_HUMAN}:
+            return True
         lowered = (prior.body or "").casefold()
         return "specialist" in lowered and (
             "would you like" in lowered
@@ -794,6 +805,7 @@ class ConversationService:
             or "confirm it" in lowered
             or "take it from here" in lowered
             or "can take over" in lowered
+            or "pick up here" in lowered
         )
 
     async def _latest_offered_question(self, conversation_id: UUID) -> str:
@@ -875,12 +887,47 @@ class ConversationService:
         site: Site,
         visitor_text: str,
     ) -> CommandResult | None:
-        evidence = await self._retrieve_evidence(site.id, visitor_text)
+        from app.services.full_context import prior_provider_messages
+
+        stage_timings: dict[str, int] = {
+            "history_load": 0,
+            "lexical_retrieve": 0,
+            "trigram_retrieve": 0,
+            "dense_retrieve": 0,
+            "embed": 0,
+            "provider": 0,
+            "citation_parse": 0,
+            "validate": 0,
+            "liveness_check": 0,
+            "commit": 0,
+        }
+        started = time.perf_counter_ns()
+        window = await self._messages.list_recent_roles(
+            conversation_id,
+            {"visitor", "bot"},
+            get_settings().conversation_window_size,
+        )
+        prior_messages = tuple(prior_provider_messages(window, visitor_text))
+        stage_timings["history_load"] = (time.perf_counter_ns() - started) // 1_000_000
+        retrieval_text = contextual_grounding_query(visitor_text, prior_messages)
+        evidence = await self._retrieve_evidence(site.id, retrieval_text, stage_timings)
         complete = getattr(self._responder, "generate_grounded_draft", None)
+        # BotResponder(complete=...) test doubles still use the legacy adapter.
+        if complete is not None and getattr(self._responder, "_complete", None) is not None:
+            complete = None
         if complete is None:
 
             async def complete(turn, units):
                 return await self._legacy_grounded_draft(site, turn, units)
+
+        else:
+            original_complete = complete
+
+            async def complete(turn, units):
+                try:
+                    return await original_complete(turn, units, stage_timings=stage_timings)
+                except TypeError:
+                    return await original_complete(turn, units)
 
         capability_labels = await self._capability_labels(site.id)
         decision = await GroundedResponseEngine(complete=complete).respond(
@@ -888,22 +935,44 @@ class ConversationService:
                 visitor_text=visitor_text,
                 evidence=evidence,
                 site_name=site.name,
+                grounding_text=retrieval_text,
+                prior_messages=prior_messages,
                 site_capability_labels=capability_labels,
                 off_brand_blocklist=tuple(getattr(site, "off_brand_blocklist", None) or ()),
-            )
+            ),
+            stage_timings=stage_timings,
         )
+        if decision.reason_code == "uncited_advisory":
+            claude_chars = len(decision.body)
+            if decision.body.endswith(UNCITED_ADVISORY_SUFFIX):
+                claude_chars = len(decision.body[: -len(UNCITED_ADVISORY_SUFFIX)].rstrip())
+            log.info(
+                "grounded_uncited_advisory",
+                body_chars=claude_chars,
+                request_id=decision.request_id,
+                generation_id=str(generation_id),
+            )
         return await self._finalize_grounded_decision(
-            conversation_id, generation_id, site.id, decision, visitor_text=visitor_text
+            conversation_id,
+            generation_id,
+            site.id,
+            decision,
+            visitor_text=visitor_text,
+            stage_timings=stage_timings,
         )
 
-    async def _retrieve_evidence(self, site_id: UUID, visitor_text: str) -> list[EvidenceUnit]:
-        query_vector: list[float] | None = None
-        try:
-            query_vector = await self._embedder.embed_query(visitor_text)
-        except Exception:
-            # Hybrid still runs FTS / exact / overview without dense; do not tech_fail the turn.
-            log.info("grounded_embed_failed", site_id=str(site_id))
-        hits = await KbSearch(self._session).search(site_id, visitor_text, query_vector)
+    async def _retrieve_evidence(
+        self,
+        site_id: UUID,
+        visitor_text: str,
+        stage_timings: dict[str, int] | None = None,
+    ) -> list[EvidenceUnit]:
+        hits = await HybridKbSearch(self._session).search_with_deferred_embed(
+            self._embedder,
+            site_id,
+            visitor_text,
+            stage_timings=stage_timings,
+        )
         return [
             EvidenceUnit(
                 id=hit.id,
@@ -959,7 +1028,7 @@ class ConversationService:
                 site=site,
                 visitor_text=turn.visitor_text,
                 documents=documents,
-                prior_messages=[],
+                prior_messages=list(turn.prior_messages),
             )
         else:
             generate = getattr(self._responder, "generate", None)
@@ -978,8 +1047,10 @@ class ConversationService:
                 continue
             start = body.find(unit.answer_verbatim)
             if start < 0:
-                continue
-            end = start + len(unit.answer_verbatim)
+                start = 0
+                end = len(body)
+            else:
+                end = start + len(unit.answer_verbatim)
             citations.append(
                 Citation(
                     chunk_id=unit.id,
@@ -1003,7 +1074,9 @@ class ConversationService:
         decision: ResponseDecision,
         *,
         visitor_text: str = "",
+        stage_timings: dict[str, int] | None = None,
     ) -> CommandResult | None:
+        timings = stage_timings if stage_timings is not None else {}
         conversation, site, site_key = await self._lock_finalize_context(
             conversation_id, generation_id, site_id
         )
@@ -1016,16 +1089,17 @@ class ConversationService:
         ):
             await self._session.commit()
             return CommandResult(conversation=conversation, site_key=site_key)
-        if decision.citations and not await self._grounded_citations_live(
-            site.id, decision.citations
-        ):
-            live_units = await self._live_units_for_citations(site.id, decision.citations)
-            if live_units:
-                decision = extractive_fallback_decision(live_units)
-            else:
-                decision = technical_failure_decision()
+        if decision.citations:
+            started = time.perf_counter_ns()
+            live = await self._grounded_citations_live(site.id, decision.citations)
+            timings["liveness_check"] = (time.perf_counter_ns() - started) // 1_000_000
+            if not live:
+                decision = _safe_technical_failure(reason="stale_source")
+        else:
+            timings.setdefault("liveness_check", 0)
         conversation.active_generation_id = None
         system_reason = self._system_reason_for(decision)
+        started = time.perf_counter_ns()
         if decision.citations:
             conversation.state = _transition(conversation.state, "bot_reply")
             source_ids = list(dict.fromkeys(citation.chunk_id for citation in decision.citations))
@@ -1071,19 +1145,42 @@ class ConversationService:
             ResponseOutcome.KNOWLEDGE_GAP,
             ResponseOutcome.PARTIAL_ANSWER,
             ResponseOutcome.BOUNDARY,
+            ResponseOutcome.SYNTHESIZED_ANSWER,
             None,
         }:
             # Persist the offer as bot speech; consent on the next visitor turn.
             conversation.fallback_count = max(conversation.fallback_count, 1)
         await self._session.commit()
+        timings["commit"] = (time.perf_counter_ns() - started) // 1_000_000
+        snapshot_id = None
+        if decision.citations and decision.citations[0].snapshot_id is not None:
+            snapshot_id = str(decision.citations[0].snapshot_id)
+        log.info(
+            "grounded_turn",
+            conversation_id=str(conversation_id),
+            generation_id=str(generation_id),
+            site_id=str(site_id),
+            snapshot_id=snapshot_id,
+            request_id=decision.request_id,
+            outcome=decision.outcome.value if decision.outcome is not None else None,
+            reason=decision.reason_code,
+            citation_count=len(decision.citations),
+            stage_timings=dict(timings),
+        )
         return CommandResult(conversation=conversation, site_key=site_key, message=inserted)
 
     @staticmethod
     def _system_reason_for(decision: ResponseDecision) -> str:
+        if decision.reason_code == "tech_fail" or (
+            decision.provider_status is ProviderStatus.TECH_FAIL
+        ):
+            return "tech_fail"
+        if decision.reason_code == "uncited_advisory":
+            return "uncited_advisory"
+        if decision.reason_code == "grounding_reject":
+            return "insufficient"
         if decision.citations:
             return "answer"
-        if decision.provider_status is ProviderStatus.TECH_FAIL and decision.outcome is None:
-            return "tech_fail"
         if decision.outcome is ResponseOutcome.CLARIFICATION:
             return "clarify"
         if decision.outcome is ResponseOutcome.BOUNDARY:
@@ -1094,49 +1191,34 @@ class ConversationService:
             return "insufficient"
         return "insufficient"
 
-    async def _live_units_for_citations(
-        self, site_id: UUID, citations: list[Citation]
-    ) -> list[EvidenceUnit]:
-        units: list[EvidenceUnit] = []
-        for citation in citations:
-            chunk = await self._chunks.get_enabled_for_site(site_id, citation.chunk_id)
-            if chunk is None or chunk.snapshot_id != citation.snapshot_id:
-                continue
-            page = await self._session.get(KbPage, chunk.page_id)
-            units.append(
-                EvidenceUnit(
-                    id=chunk.id,
-                    canonical_question=chunk.canonical_question,
-                    aliases=tuple(chunk.aliases or []),
-                    topic_label=chunk.topic_label or chunk.heading,
-                    answer_verbatim=chunk.answer_verbatim,
-                    source_title=page.title if page is not None else citation.source_title,
-                    source_url=page.url if page is not None else citation.source_url,
-                    snapshot_id=chunk.snapshot_id,
-                    risk_class=chunk.risk_class,
-                    answer_mode=chunk.answer_mode,
-                )
-            )
-        return units
-
     async def _grounded_citations_live(self, site_id: UUID, citations: list[Citation]) -> bool:
-        from app.services.pii_redactor import redact_for_model
-
-        for citation in citations:
-            chunk = await self._chunks.get_enabled_for_site(site_id, citation.chunk_id)
-            if chunk is None or chunk.snapshot_id != citation.snapshot_id:
+        cited_chunk_ids = list(dict.fromkeys(citation.chunk_id for citation in citations))
+        if not cited_chunk_ids:
+            return True
+        result = await self._session.execute(
+            select(KbChunk.id, KbChunk.snapshot_id, KbChunk.site_id)
+            .join(KbPage, KbPage.id == KbChunk.page_id)
+            .join(KbSnapshot, KbSnapshot.id == KbChunk.snapshot_id)
+            .join(KbSource, KbSource.id == KbPage.source_id)
+            .where(
+                KbChunk.id.in_(cited_chunk_ids),
+                KbChunk.site_id == site_id,
+                KbChunk.enabled.is_(True),
+                KbPage.enabled.is_(True),
+                KbSource.enabled.is_(True),
+                KbSnapshot.state == "live",
+            )
+        )
+        rows = result.all()
+        by_id = {row.id: row for row in rows}
+        if set(cited_chunk_ids) - set(by_id):
+            return False
+        citation_by_chunk = {citation.chunk_id: citation for citation in citations}
+        for chunk_id, row in by_id.items():
+            if row.site_id != site_id:
                 return False
-            # Commit-time gate: chunk still live for this site/snapshot. Do not
-            # re-slice unredacted DB text against redacted model offsets.
-            source = redact_for_model(chunk.answer_verbatim)
-            if citation.source_start < 0 or citation.source_end > len(source):
-                # Extractive citations use full unredacted spans; accept those too.
-                if (
-                    citation.source_start == 0
-                    and citation.source_end == len(chunk.answer_verbatim)
-                    and citation.cited_text == chunk.answer_verbatim
-                ):
-                    continue
+            citation = citation_by_chunk.get(chunk_id)
+            if citation is None or row.snapshot_id != citation.snapshot_id:
                 return False
         return True
 

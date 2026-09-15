@@ -1,14 +1,14 @@
 """Typed, evidence-first decisions for visitor-facing bot replies.
 
-This module intentionally owns the only server-authored non-factual copy.  A
-provider may contribute a cited answer, but it cannot turn a question into a
-clarification or a policy response.
+Claude authors normal answers. Deterministic code owns hard control cases,
+narrow validation invariants, and safe failure copy — never extractive FAQ prose.
 """
 # ruff: noqa: RUF001
 
 from __future__ import annotations
 
 import re
+import time
 import unicodedata
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
@@ -17,21 +17,25 @@ from uuid import UUID
 
 import structlog
 
-from app.chat.outcome_copy import TECH_FAIL_HUMAN
+from app.chat.outcome_copy import (
+    INSUFFICIENT_HUMAN,
+    TECH_FAIL_HUMAN,
+    UNCITED_ADVISORY_SUFFIX,
+    handoff_copy,
+)
 from app.llm.intent import is_disengage_request, is_unrelated_request
 from app.llm.safety_markers import contains_injection_marker
 from app.services import output_validator
-from app.services.kb_tokens import WEAK_OVERLAP, tokenize
-from app.services.pii_redactor import redact_for_model
+from app.services.kb_tokens import tokenize
 
 log = structlog.get_logger("grounded_response")
 
 
 class ResponseOutcome(StrEnum):
-    EXACT_ANSWER = "exact_answer"
+    EXACT_ANSWER = "exact_answer"  # Deprecated: no longer produced by respond().
     SYNTHESIZED_ANSWER = "synthesized_answer"
     CLARIFICATION = "clarification"
-    PARTIAL_ANSWER = "partial_answer"
+    PARTIAL_ANSWER = "partial_answer"  # Schema constant; retained for migration 20 check.
     KNOWLEDGE_GAP = "knowledge_gap"
     BOUNDARY = "boundary"
 
@@ -76,6 +80,8 @@ class TurnContext:
     visitor_text: str
     evidence: list[EvidenceUnit]
     site_name: str = ""
+    grounding_text: str | None = None
+    prior_messages: tuple[dict[str, str], ...] = ()
     explicit_human_request: bool = False
     sensitive: bool = False
     site_capability_labels: tuple[str, ...] = ()
@@ -90,12 +96,14 @@ class ResponseDecision:
     citations: list[Citation] = field(default_factory=list)
     offer_handoff: bool = False
     provider_status: ProviderStatus = ProviderStatus.NOT_USED
+    request_id: str | None = None
 
 
 @dataclass(frozen=True)
 class ModelDraft:
     body: str
     citations: list[Citation]
+    request_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -116,19 +124,8 @@ _NUMERIC_CLAIM_RE = re.compile(
     re.I,
 )
 _REGULATED_RE = re.compile(r"\b(?:DOT|USDOT|FMCSA|FCRA|HIPAA|49\s+CFR\s+Part\s+40)\b", re.I)
-_VERBATIM_RISKS = frozenset({"credential", "pricing", "timing", "legal"})
 _MAX_CHARS = 1500
 _SOFT_WORD_CAP = 120
-
-
-def technical_failure_decision() -> ResponseDecision:
-    return ResponseDecision(
-        None,
-        "tech_fail",
-        TECH_FAIL_HUMAN,
-        offer_handoff=True,
-        provider_status=ProviderStatus.TECH_FAIL,
-    )
 
 
 def normalized_question(value: str) -> str:
@@ -137,144 +134,26 @@ def normalized_question(value: str) -> str:
     return " ".join(normalized.split())
 
 
+def contextual_grounding_query(
+    visitor_text: str, prior_messages: tuple[dict[str, str], ...]
+) -> str:
+    """Give short follow-ups enough context for retrieval without rewriting normal turns."""
+    if len(tokenize(visitor_text)) >= 3:
+        return visitor_text
+    for message in reversed(prior_messages):
+        if message.get("role") != "assistant":
+            continue
+        body = (message.get("content") or "").strip()
+        if body.endswith("?"):
+            return f"{body} {visitor_text}"
+        break
+    return visitor_text
+
+
 def _eligible(units: list[EvidenceUnit]) -> list[EvidenceUnit]:
     return [
         unit for unit in units if unit.enabled and unit.live and unit.answer_mode != "human_only"
     ]
-
-
-def _matches(unit: EvidenceUnit, question: str) -> bool:
-    normalized = normalized_question(question)
-    candidates = [unit.canonical_question or "", *unit.aliases]
-    return normalized in {normalized_question(candidate) for candidate in candidates if candidate}
-
-
-def _material_terms(question: str) -> set[str]:
-    return {term for term in tokenize(question) if term not in WEAK_OVERLAP}
-
-
-def _unit_terms(unit: EvidenceUnit) -> set[str]:
-    return set(
-        tokenize(
-            " ".join(
-                (
-                    unit.canonical_question or "",
-                    " ".join(unit.aliases),
-                    unit.topic_label,
-                    unit.answer_verbatim,
-                )
-            )
-        )
-    )
-
-
-def _relevant(units: list[EvidenceUnit], question: str) -> list[EvidenceUnit]:
-    query_terms = _material_terms(question)
-    if not query_terms:
-        # Overview / filler-only questions: keep retrieved units as-is.
-        return list(units)[:5]
-    scored: list[tuple[int, EvidenceUnit]] = []
-    for unit in units:
-        unit_terms = _unit_terms(unit)
-        score = sum(1 for term in query_terms if term in unit_terms)
-        if score:
-            scored.append((score, unit))
-    if scored:
-        return [
-            unit
-            for _score, unit in sorted(scored, key=lambda pair: (-pair[0], str(pair[1].id)))[:5]
-        ]
-    return list(units)[:5]
-
-
-def _coverage(units: list[EvidenceUnit], question: str) -> tuple[set[str], set[str]]:
-    query_terms = _material_terms(question)
-    if not query_terms:
-        return set(), set()
-    covered: set[str] = set()
-    evidence_terms: set[str] = set()
-    for unit in units:
-        evidence_terms |= _unit_terms(unit)
-    for term in query_terms:
-        if term in evidence_terms:
-            covered.add(term)
-    return covered, query_terms - covered
-
-
-def _topic_clusters(units: list[EvidenceUnit]) -> list[str]:
-    labels = list(dict.fromkeys(unit.topic_label for unit in units if unit.topic_label))
-    return labels
-
-
-def _missing_concept(question: str, missing: set[str]) -> str:
-    """Build a readable unsupported-concept phrase from the visitor's words."""
-    raw = (question or "").strip()
-    lowered = raw.casefold()
-    if missing & {"registered", "registration"} and "registered with" in lowered:
-        match = re.search(
-            r"(?:are\s+you\s+|whether\s+(?:you\s+are\s+)?)?(registered with \w+)",
-            raw,
-            re.I,
-        )
-        if match:
-            return f"whether you are {match.group(1)}"
-    if " and " in lowered:
-        for clause in re.split(r"\band\b", raw, flags=re.I):
-            clause_terms = set(tokenize(clause))
-            if clause_terms & missing:
-                cleaned = " ".join(clause.strip().rstrip("?").split())
-                if cleaned:
-                    return cleaned
-    return ", ".join(sorted(missing)[:3]) or "that detail"
-
-
-def _capabilities(context: TurnContext) -> list[str]:
-    labels = list(context.site_capability_labels) or [unit.topic_label for unit in context.evidence]
-    return list(dict.fromkeys(label for label in labels if label))[:3]
-
-
-def _citation(unit: EvidenceUnit, *, response_start: int, response_end: int) -> Citation:
-    return Citation(
-        chunk_id=unit.id,
-        snapshot_id=unit.snapshot_id,
-        response_start=response_start,
-        response_end=response_end,
-        source_start=0,
-        source_end=len(unit.answer_verbatim),
-        cited_text=unit.answer_verbatim,
-        source_title=unit.source_title,
-        source_url=unit.source_url,
-    )
-
-
-def extractive_fallback_decision(units: list[EvidenceUnit]) -> ResponseDecision:
-    bodies: list[str] = []
-    citations: list[Citation] = []
-    offset = 0
-    for index, unit in enumerate(units):
-        text = unit.answer_verbatim.strip()
-        if not text:
-            continue
-        if index and bodies:
-            offset += 2  # blank line separator
-        start = offset
-        end = start + len(text)
-        bodies.append(text)
-        citations.append(_citation(unit, response_start=start, response_end=end))
-        offset = end
-    if not bodies:
-        return technical_failure_decision()
-    return ResponseDecision(
-        ResponseOutcome.SYNTHESIZED_ANSWER,
-        "extractive_fallback",
-        "\n\n".join(bodies),
-        citations=citations,
-        provider_status=ProviderStatus.TECH_FAIL,
-    )
-
-
-def _document_for_citation(unit: EvidenceUnit) -> str:
-    return redact_for_model(unit.answer_verbatim)
 
 
 def _numbers_are_verbatim(body: str, cited_text: str) -> bool:
@@ -291,186 +170,176 @@ def _regulated_literals_are_verbatim(body: str, cited_text: str) -> bool:
     )
 
 
-def _strip_trailing_question(body: str) -> str | None:
-    text = body.strip()
-    if "?" not in text:
-        return text
-    # Prefer a factual prefix before the first question mark sentence.
-    parts = re.split(r"(?<=[.!])\s+(?=[A-Z])", text)
-    kept: list[str] = []
-    for part in parts:
-        if "?" in part:
-            break
-        kept.append(part)
-    prefix = " ".join(kept).strip()
-    return prefix or None
+def _is_clarifying_only(body: str) -> bool:
+    text = (body or "").strip()
+    if not text.endswith("?"):
+        return False
+    # Single sentence: no internal sentence terminators before the final '?'.
+    without_final = text[:-1].rstrip()
+    if re.search(r"[.!?]", without_final):
+        return False
+    if _NUMERIC_CLAIM_RE.search(text) or _REGULATED_RE.search(text):
+        return False
+    return True
+
+
+def _normalize_copy(value: str) -> str:
+    return " ".join((value or "").casefold().split())
+
+
+def _is_source_copy(body: str, units: list[EvidenceUnit]) -> bool:
+    norm = _normalize_copy(body)
+    verbatim = {_normalize_copy(unit.answer_verbatim) for unit in units if unit.answer_verbatim}
+    verbatim.discard("")
+    if not verbatim:
+        return False
+    if norm in verbatim:
+        return True
+    fragments = [fragment for fragment in re.split(r"\n\s*\n", body) if fragment.strip()]
+    if len(fragments) < 2:
+        return False
+    return all(_normalize_copy(fragment) in verbatim for fragment in fragments)
+
+
+def _safe_sensitive_handoff() -> ResponseDecision:
+    return ResponseDecision(
+        ResponseOutcome.BOUNDARY,
+        "policy_sensitive",
+        "For privacy and compliance, a specialist needs to help with that question.",
+        offer_handoff=True,
+    )
+
+
+def _direct_handoff() -> ResponseDecision:
+    return ResponseDecision(
+        ResponseOutcome.BOUNDARY,
+        "visitor_request",
+        "",
+        offer_handoff=True,
+    )
+
+
+def _safe_no_evidence_handoff() -> ResponseDecision:
+    return ResponseDecision(
+        ResponseOutcome.KNOWLEDGE_GAP,
+        "no_evidence",
+        handoff_copy("retrieval_miss", human_enabled=True),
+        offer_handoff=True,
+    )
+
+
+def _safe_technical_failure(
+    reason: str = "tech_fail", *, request_id: str | None = None
+) -> ResponseDecision:
+    log.info("grounded_tech_fail", reason=reason)
+    return ResponseDecision(
+        ResponseOutcome.KNOWLEDGE_GAP,
+        "tech_fail",
+        TECH_FAIL_HUMAN,
+        offer_handoff=True,
+        provider_status=ProviderStatus.TECH_FAIL,
+        request_id=request_id,
+    )
+
+
+def _safe_grounding_reject(reason: str, *, request_id: str | None = None) -> ResponseDecision:
+    """Visitor-safe copy when the provider succeeded but draft validation failed.
+
+    Specific reject reason is already on the grounded_draft_reject log line.
+    """
+    del reason
+    return ResponseDecision(
+        ResponseOutcome.KNOWLEDGE_GAP,
+        "grounding_reject",
+        INSUFFICIENT_HUMAN,
+        offer_handoff=True,
+        provider_status=ProviderStatus.OK,
+        request_id=request_id,
+    )
+
+
+def _uncited_advisory(draft: ModelDraft) -> ResponseDecision:
+    body = draft.body.strip()
+    return ResponseDecision(
+        ResponseOutcome.SYNTHESIZED_ANSWER,
+        "uncited_advisory",
+        f"{body}\n\n{UNCITED_ADVISORY_SUFFIX}",
+        citations=[],
+        offer_handoff=True,
+        provider_status=ProviderStatus.OK,
+        request_id=draft.request_id,
+    )
+
+
+def _elapsed_ms(started_ns: int) -> int:
+    return (time.perf_counter_ns() - started_ns) // 1_000_000
 
 
 class GroundedResponseEngine:
     def __init__(self, complete: Provider | None = None) -> None:
         self._complete = complete
 
-    async def respond(self, turn: TurnContext) -> ResponseDecision:  # noqa: C901
+    async def respond(  # noqa: C901
+        self,
+        turn: TurnContext,
+        stage_timings: dict[str, int] | None = None,
+    ) -> ResponseDecision:
+        timings = stage_timings if stage_timings is not None else {}
         question = (turn.visitor_text or "").strip()
+        grounding_question = (turn.grounding_text or question).strip()
         if turn.sensitive:
-            return ResponseDecision(
-                ResponseOutcome.BOUNDARY,
-                "policy_sensitive",
-                "For privacy and compliance, a specialist needs to help with that question.",
-                offer_handoff=True,
-            )
+            return _safe_sensitive_handoff()
         if turn.explicit_human_request:
-            return ResponseDecision(
-                ResponseOutcome.BOUNDARY,
-                "visitor_request",
-                "",
-                offer_handoff=True,
-            )
+            return _direct_handoff()
         if _ABUSE_RE.search(question):
             return self._boundary("abuse")
         if contains_injection_marker(question) or is_disengage_request(question):
             return self._boundary("prompt_injection")
         if _FRUSTRATION_RE.search(question):
             return self._boundary("frustration")
-        evidence_tokens: set[str] = set()
-        for unit in turn.evidence:
-            evidence_tokens |= _unit_terms(unit)
-        # Off-topic only when retrieval found no site affinity. Retrieved units mean
-        # the question stays in the answerability path (gap/partial/synth).
-        if not turn.evidence and is_unrelated_request(question):
-            return self._boundary("off_topic", turn)
-        if turn.evidence and is_unrelated_request(
-            question, evidence_tokens=evidence_tokens or None
-        ):
-            # Still block clear non-business prompts even if weak hits arrived.
-            from app.services.kb_tokens import is_overview_query
 
-            if not evidence_tokens & set(tokenize(question)) and not is_overview_query(question):
-                # Credential / registration follow-ups with neighboring evidence are gaps,
-                # not off-topic.
-                if not set(tokenize(question)) & {
-                    "usdot",
-                    "registered",
-                    "registration",
-                    "dot",
-                    "number",
-                    "credential",
-                }:
-                    return self._boundary("off_topic", turn)
+        evidence = _eligible(turn.evidence)
+        if not evidence:
+            if not turn.evidence and is_unrelated_request(grounding_question):
+                return self._boundary("off_topic", turn)
+            return _safe_no_evidence_handoff()
 
-        units = _eligible(turn.evidence)
-        exact = [unit for unit in units if _matches(unit, question)]
-        if len(exact) == 1:
-            unit = exact[0]
-            body = unit.answer_verbatim.strip()
-            return ResponseDecision(
-                ResponseOutcome.EXACT_ANSWER,
-                None,
-                body,
-                citations=[_citation(unit, response_start=0, response_end=len(body))],
-            )
-
-        relevant = _relevant(units, question)
-        all_clusters = _topic_clusters(turn.evidence)
-        clusters = _topic_clusters(relevant) or all_clusters
-        if self._needs_clarification(
-            question, all_clusters if len(all_clusters) >= 2 else clusters, turn
-        ):
-            labels = (all_clusters if len(all_clusters) >= 2 else clusters)[:3]
-            if len(labels) < 2:
-                labels = list(turn.site_capability_labels)[:3] or ["screening services"]
-            return ResponseDecision(
-                ResponseOutcome.CLARIFICATION,
-                "ambiguous_topic",
-                f"Are you asking about {' or '.join(labels)}?",
-            )
-
-        covered, missing = _coverage(relevant, question)
-        from app.services.kb_tokens import is_overview_query
-
-        if is_overview_query(question) and relevant:
-            covered, missing = set(tokenize(question)), set()
-        # Registration/credential asks with no supporting eligible unit are gaps,
-        # even when a human_only unit exists in the corpus.
-        if missing and not covered:
-            return self._gap(turn)
-        if missing and covered:
-            supported = [unit for unit in relevant if _unit_terms(unit) & covered] or relevant[:1]
-            return await self._partial(turn, supported, missing)
-        if missing and not covered:
-            return self._gap(turn)
-        if not relevant:
-            return self._gap(turn)
         if self._complete is None:
-            return extractive_fallback_decision(relevant[:5])
+            return _safe_technical_failure(reason="provider_unavailable")
         try:
-            draft = await self._complete(turn, relevant[:5])
+            draft = await self._complete(turn, evidence[:5])
         except Exception:
-            return extractive_fallback_decision(relevant[:5])
-        if draft is None:
-            return extractive_fallback_decision(relevant[:5])
-        validation = self._validate_draft(draft, relevant, turn)
+            return _safe_technical_failure(reason="provider_exception")
+        if draft is None or not draft.body.strip():
+            return _safe_technical_failure(reason="empty_draft")
+
+        body = draft.body.strip()
+        # Uncited non-clarifying answers: keep source_copy as a hard reject, otherwise
+        # show Claude's body with an advisory suffix (do not tech-fail).
+        if not draft.citations and not _is_clarifying_only(body):
+            if _is_source_copy(body, evidence):
+                self._reject("source_copy", draft)
+                return _safe_grounding_reject(reason="source_copy", request_id=draft.request_id)
+            return _uncited_advisory(draft)
+
+        started = time.perf_counter_ns()
+        validation = self._validate_draft(draft, evidence, turn)
+        timings["validate"] = _elapsed_ms(started)
         if not validation.accepted or validation.draft is None:
-            return extractive_fallback_decision(relevant[:5])
+            return _safe_grounding_reject(reason=validation.reason, request_id=draft.request_id)
+
+        outcome = (
+            ResponseOutcome.CLARIFICATION
+            if _is_clarifying_only(validation.draft.body)
+            else ResponseOutcome.SYNTHESIZED_ANSWER
+        )
         return ResponseDecision(
-            ResponseOutcome.SYNTHESIZED_ANSWER,
+            outcome,
             None,
             validation.draft.body,
             citations=validation.draft.citations,
             provider_status=ProviderStatus.OK,
-        )
-
-    async def _partial(
-        self,
-        turn: TurnContext,
-        supported: list[EvidenceUnit],
-        missing: set[str],
-    ) -> ResponseDecision:
-        missing_label = _missing_concept(turn.visitor_text, missing)
-        limitation = (
-            f"I can’t verify {missing_label} from the available site information. "
-            "Would you like a specialist to confirm it?"
-        )
-        factual = ""
-        citations: list[Citation] = []
-        if self._complete is not None:
-            try:
-                draft = await self._complete(turn, supported[:5])
-            except Exception:
-                draft = None
-            if draft is not None:
-                validation = self._validate_draft(draft, supported, turn)
-                if validation.accepted and validation.draft is not None:
-                    factual = validation.draft.body.strip()
-                    citations = list(validation.draft.citations)
-        if not factual:
-            extractive = extractive_fallback_decision(supported)
-            if not extractive.citations:
-                return self._gap(turn)
-            factual = extractive.body
-            citations = extractive.citations
-            # Citations cover only the factual portion.
-            for index, citation in enumerate(citations):
-                if citation.response_end > len(factual):
-                    citations[index] = Citation(
-                        chunk_id=citation.chunk_id,
-                        snapshot_id=citation.snapshot_id,
-                        response_start=min(citation.response_start, len(factual)),
-                        response_end=min(citation.response_end, len(factual)),
-                        source_start=citation.source_start,
-                        source_end=citation.source_end,
-                        cited_text=citation.cited_text,
-                        source_title=citation.source_title,
-                        source_url=citation.source_url,
-                    )
-        body = f"{factual}\n\n{limitation}"
-        return ResponseDecision(
-            ResponseOutcome.PARTIAL_ANSWER,
-            "partial_coverage",
-            body,
-            citations=citations,
-            offer_handoff=True,
-            provider_status=ProviderStatus.OK if citations else ProviderStatus.TECH_FAIL,
+            request_id=validation.draft.request_id,
         )
 
     def _validate_draft(  # noqa: C901
@@ -487,21 +356,13 @@ class GroundedResponseEngine:
             return self._reject("over_length", draft)
         if len(body.split()) > _SOFT_WORD_CAP:
             return self._reject("over_words", draft)
-        if "?" in body:
-            stripped = _strip_trailing_question(body)
-            if stripped is None:
-                return self._reject("model_question", draft)
-            # Keep citations that still fall inside the stripped prefix.
-            kept = [
-                citation
-                for citation in citations
-                if 0 <= citation.response_start < citation.response_end <= len(stripped)
-            ]
-            body = stripped
-            citations = kept
-            draft = ModelDraft(body=body, citations=citations)
-        if not citations:
-            return self._reject("no_citation", draft)
+
+        clarifying = _is_clarifying_only(body)
+        # Citation absence for non-clarifying drafts is handled in respond() as
+        # uncited_advisory (or source_copy). Do not reject no_citation here.
+
+        if _is_source_copy(body, units):
+            return self._reject("source_copy", draft)
 
         allowed = {unit.id: unit for unit in units}
         cited_text = ""
@@ -511,22 +372,10 @@ class GroundedResponseEngine:
                 return self._reject("cite_off_corpus", draft)
             if citation.snapshot_id != unit.snapshot_id:
                 return self._reject("snapshot_mismatch", draft)
-            if citation.source_title != unit.source_title or citation.source_url != unit.source_url:
-                return self._reject("metadata_mismatch", draft)
-            source = _document_for_citation(unit)
-            if citation.source_start < 0 or citation.source_end > len(source):
-                return self._reject("source_offset", draft)
-            if citation.cited_text != source[citation.source_start : citation.source_end]:
-                return self._reject("cited_text_mismatch", draft)
             if citation.response_start < 0 or citation.response_end > len(body):
                 return self._reject("response_offset", draft)
-            requires_verbatim = (
-                unit.answer_mode == "verbatim_only" or unit.risk_class in _VERBATIM_RISKS
-            )
-            if requires_verbatim and (
-                body[citation.response_start : citation.response_end] != citation.cited_text
-            ):
-                return self._reject("verbatim_required", draft)
+            if citation.response_start > citation.response_end:
+                return self._reject("response_offset", draft)
             cited_text += citation.cited_text
 
         if not _numbers_are_verbatim(body, cited_text):
@@ -543,12 +392,15 @@ class GroundedResponseEngine:
             cited_answer_text=cited_text,
             off_brand_blocklist=list(turn.off_brand_blocklist),
             max_chars=_MAX_CHARS,
+            curated_refusal=clarifying,
         )
         if not safety.accepted:
             return self._reject(safety.reason, draft)
 
         return DraftValidation(
-            accepted=True, reason="accepted", draft=ModelDraft(body=body, citations=citations)
+            accepted=True,
+            reason="accepted",
+            draft=ModelDraft(body=body, citations=citations, request_id=draft.request_id),
         )
 
     @staticmethod
@@ -560,32 +412,6 @@ class GroundedResponseEngine:
             body_chars=len(draft.body or ""),
         )
         return DraftValidation(accepted=False, reason=reason)
-
-    @staticmethod
-    def _needs_clarification(
-        question: str,
-        clusters: list[str],
-        turn: TurnContext,
-    ) -> bool:
-        del turn
-        from app.services.kb_tokens import is_overview_query
-
-        if len(clusters) < 2:
-            return False
-        if is_overview_query(question):
-            return False
-        terms = set(tokenize(question))
-        if not terms:
-            return False
-        # Parent-concept questions that do not name a single topic (e.g. registration).
-        if terms & {"registered", "registration", "usdot"}:
-            return True
-        scored = sorted((len(terms & set(tokenize(label))), label) for label in clusters)
-        scored.reverse()
-        if scored[0][0] <= 0:
-            return False
-        # Ambiguous when the top two topic labels share the same overlap score.
-        return scored[0][0] == scored[1][0]
 
     @staticmethod
     def _boundary(reason: str, turn: TurnContext | None = None) -> ResponseDecision:
@@ -601,12 +427,24 @@ class GroundedResponseEngine:
             )
         elif reason == "prompt_injection":
             body = (
-                "I can help with screening and compliance questions using site information. "
-                "What would you like to know?"
+                "I can help with screening and compliance questions. What would you like to know?"
             )
         else:
-            labels = _capabilities(turn) if turn is not None else []
-            topic = ", ".join(labels) if labels else "screening and compliance"
+            labels: list[str] = []
+            if turn is not None:
+                for label in turn.site_capability_labels or [
+                    unit.topic_label for unit in turn.evidence
+                ]:
+                    display = (label or "").strip().rstrip("?!.")
+                    if not display:
+                        continue
+                    if re.match(
+                        r"^(?:are|can|do|does|how|is|what|when|where|why|who)\b", display, re.I
+                    ):
+                        continue
+                    if display not in labels:
+                        labels.append(display)
+            topic = ", ".join(labels[:3]) if labels else "screening and compliance"
             topic = topic.rstrip("?")
             body = (
                 "I can help with screening and compliance questions. "
@@ -617,16 +455,4 @@ class GroundedResponseEngine:
             reason,
             body,
             offer_handoff=reason == "frustration",
-        )
-
-    @staticmethod
-    def _gap(turn: TurnContext) -> ResponseDecision:
-        labels = _capabilities(turn)
-        capabilities = ", ".join(labels) if labels else "screening and compliance services"
-        return ResponseDecision(
-            ResponseOutcome.KNOWLEDGE_GAP,
-            "no_evidence",
-            "I don’t have verified information for that specific question. "
-            f"I can help with {capabilities}, or connect you with a specialist.",
-            offer_handoff=True,
         )
