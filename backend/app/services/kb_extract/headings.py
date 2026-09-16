@@ -6,7 +6,7 @@ from app.services.kb_extract.text import locator_for, tidy_text
 from app.services.kb_extract.types import EvidenceUnit
 
 HEADING_LEVEL = {"h1": 1, "h2": 2, "h3": 3, "h4": 4}
-SKIP_TAGS = {"nav", "footer", "header", "script", "style", "form", "noscript", "iframe"}
+SKIP_TAGS = {"nav", "footer", "script", "style", "form", "noscript", "iframe"}
 
 
 def parse_headings(tree: _Element, url: str) -> list[EvidenceUnit]:
@@ -62,21 +62,42 @@ def _inside_skip(node: _Element) -> bool:
 
 def _collect_until(heading: _Element, stop: _Element | None) -> str:
     parts: list[str] = []
-    node = heading.getnext()
-    while node is not None and node is not stop:
+    seen_lists: set[int] = set()
+    heading_tail = tidy_text(heading.tail or "")
+    if heading_tail:
+        parts.append(heading_tail)
+    for node in heading.xpath("./following::*"):
+        if stop is not None and node is stop:
+            break
         if isinstance(node.tag, str) and node.tag in HEADING_LEVEL:
             break
-        if isinstance(node.tag, str) and node.tag in SKIP_TAGS:
-            node = node.getnext()
-            continue
-        if isinstance(node.tag, str) and node.tag in {"ul", "ol"}:
-            for item in node.xpath("./li"):
-                text = tidy_text(item.text_content())
-                if text:
-                    parts.append(f"- {text}")
-        else:
-            text = tidy_text(node.text_content()) if hasattr(node, "text_content") else ""
-            if text:
-                parts.append(text)
-        node = node.getnext()
+        chunk = _chunk_for_node(node, seen_lists)
+        if chunk:
+            parts.append(chunk)
+        tail = _tail_outside_chrome(node)
+        if tail:
+            parts.append(tail)
     return "\n\n".join(parts)
+
+
+def _tail_outside_chrome(node: _Element) -> str | None:
+    if _inside_skip(node):
+        return None
+    if isinstance(node.tag, str) and node.tag in SKIP_TAGS:
+        return None
+    return tidy_text(node.tail or "") or None
+
+
+def _chunk_for_node(node: _Element, seen_lists: set[int]) -> str | None:
+    if not isinstance(node.tag, str) or node.tag in SKIP_TAGS or _inside_skip(node):
+        return None
+    if node.tag in {"ul", "ol"}:
+        identity = id(node)
+        if identity in seen_lists:
+            return None
+        seen_lists.add(identity)
+        items = [tidy_text(item.text_content()) for item in node.xpath("./li")]
+        return "\n".join(f"- {text}" for text in items if text) or None
+    if node.tag == "li":
+        return None
+    return tidy_text(node.text or "") or None

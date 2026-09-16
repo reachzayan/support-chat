@@ -11,7 +11,6 @@ DROP_TAGS = (
     "style",
     "nav",
     "footer",
-    "header",
     "noscript",
     "iframe",
     "svg",
@@ -20,13 +19,23 @@ DROP_TAGS = (
 MIN_CHARS = 40
 
 
+def _html_without_chrome(html: str) -> str:
+    try:
+        tree = lxml_html.fromstring(html)
+    except Exception:
+        return html
+    _strip_noise_nodes(tree)
+    return lxml_html.tostring(tree, encoding="unicode")
+
+
 def parse_fallback(html: str, url: str) -> list[EvidenceUnit]:
+    cleaned = _html_without_chrome(html)
     text = trafilatura.extract(
-        html, include_comments=False, include_tables=True, favor_recall=False
+        cleaned, include_comments=False, include_tables=True, favor_recall=True
     )
-    title = _title(html)
+    title = _title(cleaned)
     if text is None:
-        text, title = _fallback_dom(html)
+        text, title = _fallback_dom(cleaned)
     if text is None:
         return []
     cleaned = tidy_text(text)
