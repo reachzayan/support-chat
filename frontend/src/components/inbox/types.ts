@@ -64,6 +64,7 @@ export type ConversationDetail = {
 export type CannedReply = {
   shortcut: string
   body: string
+  scope: "general" | "website"
 }
 
 export type InboxFilter = "human" | "bot" | "queued" | "closed"

@@ -19,6 +19,10 @@ export const SITE = {
   human_enabled: true,
   callback_window_hours: 24,
   off_brand_blocklist: [],
+  contact_info: [],
+  website_url: "https://sample-site.example.com",
+  widget_installed: null,
+  widget_checked_at: null,
 }
 
 export const listPayload = {

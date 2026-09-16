@@ -6,6 +6,7 @@ import { renderWithProviders } from "@/test/render"
 
 import { KnowledgeConsole } from "./knowledge-console"
 import {
+  CHUNK_ID,
   diffRaceFetch,
   FCRA_TITLE,
   knowledgeFetch,
@@ -122,11 +123,38 @@ describe("knowledge page detail", () => {
     )
     await user.click(screen.getByRole("button", { name: PAGE_TITLE }))
     await waitFor(() => expect(screen.getByText("Indexed copy")).toBeInTheDocument())
+    const trigger = screen.getByText("Indexed copy").closest("button")
+    if (trigger === null) {
+      throw new Error("expected indexed copy trigger")
+    }
+    expect(trigger).toHaveAttribute("aria-expanded", "false")
+    await user.click(trigger)
     const panel = screen.getByText("Indexed copy").closest("section")
     if (panel === null) {
       throw new Error("expected indexed copy panel")
     }
-    expect(within(panel).getByText(TIMING_BODY)).toBeInTheDocument()
+    await waitFor(() => expect(within(panel).getByText(TIMING_BODY)).toBeInTheDocument())
+  })
+
+  test("an administrator can exclude one retrieved answer without removing it", async () => {
+    const user = userEvent.setup()
+    renderWithProviders(<KnowledgeConsole isAdmin={true} displayName="Riley Chen" />)
+    await user.click(await screen.findByRole("button", { name: PAGE_TITLE }))
+    await user.click(await screen.findByRole("button", { name: /Retrieved answers/ }))
+    const include = await screen.findByRole("switch", { name: "Include Turnaround in answers" })
+    await user.click(include)
+    await waitFor(() => expect(screen.getByText("0 of 1 enabled")).toBeInTheDocument())
+    expect(screen.getAllByText(TIMING_BODY)).not.toHaveLength(0)
+    const patch = vi
+      .mocked(fetch)
+      .mock.calls.find(
+        (call) =>
+          String(call[0]) === `/api/kb-chunks/${CHUNK_ID}` &&
+          (call[1] as RequestInit)?.method === "PATCH",
+      )
+    expect(patch).toBeDefined()
+    if (!patch) throw new Error("expected retrieved-answer update request")
+    expect(JSON.parse(String((patch[1] as RequestInit).body))).toEqual({ enabled: false })
   })
 })
 

@@ -1,5 +1,7 @@
 "use client"
 
+/* oxlint-disable react-perf/jsx-no-new-function-as-prop -- Retrieved-answer controls close over each immutable chunk record. */
+
 import { ChevronDown, ExternalLink, Globe2, Plus, RefreshCw } from "lucide-react"
 import { useCallback, useMemo, useState, type ChangeEvent } from "react"
 
@@ -10,6 +12,7 @@ import type {
   SiteRecord,
 } from "@/components/admin/staff-api"
 import { StaffHeader } from "@/components/admin/staff-nav"
+import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import {
@@ -28,6 +31,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
+import { Switch } from "@/components/ui/switch"
 import { Textarea } from "@/components/ui/textarea"
 import { safeHttpUrl } from "@/lib/ua"
 
@@ -39,6 +43,7 @@ type KnowledgeConsoleProps = {
   displayName: string
 }
 
+// oxlint-disable-next-line eslint/max-lines-per-function -- This screen coordinates the existing knowledge state hook and its visible sections.
 export const KnowledgeConsole = ({ isAdmin, displayName: _displayName }: KnowledgeConsoleProps) => {
   const state = useKnowledgeState(isAdmin)
   const { handleAdd } = state
@@ -96,7 +101,14 @@ export const KnowledgeConsole = ({ isAdmin, displayName: _displayName }: Knowled
             onSelect={state.handleSelectPage}
             onToggle={state.handleTogglePage}
           />
-          <IndexedCopy detail={state.pageDetail} />
+          <IndexedCopy
+            detail={state.pageDetail}
+            isAdmin={isAdmin}
+            pendingIds={state.chunkPendingIds}
+            errors={state.chunkErrors}
+            notice={state.chunkNotice}
+            onToggle={state.handleToggleChunk}
+          />
         </div>
       </div>
       {isAdmin ? (
@@ -738,7 +750,20 @@ const IndexedCopyHeader = ({ detail }: { detail: KbPageDetail }) => (
   </div>
 )
 
-const IndexedCopyChunks = ({ detail }: { detail: KbPageDetail }) => {
+// oxlint-disable-next-line eslint/max-lines-per-function -- Chunk toggles and admin actions share one detail panel state boundary.
+const IndexedCopyChunks = ({
+  detail,
+  isAdmin,
+  pendingIds,
+  errors,
+  onToggle,
+}: {
+  detail: KbPageDetail
+  isAdmin: boolean
+  pendingIds: string[]
+  errors: Record<string, string>
+  onToggle: (pageId: string, chunk: KbPageDetail["chunks"][number]) => Promise<void>
+}) => {
   if (detail.chunks.length === 0) {
     return null
   }
@@ -757,7 +782,8 @@ const IndexedCopyChunks = ({ detail }: { detail: KbPageDetail }) => {
             <span className="text-navy text-sm font-extrabold dark:text-white">
               Retrieved answers{" "}
               <span className="text-mute font-mono text-xs dark:text-white/55">
-                ({detail.chunks.length})
+                {detail.chunks.filter((chunk) => chunk.enabled).length} of {detail.chunks.length}{" "}
+                enabled
               </span>
             </span>
           </span>
@@ -770,18 +796,52 @@ const IndexedCopyChunks = ({ detail }: { detail: KbPageDetail }) => {
       <CollapsibleContent className="border-line mt-0 flex flex-col gap-3 border-t px-5 pt-4 pb-5 dark:border-white/10">
         {detail.chunks.map((chunk) => (
           <article
-            key={`${chunk.ordinal}-${chunk.heading}`}
-            className="border-line bg-ice text-ink hover:border-steel/40 hover:bg-ice-2 rounded-[10px] border px-4 py-4 transition-[background-color,border-color] duration-150 dark:border-white/10 dark:bg-[#12171E] dark:text-white dark:hover:bg-[#18222D]"
+            key={chunk.id}
+            className={`border-line text-ink hover:border-steel/40 rounded-[10px] border px-4 py-4 transition-[opacity,background-color,border-color] duration-150 dark:border-white/10 dark:text-white ${chunk.enabled ? "bg-ice hover:bg-ice-2 dark:bg-[#12171E] dark:hover:bg-[#18222D]" : "bg-ice/60 opacity-70 dark:bg-[#12171E]/70"}`}
           >
             <div className="flex items-start justify-between gap-3">
               <h3 className="text-navy text-sm font-bold dark:text-white">{chunk.heading}</h3>
-              <span className="text-mute shrink-0 font-mono text-[10px] dark:text-white/55">
-                #{chunk.ordinal + 1}
-              </span>
+              <div className="flex shrink-0 items-center gap-2">
+                <Badge
+                  className={
+                    chunk.enabled
+                      ? "bg-[#E8F5EE] text-[#247A4D] dark:bg-[#163627] dark:text-[#8DDEAE]"
+                      : "bg-ice-2 text-mute dark:bg-white/10 dark:text-white/60"
+                  }
+                >
+                  {chunk.enabled ? "Enabled" : "Disabled"}
+                </Badge>
+                <span className="text-mute font-mono text-[10px] dark:text-white/55">
+                  #{chunk.ordinal + 1}
+                </span>
+              </div>
             </div>
             <p className="text-ink mt-2 text-sm leading-6 whitespace-pre-wrap dark:text-white/80">
               {chunk.body}
             </p>
+            {isAdmin ? (
+              <div className="border-line mt-4 flex items-center justify-between gap-3 border-t pt-3 dark:border-white/10">
+                <span className="text-mute text-xs font-bold">Include in answers</span>
+                <Switch
+                  aria-label={`Include ${chunk.heading} in answers`}
+                  checked={chunk.enabled}
+                  disabled={pendingIds.includes(chunk.id)}
+                  onCheckedChange={() => void onToggle(detail.id, chunk)}
+                />
+              </div>
+            ) : null}
+            {errors[chunk.id] ? (
+              <p className="text-ember mt-3 text-xs" role="alert">
+                {errors[chunk.id]}{" "}
+                <button
+                  type="button"
+                  className="underline underline-offset-2"
+                  onClick={() => void onToggle(detail.id, chunk)}
+                >
+                  Retry
+                </button>
+              </p>
+            ) : null}
           </article>
         ))}
       </CollapsibleContent>
@@ -789,7 +849,21 @@ const IndexedCopyChunks = ({ detail }: { detail: KbPageDetail }) => {
   )
 }
 
-const IndexedCopy = ({ detail }: { detail: KbPageDetail | null }) => {
+const IndexedCopy = ({
+  detail,
+  isAdmin,
+  pendingIds,
+  errors,
+  notice,
+  onToggle,
+}: {
+  detail: KbPageDetail | null
+  isAdmin: boolean
+  pendingIds: string[]
+  errors: Record<string, string>
+  notice: string
+  onToggle: (pageId: string, chunk: KbPageDetail["chunks"][number]) => Promise<void>
+}) => {
   if (detail === null) {
     return null
   }
@@ -799,9 +873,14 @@ const IndexedCopy = ({ detail }: { detail: KbPageDetail | null }) => {
       {detail.skip_reason ? (
         <p className="text-ember mt-4 text-sm">Skipped: {detail.skip_reason}</p>
       ) : null}
+      {notice ? (
+        <output className="border-ember/20 bg-ember/10 text-ember mt-4 block rounded-[8px] border px-3 py-2 text-sm">
+          {notice}
+        </output>
+      ) : null}
       <div className="flex flex-col gap-3">
         <Collapsible
-          defaultOpen
+          defaultOpen={false}
           className="border-line bg-paper overflow-hidden rounded-[12px] border shadow-[0_8px_24px_rgba(13,31,58,0.08)] dark:border-[#202833] dark:bg-[#07090C] dark:shadow-[0_8px_24px_rgba(0,0,0,0.24)]"
         >
           <CollapsibleTrigger className="group text-ink hover:bg-ice-2 px-5 py-4 transition-[background-color,border-color,transform] duration-[180ms] ease-[cubic-bezier(0.23,1,0.32,1)] active:scale-[0.997] dark:text-white dark:hover:bg-[#12171E]">
@@ -825,7 +904,13 @@ const IndexedCopy = ({ detail }: { detail: KbPageDetail | null }) => {
             <p className="text-ink whitespace-pre-wrap dark:text-white/80">{detail.content_text}</p>
           </CollapsibleContent>
         </Collapsible>
-        <IndexedCopyChunks detail={detail} />
+        <IndexedCopyChunks
+          detail={detail}
+          isAdmin={isAdmin}
+          pendingIds={pendingIds}
+          errors={errors}
+          onToggle={onToggle}
+        />
       </div>
     </section>
   )

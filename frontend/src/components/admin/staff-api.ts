@@ -25,6 +25,10 @@ export type SiteRecord = {
   human_enabled: boolean
   callback_window_hours?: number
   off_brand_blocklist?: string[]
+  website_url: string | null
+  widget_installed: boolean | null
+  widget_checked_at: string | null
+  contact_info?: string[]
 }
 
 export type HandoffOutcomeRecord = {
@@ -134,6 +138,7 @@ export type KbPageRecord = {
 }
 
 export type KbChunkRecord = {
+  id: string
   ordinal: number
   heading: string
   body: string

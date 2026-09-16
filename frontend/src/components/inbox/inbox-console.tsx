@@ -1,6 +1,5 @@
 "use client"
 
-import { StaffHeader } from "@/components/admin/staff-nav"
 import type { StaffUser } from "@/lib/auth-client"
 
 import { ConversationList } from "./conversation-list"
@@ -57,7 +56,6 @@ const InboxShell = ({ userId, isAdmin, inbox }: InboxShellProps) => {
   return (
     <div className="view-transition-enter bg-ice flex min-h-0 min-w-0 flex-1 flex-col lg:overflow-hidden">
       <div id="main-content" className="flex min-h-0 min-w-0 flex-1 flex-col">
-        <StaffHeader title="Inbox" />
         <div className="flex min-h-0 flex-1 flex-col lg:flex-row">
           <ConversationList
             filter={inbox.filter}

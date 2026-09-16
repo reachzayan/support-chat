@@ -1,7 +1,6 @@
 "use client"
 
-export const FIELD =
-  "border-line bg-ice text-ink focus-visible:ring-steel mt-1.5 w-full rounded-[8px] border px-3 py-2.5 text-sm outline-none focus-visible:ring-2 disabled:cursor-not-allowed disabled:opacity-60"
+export const FIELD = "bg-ice"
 export const LABEL = "text-mute text-[10px] font-bold tracking-[0.12em] uppercase"
 export const BTN_PRIMARY =
   "micro-interaction bg-ember text-white dark:text-navy-deep hover:bg-ember-mid focus-visible:ring-steel cursor-pointer rounded-[8px] px-3 py-2 text-xs font-bold focus-visible:ring-2 focus-visible:outline-none"
@@ -10,19 +9,28 @@ export const BTN_SECONDARY =
 export const BTN_DANGER =
   "border-ember/30 bg-ember/10 text-ember hover:bg-ember/15 focus-visible:ring-steel cursor-pointer rounded-[8px] border px-3 py-2 text-xs font-bold focus-visible:ring-2 focus-visible:outline-none"
 
-export const COLUMNS = ["Name", "Site key", "Public key", "Origins", "Routing", "Actions"] as const
+export const COLUMNS = [
+  "Name",
+  "Site key",
+  "Public key",
+  "Origins",
+  "Routing",
+  "Installed",
+  "Actions",
+] as const
 export type ColumnLabel = (typeof COLUMNS)[number]
 
 export const DEFAULT_WIDTHS: Record<ColumnLabel, number> = {
-  Name: 22,
-  "Site key": 14,
-  "Public key": 16,
-  Origins: 12,
+  Name: 20,
+  "Site key": 12,
+  "Public key": 14,
+  Origins: 10,
   Routing: 16,
+  Installed: 14,
   Actions: 20,
 }
 
-export const WIDTHS_KEY = "supportchat.sites.column-widths.v3"
+export const WIDTHS_KEY = "supportchat.sites.column-widths.v4"
 export const MIN_WIDTH = 8
 export const MAX_WIDTH = 48
 export const WIDTH_STEP = 2

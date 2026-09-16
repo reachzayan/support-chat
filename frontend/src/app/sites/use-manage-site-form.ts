@@ -8,6 +8,26 @@ import { copyManageSnippet, saveManageSite } from "./manage-site-save"
 import { useLeaveGuard } from "./sites-form"
 import { useSiteValidation } from "./use-site-validation"
 
+const isManageSiteDirty = (
+  site: SiteRecord,
+  fields: {
+    name: string
+    greeting: string
+    privacyUrl: string
+    websiteUrl: string
+    originsText: string
+    contactInfoText: string
+    windowHours: number
+  },
+) =>
+  fields.name !== site.name ||
+  fields.greeting !== site.greeting ||
+  fields.privacyUrl !== site.privacy_url ||
+  fields.websiteUrl !== (site.website_url ?? "") ||
+  fields.originsText !== site.origins.join("\n") ||
+  fields.contactInfoText !== (site.contact_info ?? []).join("\n") ||
+  fields.windowHours !== (site.callback_window_hours ?? 24)
+
 // oxlint-disable-next-line max-lines-per-function
 export const useManageSiteForm = (
   site: SiteRecord,
@@ -18,25 +38,26 @@ export const useManageSiteForm = (
   const [name, setName] = useState(site.name)
   const [greeting, setGreeting] = useState(site.greeting)
   const [privacyUrl, setPrivacyUrl] = useState(site.privacy_url)
+  const [websiteUrl, setWebsiteUrl] = useState(site.website_url ?? "")
   const [originsText, setOriginsText] = useState(site.origins.join("\n"))
+  const [contactInfoText, setContactInfoText] = useState((site.contact_info ?? []).join("\n"))
   const [windowHours, setWindowHours] = useState(site.callback_window_hours ?? 24)
   const [copyNotice, setCopyNotice] = useState<string | null>(null)
   const [errors, setErrors] = useState<Record<string, string>>({})
 
-  const dirty =
-    name !== site.name ||
-    greeting !== site.greeting ||
-    privacyUrl !== site.privacy_url ||
-    originsText !== site.origins.join("\n") ||
-    windowHours !== (site.callback_window_hours ?? 24)
+  const dirty = isManageSiteDirty(site, {
+    name,
+    greeting,
+    privacyUrl,
+    websiteUrl,
+    originsText,
+    contactInfoText,
+    windowHours,
+  })
 
   const { leaveOpen, requestClose, handleStay, handleLeave } = useLeaveGuard(dirty, onClose)
-  const { handleNameBlur, handlePrivacyBlur, handleOriginsBlur, validate } = useSiteValidation(
-    name,
-    privacyUrl,
-    originsText,
-    setErrors,
-  )
+  const { handleNameBlur, handlePrivacyBlur, handleOriginsBlur, handleWebsiteUrlBlur, validate } =
+    useSiteValidation(name, privacyUrl, originsText, websiteUrl, false, setErrors)
 
   const handleName = useCallback((event: ChangeEvent<HTMLInputElement>) => {
     setName(event.target.value)
@@ -47,8 +68,14 @@ export const useManageSiteForm = (
   const handlePrivacy = useCallback((event: ChangeEvent<HTMLInputElement>) => {
     setPrivacyUrl(event.target.value)
   }, [])
+  const handleWebsiteUrl = useCallback((event: ChangeEvent<HTMLInputElement>) => {
+    setWebsiteUrl(event.target.value)
+  }, [])
   const handleOrigins = useCallback((event: ChangeEvent<HTMLTextAreaElement>) => {
     setOriginsText(event.target.value)
+  }, [])
+  const handleContactInfo = useCallback((event: ChangeEvent<HTMLTextAreaElement>) => {
+    setContactInfoText(event.target.value)
   }, [])
   const handleWindow = useCallback((event: ChangeEvent<HTMLInputElement>) => {
     const next = Number(event.target.value)
@@ -76,11 +103,23 @@ export const useManageSiteForm = (
     }
     await saveManageSite(
       site.id,
-      { name, greeting, privacyUrl, originsText, windowHours },
+      { name, greeting, privacyUrl, websiteUrl, originsText, contactInfoText, windowHours },
       onSaved,
       onError,
     )
-  }, [greeting, name, onError, onSaved, originsText, privacyUrl, site.id, validate, windowHours])
+  }, [
+    contactInfoText,
+    greeting,
+    name,
+    onError,
+    onSaved,
+    originsText,
+    privacyUrl,
+    site.id,
+    validate,
+    websiteUrl,
+    windowHours,
+  ])
   const handleCopy = useCallback(async () => {
     await copyManageSnippet(site.snippet, setCopyNotice)
   }, [site.snippet])
@@ -89,7 +128,9 @@ export const useManageSiteForm = (
     name,
     greeting,
     privacyUrl,
+    websiteUrl,
     originsText,
+    contactInfoText,
     windowHours,
     errors,
     copyNotice,
@@ -100,10 +141,13 @@ export const useManageSiteForm = (
     handleName,
     handleGreeting,
     handlePrivacy,
+    handleWebsiteUrl,
     handleOrigins,
+    handleContactInfo,
     handleWindow,
     handleNameBlur,
     handlePrivacyBlur,
+    handleWebsiteUrlBlur,
     handleOriginsBlur,
     handleOpenChange,
     handleSave,

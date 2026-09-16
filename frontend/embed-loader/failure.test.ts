@@ -10,6 +10,7 @@ describe("loader failure copy", () => {
     document.body.innerHTML = ""
     vi.unstubAllGlobals()
     window.__supportchat = { siteKey: "demo", publicKey: "d".repeat(64) }
+    window.__supportchatInstalled = false
   })
 
   test("unreadable bootstrap shows the page-unavailable message and Retry", async () => {

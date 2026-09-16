@@ -1,6 +1,9 @@
+/* oxlint-disable react-perf/jsx-no-new-object-as-prop */
+
 "use client"
 
 import { ArrowUp } from "lucide-react"
+import { motion, useReducedMotion } from "motion/react"
 import { useCallback, useState, type ChangeEvent, type FormEvent } from "react"
 
 import { Button } from "@/components/ui/button"
@@ -14,6 +17,7 @@ type ComposerProps = {
 
 export const Composer = ({ disabled, sending, onSend }: ComposerProps) => {
   const [draft, setDraft] = useState("")
+  const reducedMotion = useReducedMotion()
   const canSend = !disabled && !sending && draft.trim() !== ""
   const handleDraftChange = useCallback((event: ChangeEvent<HTMLInputElement>) => {
     setDraft(event.target.value)
@@ -32,11 +36,17 @@ export const Composer = ({ disabled, sending, onSend }: ComposerProps) => {
   )
 
   return (
-    <form onSubmit={handleSubmit} className="border-line bg-paper border-t px-5 py-3.5">
+    <form onSubmit={handleSubmit} className="bg-transparent px-3 pt-2 pb-3">
       <label className="sr-only" htmlFor="supportchat-message">
         Message
       </label>
-      <div className="border-line focus-within:border-steel focus-within:ring-steel bg-ice flex min-h-14 items-center gap-2 rounded-full border px-3 py-2 transition-[border-color,box-shadow] duration-150 ease-out focus-within:ring-2">
+      <motion.div
+        layout
+        transition={
+          reducedMotion ? { duration: 0 } : { type: "spring", stiffness: 380, damping: 32 }
+        }
+        className="focus-within:border-steel/45 focus-within:ring-steel/25 flex min-h-14 items-center gap-2 rounded-[28px] border border-white/80 bg-white/80 px-3 py-2 shadow-[0_10px_30px_rgba(13,31,58,0.12)] backdrop-blur-xl transition-[border-color,box-shadow] duration-200 ease-out focus-within:ring-4"
+      >
         <Input
           id="supportchat-message"
           name="message"
@@ -53,12 +63,12 @@ export const Composer = ({ disabled, sending, onSend }: ComposerProps) => {
           type="submit"
           aria-label="Send"
           disabled={!canSend}
-          className="widget-send-button bg-steel hover:bg-navy disabled:bg-ember-soft focus-visible:ring-steel dark:text-navy-deep flex size-11 shrink-0 cursor-pointer items-center justify-center rounded-full text-white focus-visible:ring-2 focus-visible:outline-none disabled:cursor-not-allowed"
+          className="widget-send-button bg-ember hover:bg-ember-mid disabled:bg-ember-soft focus-visible:ring-ember/30 flex size-11 shrink-0 cursor-pointer items-center justify-center rounded-full text-white focus-visible:ring-4 focus-visible:outline-none disabled:cursor-not-allowed"
         >
           <ArrowUp aria-hidden="true" className="size-5" strokeWidth={2.4} />
           <span className="sr-only">Send</span>
         </Button>
-      </div>
+      </motion.div>
     </form>
   )
 }

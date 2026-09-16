@@ -1,6 +1,9 @@
+/* oxlint-disable react-perf/jsx-no-new-object-as-prop */
+
 "use client"
 
 import { Maximize2, Minimize2, RotateCcw, X } from "lucide-react"
+import { motion, useReducedMotion } from "motion/react"
 import {
   useCallback,
   useState,
@@ -9,7 +12,6 @@ import {
   type SyntheticEvent,
 } from "react"
 
-import { ThemeToggle } from "@/components/theme-toggle"
 import {
   WIDGET_DEFAULT_HEIGHT,
   WIDGET_DEFAULT_WIDTH,
@@ -55,7 +57,7 @@ type WidgetShellProps = {
 }
 
 const ICON_BUTTON =
-  "text-white/85 hover:bg-white/10 hover:text-white focus-visible:ring-paper flex size-9 cursor-pointer items-center justify-center rounded-[8px] transition-colors duration-150 focus-visible:ring-2 focus-visible:outline-none"
+  "bg-white/75 text-ink shadow-[0_6px_20px_rgba(13,31,58,0.10)] backdrop-blur-xl hover:bg-white hover:shadow-[0_10px_24px_rgba(13,31,58,0.14)] focus-visible:ring-steel flex size-10 cursor-pointer items-center justify-center rounded-full transition-[background-color,box-shadow,transform] duration-200 ease-out focus-visible:ring-2 focus-visible:outline-none active:scale-95"
 
 export const WidgetShell = ({ name, onClose, onReset, onResize, children }: WidgetShellProps) => {
   const displayName =
@@ -88,14 +90,14 @@ export const WidgetShell = ({ name, onClose, onReset, onResize, children }: Widg
       aria-label={displayName}
       onKeyDown={handleKeyDown}
       onCancel={handleCancel}
-      className="widget-enter bg-paper text-ink m-0 flex h-dvh max-h-none w-full max-w-none flex-col overflow-hidden rounded-[16px] border-0 p-0 font-sans outline-none"
+      className="widget-enter text-ink m-0 flex h-dvh max-h-none w-full max-w-none flex-col overflow-hidden rounded-[30px] border border-white/70 bg-white/78 p-0 font-sans shadow-[0_24px_70px_rgba(13,31,58,0.20)] backdrop-blur-2xl outline-none"
     >
-      <header className="border-navy-mid bg-navy-deep border-b px-5 py-4 text-white">
+      <header className="relative z-10 px-3 pt-3 pb-2">
         <WidgetTopbar name={displayName} onClose={onClose} onReset={onReset} onResize={onResize} />
       </header>
       <main className="flex min-h-0 min-w-0 flex-1 flex-col">{children}</main>
-      <footer className="border-line text-mute bg-paper flex items-center justify-center border-t px-5 py-3 text-center">
-        <p className="text-[11px] leading-4">
+      <footer className="text-mute flex items-center justify-center px-4 pt-1 pb-3 text-center">
+        <p className="rounded-full bg-white/65 px-3 py-1 text-[11px] leading-4 shadow-[0_4px_16px_rgba(13,31,58,0.05)] backdrop-blur-lg">
           AI responses may be incorrect. Do not share sensitive information.
         </p>
       </footer>
@@ -114,33 +116,44 @@ const WidgetTopbar = ({
   onReset: () => void
   onResize?: (size: WidgetSize) => void
 }) => {
+  const reducedMotion = useReducedMotion()
+
   return (
-    <div className="relative flex items-center justify-between">
-      <div className="flex min-w-0 items-center gap-3">
-        <div className="min-w-0">
-          <h1 className="truncate text-sm font-extrabold tracking-[-0.025em]">{name}</h1>
-          <p className="mt-0.5 flex items-center gap-1.5 text-[11px] text-white/65">
-            <span className="bg-ember-soft size-1.5 rounded-full" aria-hidden="true" />
+    <motion.div
+      layout
+      transition={reducedMotion ? { duration: 0 } : { type: "spring", stiffness: 360, damping: 32 }}
+      className="grid grid-cols-[2.5rem_minmax(0,1fr)_auto] items-start gap-2"
+    >
+      <div>{onResize ? <ResizeHandle onResize={onResize} /> : null}</div>
+      <motion.div
+        layout="position"
+        transition={
+          reducedMotion ? { duration: 0 } : { type: "spring", stiffness: 360, damping: 32 }
+        }
+        className="mx-auto max-w-[240px] min-w-0 rounded-[22px] bg-white/80 px-4 py-2 shadow-[0_10px_28px_rgba(13,31,58,0.13)] backdrop-blur-xl"
+      >
+        <div className="min-w-0 text-center">
+          <h1 className="truncate text-sm font-extrabold tracking-[-0.03em]">{name}</h1>
+          <p className="text-mute mt-0.5 text-[11px] font-medium whitespace-nowrap">
             Secure, assisted support
           </p>
         </div>
-      </div>
+      </motion.div>
       <div className="flex items-center gap-1">
-        {onResize ? <ResizeHandle onResize={onResize} /> : null}
-        <ThemeToggle compact />
         <button type="button" aria-label="Reset chat" onClick={onReset} className={ICON_BUTTON}>
-          <RotateCcw aria-hidden="true" className="size-5" strokeWidth={2.2} />
+          <RotateCcw aria-hidden="true" className="size-[18px]" strokeWidth={2.2} />
         </button>
         <button type="button" aria-label="Close chat" onClick={onClose} className={ICON_BUTTON}>
-          <X aria-hidden="true" className="size-6" strokeWidth={2.2} />
+          <X aria-hidden="true" className="size-5" strokeWidth={2.4} />
         </button>
       </div>
-    </div>
+    </motion.div>
   )
 }
 
 const ResizeHandle = ({ onResize }: { onResize: (size: WidgetSize) => void }) => {
   const [expanded, setExpanded] = useState(false)
+  const reducedMotion = useReducedMotion()
   const handleToggle = useCallback(() => {
     setExpanded((current) => {
       const next = !current
@@ -161,19 +174,19 @@ const ResizeHandle = ({ onResize }: { onResize: (size: WidgetSize) => void }) =>
       onClick={handleToggle}
       className={ICON_BUTTON}
     >
-      {expanded ? (
-        <Minimize2
-          aria-hidden="true"
-          className="size-5 transition-transform duration-200 ease-out"
-          strokeWidth={2.2}
-        />
-      ) : (
-        <Maximize2
-          aria-hidden="true"
-          className="size-5 transition-transform duration-200 ease-out"
-          strokeWidth={2.2}
-        />
-      )}
+      <motion.span
+        animate={{ rotate: expanded ? 180 : 0, scale: expanded ? 0.92 : 1 }}
+        transition={
+          reducedMotion ? { duration: 0 } : { type: "spring", stiffness: 420, damping: 28 }
+        }
+        className="flex"
+      >
+        {expanded ? (
+          <Minimize2 aria-hidden="true" className="size-[18px]" strokeWidth={2.2} />
+        ) : (
+          <Maximize2 aria-hidden="true" className="size-[18px]" strokeWidth={2.2} />
+        )}
+      </motion.span>
     </button>
   )
 }

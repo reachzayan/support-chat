@@ -40,6 +40,7 @@ describe("bootstrap expiry", () => {
     window.localStorage.clear()
     document.body.innerHTML = ""
     vi.unstubAllGlobals()
+    window.__supportchatInstalled = false
   })
 
   test("4401 rebootstrap posts the same-site resume token once", async () => {

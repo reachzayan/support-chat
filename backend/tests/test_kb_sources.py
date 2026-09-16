@@ -200,20 +200,20 @@ def test_get_page_returns_indexed_copy_and_chunks(client: TestClient) -> None:
         )
         session.add(snapshot)
         session.flush()
-        session.add(
-            KbChunk(
-                page_id=page.id,
-                site_id=site.id,
-                snapshot_id=snapshot.id,
-                ordinal=0,
-                heading=TIMING_TITLE,
-                body=TIMING_BODY,
-                answer_verbatim=TIMING_BODY,
-                enabled=True,
-            )
+        chunk = KbChunk(
+            page_id=page.id,
+            site_id=site.id,
+            snapshot_id=snapshot.id,
+            ordinal=0,
+            heading=TIMING_TITLE,
+            body=TIMING_BODY,
+            answer_verbatim=TIMING_BODY,
+            enabled=True,
         )
+        session.add(chunk)
         session.commit()
         page_id = str(page.id)
+        chunk_id = str(chunk.id)
     finally:
         session.close()
     detail = client.get(f"/api/kb-pages/{page_id}", headers=_auth(alex))
@@ -223,7 +223,13 @@ def test_get_page_returns_indexed_copy_and_chunks(client: TestClient) -> None:
     assert payload["content_text"] == TIMING_BODY
     assert payload["skip_reason"] is None
     assert payload["chunks"] == [
-        {"ordinal": 0, "heading": TIMING_TITLE, "body": TIMING_BODY, "enabled": True}
+        {
+            "id": chunk_id,
+            "ordinal": 0,
+            "heading": TIMING_TITLE,
+            "body": TIMING_BODY,
+            "enabled": True,
+        }
     ]
 
 

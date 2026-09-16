@@ -51,6 +51,7 @@ def test_allowed_host_bootstrap_returns_widget_config_and_scoped_token(
         "privacy_url": DEMO_PRIVACY,
         "bot_enabled": True,
         "human_enabled": True,
+        "contact_info": [],
     }
     assert body["resume_token"]
     claims = decode_widget_token(body["bootstrap_token"])

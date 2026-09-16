@@ -21,6 +21,7 @@ describe("site-keyed resume storage", () => {
     window.localStorage.clear()
     document.body.innerHTML = ""
     vi.unstubAllGlobals()
+    window.__supportchatInstalled = false
   })
 
   test("Sample Services bootstrap does not send an SampleSite token", async () => {

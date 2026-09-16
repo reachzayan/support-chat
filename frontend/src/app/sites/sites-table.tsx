@@ -1,5 +1,6 @@
 "use client"
 
+import { RefreshCw } from "lucide-react"
 import { useCallback, useEffect, useMemo, useState } from "react"
 
 import type { SiteRecord } from "@/components/admin/staff-api"
@@ -54,7 +55,70 @@ const SitesColumnHeader = ({
   )
 }
 
-const SiteRow = ({ site, onManage }: { site: SiteRecord; onManage: (siteId: string) => void }) => {
+const InstalledCell = ({
+  site,
+  isAdmin,
+  checking,
+  onCheckInstall,
+}: {
+  site: SiteRecord
+  isAdmin: boolean
+  checking: boolean
+  onCheckInstall: (siteId: string) => void
+}) => {
+  const handleRefresh = useCallback(() => onCheckInstall(site.id), [onCheckInstall, site.id])
+
+  if (!site.website_url) {
+    return <span className="text-mute text-xs">No website URL</span>
+  }
+
+  const pillClass =
+    site.widget_installed === true
+      ? "bg-steel/10 text-steel"
+      : site.widget_installed === false
+        ? "bg-ember/10 text-ember"
+        : "bg-ice text-mute"
+  const pillLabel =
+    site.widget_installed === true
+      ? "Installed"
+      : site.widget_installed === false
+        ? "Not installed"
+        : "Not checked"
+
+  return (
+    <div className="flex items-center gap-1.5">
+      <span className={`rounded-[6px] px-1.5 py-0.5 text-[10px] font-bold ${pillClass}`}>
+        {pillLabel}
+      </span>
+      {isAdmin ? (
+        <button
+          type="button"
+          onClick={handleRefresh}
+          disabled={checking}
+          aria-label={`Recheck install status for ${site.name}`}
+          title="Recheck install status"
+          className="text-mute hover:text-steel focus-visible:ring-steel cursor-pointer rounded-[6px] p-1 focus-visible:ring-2 focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          <RefreshCw className={`size-3.5 ${checking ? "animate-spin" : ""}`} />
+        </button>
+      ) : null}
+    </div>
+  )
+}
+
+const SiteRow = ({
+  site,
+  isAdmin,
+  onManage,
+  checking,
+  onCheckInstall,
+}: {
+  site: SiteRecord
+  isAdmin: boolean
+  onManage: (siteId: string) => void
+  checking: boolean
+  onCheckInstall: (siteId: string) => void
+}) => {
   const [copied, setCopied] = useState(false)
   const publicPreview = `${site.public_key.slice(0, 6)}…${site.public_key.slice(-4)}`
   const originLabel = site.origins.length === 1 ? "1 origin" : `${site.origins.length} origins`
@@ -99,6 +163,14 @@ const SiteRow = ({ site, onManage }: { site: SiteRecord; onManage: (siteId: stri
           </span>
         </div>
       </td>
+      <td className="px-3 py-2.5" aria-label="Widget install status">
+        <InstalledCell
+          site={site}
+          isAdmin={isAdmin}
+          checking={checking}
+          onCheckInstall={onCheckInstall}
+        />
+      </td>
       <td className="px-3 py-2.5">
         <div className="flex flex-nowrap items-center justify-end gap-1.5">
           <button
@@ -120,10 +192,16 @@ const SiteRow = ({ site, onManage }: { site: SiteRecord; onManage: (siteId: stri
 
 export const SitesTable = ({
   sites,
+  isAdmin,
   onManage,
+  checkingIds,
+  onCheckInstall,
 }: {
   sites: SiteRecord[]
+  isAdmin: boolean
   onManage: (siteId: string) => void
+  checkingIds: string[]
+  onCheckInstall: (siteId: string) => void
 }) => {
   const { widths, total, handleResizeStart, handleResizeKeyDown, handleResizeReset } =
     useSitesColumnWidths()
@@ -164,7 +242,14 @@ export const SitesTable = ({
         </thead>
         <tbody>
           {sites.map((site) => (
-            <SiteRow key={site.id} site={site} onManage={onManage} />
+            <SiteRow
+              key={site.id}
+              site={site}
+              isAdmin={isAdmin}
+              onManage={onManage}
+              checking={checkingIds.includes(site.id)}
+              onCheckInstall={onCheckInstall}
+            />
           ))}
         </tbody>
       </table>

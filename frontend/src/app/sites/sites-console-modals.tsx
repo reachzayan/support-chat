@@ -26,7 +26,7 @@ export const SitesConsoleModals = ({
 }) => (
   <>
     {modal === "add" ? (
-      <AddSiteModal isAdmin={isAdmin} onClose={onClose} onCreated={onCreated} />
+      <AddSiteModal isAdmin={isAdmin} onClose={onClose} onCreated={onCreated} onSaved={onSaved} />
     ) : null}
     {activeSite && modal === "manage" ? (
       <ManageSiteModal

@@ -10,6 +10,7 @@ describe("host isolation", () => {
     window.localStorage.clear()
     document.body.innerHTML = ""
     vi.unstubAllGlobals()
+    window.__supportchatInstalled = false
   })
 
   test("hostile host CSS cannot reach transcript text in the host document", async () => {

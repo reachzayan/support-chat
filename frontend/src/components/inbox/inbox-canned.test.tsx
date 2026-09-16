@@ -1,6 +1,7 @@
 import { screen, waitFor } from "@testing-library/react"
 import { beforeEach, describe, expect, test } from "vitest"
 
+import { expandCanned } from "./agent-composer"
 import {
   ALEX,
   CONVO_ID,
@@ -48,5 +49,22 @@ describe("inbox canned replies", () => {
     await user.type(otherComposer, "#hours")
     await user.keyboard("{Tab}")
     expect(otherComposer).toHaveValue("#hours")
+  })
+
+  test("expandCanned matches a shortcut regardless of the case the agent typed", () => {
+    const canned = [{ shortcut: "hours", body: HOURS_BODY, scope: "website" as const }]
+    expect(expandCanned("#Hours", canned)).toBe(HOURS_BODY)
+    expect(expandCanned("#HOURS", canned)).toBe(HOURS_BODY)
+  })
+
+  test("picker inserts an editable canned response without sending a message frame", async () => {
+    const user = await openQueuedAda()
+    await waitFor(() => expect(FakeSocket.instances.length).toBe(1))
+    emitAlexJoined(FakeSocket.instances[0])
+    await user.click(screen.getByRole("button", { name: "Open canned responses" }))
+    await user.click(await screen.findByRole("button", { name: "Insert #hours" }))
+    expect(screen.getByLabelText("Message")).toHaveValue(HOURS_BODY)
+    const frames = FakeSocket.instances[0]?.sent.filter((raw) => raw.includes('"type":"message"'))
+    expect(frames).toHaveLength(0)
   })
 })

@@ -35,6 +35,7 @@ describe("postMessage boundary", () => {
     window.localStorage.clear()
     document.body.innerHTML = ""
     vi.unstubAllGlobals()
+    window.__supportchatInstalled = false
   })
 
   test("wrong origin, source, type, and height 5000 do nothing", async () => {

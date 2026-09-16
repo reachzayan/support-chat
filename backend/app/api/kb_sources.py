@@ -36,6 +36,12 @@ class PagePatchIn(BaseModel):
     enabled: bool
 
 
+class ChunkPatchIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool
+
+
 class SourceOut(BaseModel):
     id: UUID
     site_id: UUID
@@ -107,6 +113,7 @@ class PageOut(BaseModel):
 
 
 class ChunkOut(BaseModel):
+    id: UUID
     ordinal: int
     heading: str
     body: str
@@ -215,6 +222,7 @@ def _page_detail_out(page: KbPage, chunks: list[KbChunk]) -> PageDetailOut:
         content_text=page.content_text,
         chunks=[
             ChunkOut(
+                id=chunk.id,
                 ordinal=chunk.ordinal,
                 heading=chunk.heading,
                 body=chunk.body,
@@ -268,6 +276,28 @@ async def patch_source(
     except AdminError as exc:
         raise _http_error(exc) from exc
     return await _source_out(session, source)
+
+
+@router.patch("/api/kb-chunks/{chunk_id}", response_model=ChunkOut)
+async def patch_chunk(
+    chunk_id: UUID, payload: ChunkPatchIn, session: SessionDep, _admin: CurrentAdmin
+) -> ChunkOut:
+    try:
+        chunk = await KbSourceService(session).patch_chunk(chunk_id, enabled=payload.enabled)
+    except AdminError as exc:
+        if exc.code == "stale":
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="This retrieved answer was replaced during sync.",
+            ) from exc
+        raise _http_error(exc) from exc
+    return ChunkOut(
+        id=chunk.id,
+        ordinal=chunk.ordinal,
+        heading=chunk.heading,
+        body=chunk.body,
+        enabled=chunk.enabled,
+    )
 
 
 @router.post("/api/kb-sources/{source_id}/sync", response_model=SourceOut)

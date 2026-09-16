@@ -59,13 +59,13 @@ export const isCenteredNotice = (line: TranscriptLine) => {
 }
 
 const selfBubble =
-  "ml-auto max-w-[82%] rounded-[20px] rounded-br-[6px] border border-steel/40 bg-steel/15 px-4 py-2 text-sm leading-5 text-ink"
+  "ml-auto max-w-[82%] rounded-[20px] rounded-br-[6px] bg-steel/15 px-4 py-2 text-sm leading-5 text-ink"
 const otherBubble =
-  "mr-auto max-w-[82%] rounded-[20px] rounded-bl-[6px] border border-line bg-paper px-4 py-2 text-sm leading-5 text-ink shadow-[0_1px_2px_rgba(13,31,58,0.04)]"
+  "mr-auto max-w-[82%] rounded-[20px] rounded-bl-[6px] bg-paper px-4 py-2 text-sm leading-5 text-ink shadow-[0_1px_3px_rgba(13,31,58,0.08)]"
 const noticeClass =
-  "mx-auto max-w-[92%] rounded-full border border-line bg-paper px-3 py-1 text-center text-[11px] leading-5 text-mute"
+  "mx-auto max-w-[92%] rounded-full bg-ice-2 px-3 py-1 text-center text-[11px] leading-5 text-mute"
 const idleWarningClass =
-  "mx-auto max-w-[92%] rounded-[8px] border border-line bg-ice-2 px-3 py-2 text-center text-xs leading-5 text-mute motion-safe:transition-opacity motion-safe:duration-200"
+  "mx-auto max-w-[92%] rounded-[8px] bg-ice-2 px-3 py-2 text-center text-xs leading-5 text-mute motion-safe:transition-opacity motion-safe:duration-200"
 
 const useAutoFollow = (enabled: boolean, latestLineId: number | undefined) => {
   const latestRef = useRef<HTMLDivElement>(null)
@@ -230,7 +230,7 @@ const isEmptyTranscript = (
   logLabel: string | undefined,
 ) => lines.length === 0 && !typing && notice === undefined && logLabel === undefined
 
-const transcriptSurface = (muted: boolean) => (muted ? "bg-ice-2" : "bg-ice")
+const transcriptSurface = (muted: boolean) => (muted ? "bg-ice-2/55" : "bg-transparent")
 
 const TranscriptContent = ({
   lines,

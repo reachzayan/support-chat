@@ -11,6 +11,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
+import { ScrollArea } from "@/components/ui/scroll-area"
 
 import { ManageSiteFields, ManageSiteSnippet } from "./manage-site-fields"
 import { ManageSiteRouting } from "./manage-site-routing"
@@ -61,34 +62,50 @@ export const ManageSiteModal = ({
               {error}
             </p>
           ) : null}
-          <div className="flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto px-5 py-4">
-            <ManageSiteFields
-              site={site}
-              isAdmin={isAdmin}
-              name={form.name}
-              greeting={form.greeting}
-              privacyUrl={form.privacyUrl}
-              originsText={form.originsText}
-              windowHours={form.windowHours}
-              onName={form.handleName}
-              onGreeting={form.handleGreeting}
-              onPrivacy={form.handlePrivacy}
-              onOrigins={form.handleOrigins}
-              onWindow={form.handleWindow}
-              errors={form.errors}
-              onNameBlur={form.handleNameBlur}
-              onPrivacyBlur={form.handlePrivacyBlur}
-              onOriginsBlur={form.handleOriginsBlur}
-            />
-            <ManageSiteRouting
-              site={site}
-              isAdmin={isAdmin}
-              onSaved={onSaved}
-              onError={handleError}
-            />
-            <OffBrandEditor site={site} isAdmin={isAdmin} onError={handleError} onSaved={onSaved} />
-            <ManageSiteSnippet site={site} copyNotice={form.copyNotice} onCopy={form.handleCopy} />
-          </div>
+          <ScrollArea className="min-h-0 flex-1 px-5 py-4">
+            <div className="flex flex-col gap-5">
+              <ManageSiteFields
+                site={site}
+                isAdmin={isAdmin}
+                name={form.name}
+                greeting={form.greeting}
+                privacyUrl={form.privacyUrl}
+                websiteUrl={form.websiteUrl}
+                originsText={form.originsText}
+                contactInfoText={form.contactInfoText}
+                windowHours={form.windowHours}
+                onName={form.handleName}
+                onGreeting={form.handleGreeting}
+                onPrivacy={form.handlePrivacy}
+                onWebsiteUrl={form.handleWebsiteUrl}
+                onOrigins={form.handleOrigins}
+                onContactInfo={form.handleContactInfo}
+                onWindow={form.handleWindow}
+                errors={form.errors}
+                onNameBlur={form.handleNameBlur}
+                onPrivacyBlur={form.handlePrivacyBlur}
+                onWebsiteUrlBlur={form.handleWebsiteUrlBlur}
+                onOriginsBlur={form.handleOriginsBlur}
+              />
+              <ManageSiteRouting
+                site={site}
+                isAdmin={isAdmin}
+                onSaved={onSaved}
+                onError={handleError}
+              />
+              <OffBrandEditor
+                site={site}
+                isAdmin={isAdmin}
+                onError={handleError}
+                onSaved={onSaved}
+              />
+              <ManageSiteSnippet
+                site={site}
+                copyNotice={form.copyNotice}
+                onCopy={form.handleCopy}
+              />
+            </div>
+          </ScrollArea>
           <DialogFooter className="flex-row justify-end gap-2">
             {isAdmin ? (
               <button

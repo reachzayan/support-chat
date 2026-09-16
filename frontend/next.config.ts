@@ -101,6 +101,10 @@ const nextConfig: NextConfig = {
         destination: `${apiOrigin}/api/canned-replies`,
       },
       {
+        source: "/api/canned-replies/:path*",
+        destination: `${apiOrigin}/api/canned-replies/:path*`,
+      },
+      {
         source: "/api/sites",
         destination: `${apiOrigin}/api/sites`,
       },
@@ -119,6 +123,10 @@ const nextConfig: NextConfig = {
       {
         source: "/api/kb-pages/:path*",
         destination: `${apiOrigin}/api/kb-pages/:path*`,
+      },
+      {
+        source: "/api/kb-chunks/:path*",
+        destination: `${apiOrigin}/api/kb-chunks/:path*`,
       },
       {
         source: "/api/handoffs/:path*",

@@ -2,7 +2,13 @@
 
 import { useCallback, type Dispatch, type SetStateAction } from "react"
 
-import { httpUrlError, originsError, requiredError } from "@/lib/validation"
+import {
+  extraOriginsError,
+  httpUrlError,
+  originsError,
+  requiredError,
+  websiteUrlError,
+} from "@/lib/validation"
 
 type SetErrors = Dispatch<SetStateAction<Record<string, string>>>
 
@@ -19,7 +25,10 @@ export const useSiteValidation = (
   name: string,
   privacyUrl: string,
   originsText: string,
+  websiteUrl: string,
+  websiteUrlRequired: boolean,
   setErrors: SetErrors,
+  originsRequired = true,
 ) => {
   const handleNameBlur = useCallback(
     () => updateError(setErrors, "name", requiredError("Name", name)),
@@ -30,17 +39,27 @@ export const useSiteValidation = (
     [privacyUrl, setErrors],
   )
   const handleOriginsBlur = useCallback(
-    () => updateError(setErrors, "origins", originsError(originsText)),
-    [originsText, setErrors],
+    () =>
+      updateError(
+        setErrors,
+        "origins",
+        originsRequired ? originsError(originsText) : extraOriginsError(originsText),
+      ),
+    [originsRequired, originsText, setErrors],
+  )
+  const handleWebsiteUrlBlur = useCallback(
+    () => updateError(setErrors, "websiteUrl", websiteUrlError(websiteUrl, websiteUrlRequired)),
+    [websiteUrl, websiteUrlRequired, setErrors],
   )
   const validate = useCallback(
     () => ({
       name: requiredError("Name", name),
       privacyUrl: httpUrlError(privacyUrl),
-      origins: originsError(originsText),
+      origins: originsRequired ? originsError(originsText) : extraOriginsError(originsText),
+      websiteUrl: websiteUrlError(websiteUrl, websiteUrlRequired),
     }),
-    [name, originsText, privacyUrl],
+    [name, originsRequired, originsText, privacyUrl, websiteUrl, websiteUrlRequired],
   )
 
-  return { handleNameBlur, handlePrivacyBlur, handleOriginsBlur, validate }
+  return { handleNameBlur, handlePrivacyBlur, handleOriginsBlur, handleWebsiteUrlBlur, validate }
 }

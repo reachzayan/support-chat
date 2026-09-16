@@ -26,8 +26,15 @@ vi.mock("@/lib/auth-client", async () => {
   return { ...actual, refreshSession: vi.fn().mockResolvedValue(USER) }
 })
 
+const sidebarCookie = () => {
+  const match = document.cookie.match(/(?:^|; )sidebar_state=([^;]*)/)
+  return match ? decodeURIComponent(match[1]) : null
+}
+
 describe("admin shell", () => {
   beforeEach(() => {
+    document.cookie = "sidebar_state=; path=/; max-age=0"
+    document.cookie = "supportchat_theme=; path=/; max-age=0"
     Object.defineProperty(window, "matchMedia", {
       configurable: true,
       value: () => ({ matches: false, addEventListener: vi.fn(), removeEventListener: vi.fn() }),
@@ -52,6 +59,13 @@ describe("admin shell", () => {
     const accountLink = screen.getByRole("link", { name: "Alex Morgan account" })
     expect(accountLink).toHaveAttribute("href", "/admin/settings")
     expect(accountLink.closest('[data-slot="sidebar-footer"]')).not.toBeNull()
+    const footer = accountLink.closest('[data-slot="sidebar-footer"]')
+    expect(footer?.querySelector('[data-sidebar="trigger"]')).not.toBeNull()
+    expect(
+      footer?.querySelector(
+        'button[aria-label="Switch to dark mode"], button[aria-label="Switch to light mode"]',
+      ),
+    ).not.toBeNull()
     expect(screen.queryByRole("link", { name: "Settings" })).not.toBeInTheDocument()
     const sidebar = screen.getByTestId("admin-sidebar")
     expect(sidebar).toHaveAttribute("data-slot", "sidebar-container")
@@ -64,5 +78,27 @@ describe("admin shell", () => {
     await userEvent.setup().click(trigger!)
 
     expect(sidebar.parentElement).toHaveAttribute("data-state", "collapsed")
+    expect(sidebar.className).toMatch(/border-r-0/)
+    expect(screen.getByRole("link", { name: "Alex Morgan account" })).toBeInTheDocument()
+    expect(screen.getByRole("link", { name: "Alex Morgan account" })).toHaveTextContent("AM")
+    const wrapper = sidebar.closest('[data-slot="sidebar-wrapper"]')
+    expect(wrapper).toHaveStyle({ "--sidebar-width-icon": "3rem" })
+    expect(sidebarCookie()).toBe("false")
+    expect(window.localStorage.getItem("sidebar_state")).toBeNull()
+  })
+
+  test("restores a collapsed sidebar from the preferences cookie", async () => {
+    renderWithProviders(
+      <AdminShell>
+        <div id="main-content">Inbox view</div>
+      </AdminShell>,
+      { initialSidebarOpen: false },
+    )
+
+    await waitFor(() => expect(screen.getByText("Inbox view")).toBeInTheDocument())
+    expect(screen.getByTestId("admin-sidebar").parentElement).toHaveAttribute(
+      "data-state",
+      "collapsed",
+    )
   })
 })

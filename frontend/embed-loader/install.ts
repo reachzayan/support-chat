@@ -25,10 +25,11 @@ type Runtime = {
 
 const BOOTSTRAP_RETRY_COUNT = 5
 const BOOTSTRAP_RETRY_MS = 100
+const PANEL_MOTION_MS = 300
 
 const reducedMotionDelay = (win: Window) => {
   try {
-    return win.matchMedia("(prefers-reduced-motion: reduce)").matches ? 0 : 200
+    return win.matchMedia("(prefers-reduced-motion: reduce)").matches ? 0 : PANEL_MOTION_MS
   } catch {
     return 0
   }
@@ -177,10 +178,7 @@ const applyBootstrap = (
   if (runtime.iframe === null) {
     runtime.iframe = createPanel(runtime.doc, runtime.widgetOrigin)
   }
-  runtime.iframe.hidden = false
-  runtime.iframe.style.opacity = "1"
-  runtime.iframe.style.transform = "translateY(0) scale(1)"
-  runtime.launcher.hidden = true
+  showPanel(runtime)
   hideHostError(runtime.doc)
 }
 
@@ -231,6 +229,9 @@ const handleOpen = (runtime: Runtime) => {
 }
 
 export const installSupportChat = (win: Window, doc: Document, script: HTMLScriptElement | null) => {
+  if (win.__supportchatInstalled === true) {
+    return
+  }
   const widgetOrigin = originFromScript(script)
   const config = win.__supportchat
   if (
@@ -242,6 +243,7 @@ export const installSupportChat = (win: Window, doc: Document, script: HTMLScrip
     console.error("SupportChat: widget configuration is missing")
     return
   }
+  win.__supportchatInstalled = true
   const runtime: Runtime = {
     win,
     doc,

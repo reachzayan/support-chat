@@ -156,6 +156,7 @@ def test_http_www_evil_and_missing_origin_fail_bootstrap_and_create_zero_visitor
         "privacy_url": EASY_PRIVACY,
         "bot_enabled": True,
         "human_enabled": True,
+        "contact_info": [],
     }
     assert "allowed_origins" not in allowed.json()
     assert "origins" not in allowed.json()

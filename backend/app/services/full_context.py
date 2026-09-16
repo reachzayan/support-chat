@@ -127,10 +127,16 @@ async def likeliest_unit_id(
     rank = func.ts_rank_cd(KbChunk.search_document, ts)
     result = await session.execute(
         select(KbChunk.id, rank.label("score"))
+        .join(KbPage, KbPage.id == KbChunk.page_id)
+        .join(KbSnapshot, KbSnapshot.id == KbChunk.snapshot_id)
+        .join(KbSource, KbSource.id == KbPage.source_id)
         .where(
             KbChunk.site_id == site_id,
             KbChunk.snapshot_id.in_(snapshot_ids),
             KbChunk.enabled.is_(True),
+            KbPage.enabled.is_(True),
+            KbSource.enabled.is_(True),
+            KbSnapshot.state == "live",
             KbChunk.search_document.op("@@")(ts),
         )
         .order_by(rank.desc(), KbChunk.id)

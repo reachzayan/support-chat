@@ -2,16 +2,18 @@
 
 import { useCallback, useState } from "react"
 
-import type { SiteRecord } from "@/components/admin/staff-api"
+import { staffWrite, type SiteRecord } from "@/components/admin/staff-api"
 
 import type { ModalKind } from "./sites-shared"
 
+// oxlint-disable-next-line max-lines-per-function
 export const useSitesConsoleActions = (
   setSites: React.Dispatch<React.SetStateAction<SiteRecord[]>>,
   setError: React.Dispatch<React.SetStateAction<string | null>>,
 ) => {
   const [modal, setModal] = useState<ModalKind>(null)
   const [activeId, setActiveId] = useState<string | null>(null)
+  const [checkingIds, setCheckingIds] = useState<string[]>([])
 
   const handleSaved = useCallback(
     (next: SiteRecord) => {
@@ -19,12 +21,33 @@ export const useSitesConsoleActions = (
     },
     [setSites],
   )
+  const handleCheckInstall = useCallback(
+    async (siteId: string) => {
+      setCheckingIds((current) => (current.includes(siteId) ? current : [...current, siteId]))
+      try {
+        const response = await staffWrite(`/api/sites/${siteId}/check-install`, "POST", {})
+        if (!response.ok) {
+          setError("Could not recheck the widget install status.")
+          return
+        }
+        setError(null)
+        handleSaved((await response.json()) as SiteRecord)
+      } catch {
+        setError("Could not recheck the widget install status.")
+      } finally {
+        setCheckingIds((current) => current.filter((id) => id !== siteId))
+      }
+    },
+    [handleSaved, setError],
+  )
   const handleCreated = useCallback(
     (next: SiteRecord) => {
-      setSites((current) => [...current, next])
+      setSites((current) =>
+        current.some((row) => row.id === next.id)
+          ? current.map((row) => (row.id === next.id ? next : row))
+          : [...current, next],
+      )
       setError(null)
-      setModal(null)
-      setActiveId(null)
     },
     [setError, setSites],
   )
@@ -57,6 +80,7 @@ export const useSitesConsoleActions = (
   return {
     modal,
     activeId,
+    checkingIds,
     handleSaved,
     handleCreated,
     handleDeleted,
@@ -64,5 +88,6 @@ export const useSitesConsoleActions = (
     handleOpenAdd,
     handleOpenManage,
     handleOpenDelete,
+    handleCheckInstall,
   }
 }
