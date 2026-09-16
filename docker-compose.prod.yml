@@ -43,11 +43,7 @@ services:
         "",
       ]
     healthcheck:
-      test:
-        [
-          "CMD-SHELL",
-          "redis-cli -a \"$$REDIS_PASSWORD\" --no-auth-warning ping | grep PONG",
-        ]
+      test: ["CMD-SHELL", 'redis-cli -a "$$REDIS_PASSWORD" --no-auth-warning ping | grep PONG']
 
   backend:
     restart: unless-stopped
@@ -70,6 +66,5 @@ services:
         NEXT_PUBLIC_MARKETING_HOST_ORIGIN: ${NEXT_PUBLIC_MARKETING_HOST_ORIGIN:?NEXT_PUBLIC_MARKETING_HOST_ORIGIN is required}
         NEXT_PUBLIC_DEMO_SITE_KEY: ${NEXT_PUBLIC_DEMO_SITE_KEY:-demo}
         NEXT_PUBLIC_DEMO_PUBLIC_KEY: ${NEXT_PUBLIC_DEMO_PUBLIC_KEY:-}
-        WIDGET_FRAME_ANCESTORS: ${WIDGET_FRAME_ANCESTORS:?WIDGET_FRAME_ANCESTORS is required}
     ports: !override
       - "127.0.0.1:${FRONTEND_PORT:-3000}:3000"
