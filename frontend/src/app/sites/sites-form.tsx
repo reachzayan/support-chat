@@ -10,9 +10,10 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
+import { Field, FieldError, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 
-import { BTN_PRIMARY, BTN_SECONDARY, FIELD, LABEL } from "./sites-shared"
+import { BTN_PRIMARY, BTN_SECONDARY, FIELD } from "./sites-shared"
 
 export const LeaveGuard = ({
   open,
@@ -95,7 +96,7 @@ export const useAnimatedDialogClose = (onClosed: () => void) => {
   return { open, close }
 }
 
-export const Field = ({
+export const SiteField = ({
   id,
   label,
   value,
@@ -114,10 +115,8 @@ export const Field = ({
 }) => {
   const errorId = `${id}-error`
   return (
-    <div>
-      <label className={LABEL} htmlFor={id}>
-        {label}
-      </label>
+    <Field>
+      <FieldLabel htmlFor={id}>{label}</FieldLabel>
       <Input
         id={id}
         name={id}
@@ -128,14 +127,10 @@ export const Field = ({
         onBlur={onBlur}
         className={FIELD}
         aria-invalid={error ? "true" : undefined}
-        aria-describedby={error ? errorId : undefined}
+        aria-describedby={errorId}
       />
-      {error ? (
-        <p id={errorId} className="text-ember mt-1 text-xs" role="alert">
-          {error}
-        </p>
-      ) : null}
-    </div>
+      <FieldError id={errorId}>{error}</FieldError>
+    </Field>
   )
 }
 

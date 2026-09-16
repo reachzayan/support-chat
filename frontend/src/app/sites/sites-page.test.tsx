@@ -149,71 +149,87 @@ describe("sites bot routing", () => {
   })
 })
 
-describe("sites add website", () => {
-  test("add website modal creates a site without a client-supplied key", async () => {
-    const created = {
-      ...SITE,
-      id: "22222222-2222-4222-8222-222222222222",
-      key: "sample-services-a1b2",
-      name: "Sample Services",
-      public_key: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-      origins: ["https://sample-services.example.com"],
-      snippet: SNIPPET.replaceAll("samplesite", "sample-services-a1b2"),
-      origins_missing_from_frame_ancestors: false,
-    }
-    let postBody: Record<string, unknown> | undefined
-    vi.stubGlobal(
-      "fetch",
-      vi.fn().mockImplementation(async (input: RequestInfo, init?: RequestInit) => {
-        if (typeof input === "string" && input === "/api/sites" && init?.method === "POST") {
-          postBody = JSON.parse(String(init.body)) as Record<string, unknown>
-          return { ok: true, status: 201, json: async () => created }
-        }
-        return {
-          ok: true,
-          status: 200,
-          json: async () => ({
-            items: [],
-            frame_ancestors: ["http://localhost:3000"],
-            widget_origin: "http://widget.localhost:3000",
-          }),
-        }
-      }),
-    )
+const CREATED_SITE = {
+  ...SITE,
+  id: "22222222-2222-4222-8222-222222222222",
+  key: "sample-services-a1b2",
+  name: "Sample Services",
+  public_key: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  origins: ["https://sample-services.example.com"],
+  snippet: SNIPPET.replaceAll("samplesite", "sample-services-a1b2"),
+  origins_missing_from_frame_ancestors: false,
+  website_url: "https://sample-services.example.com",
+  widget_installed: false,
+  widget_checked_at: "2026-09-16T15:00:00Z",
+}
+
+const emptySitesFetch = () => ({
+  ok: true,
+  status: 200,
+  json: async () => ({
+    items: [],
+    frame_ancestors: ["http://localhost:3000"],
+    widget_origin: "http://widget.localhost:3000",
+  }),
+})
+
+const fillAddWebsiteForm = async (
+  user: ReturnType<typeof userEvent.setup>,
+  dialog: HTMLElement,
+) => {
+  await user.type(within(dialog).getByLabelText("Name"), "Sample Services")
+  await user.type(
+    within(dialog).getByLabelText("Website URL"),
+    "https://sample-services.example.com/careers",
+  )
+  await user.type(
+    within(dialog).getByLabelText("Privacy URL"),
+    "https://sample-services.example.com/privacy",
+  )
+  await user.type(
+    within(dialog).getByLabelText("Greeting"),
+    "Talk to a specialist about screening.",
+  )
+}
+
+describe("sites add website form", () => {
+  test("add website fields appear in install order", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(mockListFetch()))
     const user = userEvent.setup()
     renderWithProviders(<SitesConsole isAdmin={true} displayName="Riley Chen" />)
 
-    await screen.findByText("No sites configured")
-    await user.click(screen.getByRole("button", { name: "Add new website" }))
+    await user.click(await screen.findByRole("button", { name: "Add new website" }))
     const dialog = await screen.findByRole("dialog", { name: "Add new website" })
-    expect(within(dialog).queryByLabelText("Site key")).not.toBeInTheDocument()
-    await user.type(within(dialog).getByLabelText("Name"), "Sample Services")
-    await user.type(
-      within(dialog).getByLabelText("Greeting"),
-      "Talk to a specialist about screening.",
+    const labels = ["Name", "Website URL", "Privacy URL", "Approved origins", "Greeting"].map(
+      (label) => within(dialog).getByText(label),
     )
-    await user.type(
-      within(dialog).getByLabelText("Privacy URL"),
-      "https://sample-services.example.com/privacy",
-    )
-    await user.type(
-      within(dialog).getByLabelText("Approved origins"),
-      "https://sample-services.example.com",
-    )
-    await user.click(within(dialog).getByRole("button", { name: "Create website" }))
+    for (let index = 0; index < labels.length - 1; index += 1) {
+      expect(labels[index].compareDocumentPosition(labels[index + 1])).toBe(
+        Node.DOCUMENT_POSITION_FOLLOWING,
+      )
+    }
+  })
 
-    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument())
-    expect(postBody).toEqual({
-      name: "Sample Services",
-      greeting: "Talk to a specialist about screening.",
-      privacy_url: "https://sample-services.example.com/privacy",
-      origins: ["https://sample-services.example.com"],
-    })
-    expect(postBody).not.toHaveProperty("key")
-    expect(postBody).not.toHaveProperty("public_key")
-    const table = await screen.findByRole("table", { name: "Sites" })
-    expect(within(table).getByText("Sample Services")).toBeInTheDocument()
-    expect(within(table).getByText("sample-services-a1b2")).toBeInTheDocument()
+  test("website URL locks its origin into approved origins and that lock cannot be removed", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(mockListFetch()))
+    const user = userEvent.setup()
+    renderWithProviders(<SitesConsole isAdmin={true} displayName="Riley Chen" />)
+
+    await user.click(await screen.findByRole("button", { name: "Add new website" }))
+    const dialog = await screen.findByRole("dialog", { name: "Add new website" })
+    await user.type(
+      within(dialog).getByLabelText("Website URL"),
+      "https://sample-services.example.com/careers",
+    )
+
+    const origins = within(dialog).getByText("Approved origins").closest("[data-slot=field]")
+    expect(origins).not.toBeNull()
+    expect(
+      within(origins as HTMLElement).getByText("https://sample-services.example.com"),
+    ).toBeInTheDocument()
+    expect(
+      within(origins as HTMLElement).queryByRole("button", { name: /remove/i }),
+    ).not.toBeInTheDocument()
   })
 
   test("add website shows inline errors when required fields are empty", async () => {
@@ -228,8 +244,199 @@ describe("sites add website", () => {
 
     expect(within(dialog).getByText("Name is required.")).toBeInTheDocument()
     expect(within(dialog).getByText("Privacy URL is required.")).toBeInTheDocument()
-    expect(within(dialog).getByText("Add at least one approved origin.")).toBeInTheDocument()
+    expect(within(dialog).getByText("Website URL is required.")).toBeInTheDocument()
+    expect(within(dialog).queryByText("Add at least one approved origin.")).not.toBeInTheDocument()
     expect(within(dialog).getByLabelText("Name")).toHaveAttribute("aria-invalid", "true")
+  })
+})
+
+describe("sites add website create flow", () => {
+  test("creating a website keeps the dialog open with the snippet, install steps, and an install check", async () => {
+    const created = { ...CREATED_SITE }
+    let postBody: Record<string, unknown> | undefined
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockImplementation(async (input: RequestInfo, init?: RequestInit) => {
+        if (typeof input === "string" && input === "/api/sites" && init?.method === "POST") {
+          postBody = JSON.parse(String(init.body)) as Record<string, unknown>
+          return { ok: true, status: 201, json: async () => created }
+        }
+        return emptySitesFetch()
+      }),
+    )
+    const user = userEvent.setup()
+    renderWithProviders(<SitesConsole isAdmin={true} displayName="Riley Chen" />)
+
+    await screen.findByText("No sites configured")
+    await user.click(screen.getByRole("button", { name: "Add new website" }))
+    const form = await screen.findByRole("dialog", { name: "Add new website" })
+    expect(within(form).queryByLabelText("Site key")).not.toBeInTheDocument()
+    await fillAddWebsiteForm(user, form)
+    await user.click(within(form).getByRole("button", { name: "Create website" }))
+
+    const dialog = await screen.findByRole("dialog", { name: "Install the widget" })
+    expect(postBody).toEqual({
+      name: "Sample Services",
+      greeting: "Talk to a specialist about screening.",
+      privacy_url: "https://sample-services.example.com/privacy",
+      origins: ["https://sample-services.example.com"],
+      website_url: "https://sample-services.example.com/careers",
+      contact_info: [],
+    })
+    expect(postBody).not.toHaveProperty("key")
+    expect(postBody).not.toHaveProperty("public_key")
+    expect(within(dialog).getByLabelText("Embed snippet")).toHaveValue(created.snippet)
+    expect(
+      within(dialog).getByText("Paste the snippet before the closing body tag."),
+    ).toBeInTheDocument()
+    expect(within(dialog).getByLabelText("Widget install status")).toHaveTextContent(
+      "Not installed",
+    )
+    expect(within(dialog).getByRole("button", { name: "Copy snippet" })).toBeInTheDocument()
+
+    await user.click(within(dialog).getByRole("button", { name: "Done" }))
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument())
+
+    const table = await screen.findByRole("table", { name: "Sites" })
+    expect(within(table).getByText("Sample Services")).toBeInTheDocument()
+    expect(within(table).getByText("sample-services-a1b2")).toBeInTheDocument()
+  })
+})
+
+describe("sites add website install check", () => {
+  test("install panel refresh rechecks the new site and shows Installed", async () => {
+    const created = { ...CREATED_SITE }
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockImplementation(async (input: RequestInfo, init?: RequestInit) => {
+        if (typeof input === "string" && input === "/api/sites" && init?.method === "POST") {
+          return { ok: true, status: 201, json: async () => created }
+        }
+        if (
+          typeof input === "string" &&
+          input === `/api/sites/${created.id}/check-install` &&
+          init?.method === "POST"
+        ) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({
+              ...created,
+              widget_installed: true,
+              widget_checked_at: "2026-09-16T15:05:00Z",
+            }),
+          }
+        }
+        return emptySitesFetch()
+      }),
+    )
+    const user = userEvent.setup()
+    renderWithProviders(<SitesConsole isAdmin={true} displayName="Riley Chen" />)
+
+    await user.click(await screen.findByRole("button", { name: "Add new website" }))
+    const form = await screen.findByRole("dialog", { name: "Add new website" })
+    await fillAddWebsiteForm(user, form)
+    await user.click(within(form).getByRole("button", { name: "Create website" }))
+
+    const dialog = await screen.findByRole("dialog", { name: "Install the widget" })
+    await user.click(
+      within(dialog).getByRole("button", {
+        name: "Recheck install status for Sample Services",
+      }),
+    )
+    await waitFor(() =>
+      expect(within(dialog).getByLabelText("Widget install status")).toHaveTextContent("Installed"),
+    )
+  })
+})
+
+// oxlint-disable-next-line max-lines-per-function
+describe("sites contact info", () => {
+  test("add website sends parsed contact info lines", async () => {
+    const created = {
+      ...SITE,
+      id: "33333333-3333-4333-8333-333333333333",
+      key: "sample-services-a1b2",
+      name: "Sample Services",
+      website_url: "https://sample-services.example.com/careers",
+      contact_info: ["555-123-4567", "support@sample-services.example.com"],
+    }
+    let postBody: Record<string, unknown> | undefined
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockImplementation(async (input: RequestInfo, init?: RequestInit) => {
+        if (typeof input === "string" && input === "/api/sites" && init?.method === "POST") {
+          postBody = JSON.parse(String(init.body)) as Record<string, unknown>
+          return { ok: true, status: 201, json: async () => created }
+        }
+        return mockListFetch()
+      }),
+    )
+    const user = userEvent.setup()
+    renderWithProviders(<SitesConsole isAdmin={true} displayName="Riley Chen" />)
+
+    await user.click(await screen.findByRole("button", { name: "Add new website" }))
+    const form = await screen.findByRole("dialog", { name: "Add new website" })
+    await user.type(within(form).getByLabelText("Name"), "Sample Services")
+    await user.type(
+      within(form).getByLabelText("Website URL"),
+      "https://sample-services.example.com/careers",
+    )
+    await user.type(
+      within(form).getByLabelText("Privacy URL"),
+      "https://sample-services.example.com/privacy",
+    )
+    await user.type(
+      within(form).getByLabelText("Contact info"),
+      "555-123-4567\nsupport@sample-services.example.com",
+    )
+    await user.click(within(form).getByRole("button", { name: "Create website" }))
+
+    await screen.findByRole("dialog", { name: "Install the widget" })
+    expect(postBody?.contact_info).toEqual(["555-123-4567", "support@sample-services.example.com"])
+  })
+
+  test("manage site pre-fills contact info and saves the edited lines", async () => {
+    const siteWithContact = { ...SITE, contact_info: ["555-123-4567"] }
+    let patchBody: Record<string, unknown> | undefined
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockImplementation(async (input: RequestInfo, init?: RequestInit) => {
+        if (
+          typeof input === "string" &&
+          input.startsWith("/api/sites/") &&
+          init?.method === "PATCH"
+        ) {
+          patchBody = JSON.parse(String(init.body)) as Record<string, unknown>
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({ ...siteWithContact, contact_info: ["support@sample-site.example.com"] }),
+          }
+        }
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            items: [siteWithContact],
+            frame_ancestors: ["http://localhost:3000"],
+            widget_origin: "http://widget.localhost:3000",
+          }),
+        }
+      }),
+    )
+    const user = userEvent.setup()
+    renderWithProviders(<SitesConsole isAdmin={true} displayName="Riley Chen" />)
+
+    await user.click(await screen.findByRole("button", { name: "Manage" }))
+    const dialog = await screen.findByRole("dialog", { name: "Manage site" })
+    expect(within(dialog).getByLabelText("Contact info")).toHaveValue("555-123-4567")
+
+    await user.clear(within(dialog).getByLabelText("Contact info"))
+    await user.type(within(dialog).getByLabelText("Contact info"), "support@sample-site.example.com")
+    await user.click(within(dialog).getByRole("button", { name: "Save" }))
+
+    await waitFor(() => expect(patchBody?.contact_info).toEqual(["support@sample-site.example.com"]))
   })
 })
 

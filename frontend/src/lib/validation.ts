@@ -48,6 +48,21 @@ const isValidOrigin = (origin: string) => {
   }
 }
 
+export const originFromWebsiteUrl = (value: string) => {
+  try {
+    const url = new URL(value.trim())
+    if (url.protocol !== "http:" && url.protocol !== "https:") {
+      return null
+    }
+    if (url.username || url.password) {
+      return null
+    }
+    return url.origin
+  } catch {
+    return null
+  }
+}
+
 export const originsError = (value: string) => {
   const origins = value
     .split("\n")
@@ -62,6 +77,34 @@ export const originsError = (value: string) => {
     }
   }
   return null
+}
+
+export const extraOriginsError = (value: string) => {
+  const origins = value
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean)
+  if (origins.length === 0) {
+    return null
+  }
+  for (const origin of origins) {
+    if (!isValidOrigin(origin)) {
+      return "Use one http:// or https:// origin per line."
+    }
+  }
+  return null
+}
+
+export const websiteUrlError = (value: string, required: boolean) => {
+  const trimmed = value.trim()
+  if (trimmed === "") {
+    return required ? "Website URL is required." : null
+  }
+  try {
+    return new URL(trimmed).protocol === "https:" ? null : "Use a valid https:// URL."
+  } catch {
+    return "Use a valid https:// URL."
+  }
 }
 
 export const httpsUrlsError = (value: string) => {

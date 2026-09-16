@@ -4,11 +4,10 @@ import { useCallback, useState, type ChangeEvent } from "react"
 
 import { staffWrite, type SiteRecord } from "@/components/admin/staff-api"
 import { Button } from "@/components/ui/button"
+import { Field, FieldDescription, FieldLabel } from "@/components/ui/field"
 import { Textarea } from "@/components/ui/textarea"
 
-const FIELD =
-  "border-line bg-ice text-ink focus-visible:ring-steel mt-1.5 w-full rounded-[8px] border px-3 py-2.5 text-sm outline-none focus-visible:ring-2 disabled:cursor-not-allowed disabled:opacity-60"
-const LABEL = "text-mute text-[10px] font-bold tracking-[0.12em] uppercase"
+import { FIELD } from "./sites-shared"
 
 type OffBrandEditorProps = {
   site: SiteRecord
@@ -46,16 +45,14 @@ export const OffBrandEditor = ({ site, isAdmin, onError, onSaved }: OffBrandEdit
   }, [onError, onSaved, site.id, text])
 
   return (
-    <div className="border-line mt-6 border-t pt-5">
-      <p className={LABEL}>Guardrails</p>
-      <h3 className="text-navy mt-1 text-sm font-extrabold">Off-brand blocklist</h3>
-      <p className="text-mute mt-2 text-xs leading-5">
+    <Field className="border-line border-t pt-5">
+      <p className="text-mute text-[10px] font-bold tracking-[0.12em] uppercase">Guardrails</p>
+      <h3 className="text-navy text-sm font-extrabold">Off-brand blocklist</h3>
+      <FieldDescription>
         One competitor or unrelated brand per line. Mentions without matching knowledge return an
         out-of-scope reply.
-      </p>
-      <label className={LABEL} htmlFor={`off-brand-${site.id}`}>
-        Brands
-      </label>
+      </FieldDescription>
+      <FieldLabel htmlFor={`off-brand-${site.id}`}>Brands</FieldLabel>
       <Textarea
         id={`off-brand-${site.id}`}
         value={text}
@@ -65,20 +62,18 @@ export const OffBrandEditor = ({ site, isAdmin, onError, onSaved }: OffBrandEdit
         rows={4}
         aria-label="Off-brand blocklist"
       />
-      {savedNotice ? (
-        <output className="text-steel mt-2 block text-xs">{savedNotice}</output>
-      ) : null}
+      {savedNotice ? <output className="text-steel text-xs">{savedNotice}</output> : null}
       {isAdmin ? (
-        <div className="mt-3 flex justify-end">
+        <div className="flex justify-end">
           <Button
             type="button"
             onClick={handleSave}
-            className="bg-navy text-primary-foreground hover:bg-navy-deep focus-visible:ring-steel cursor-pointer rounded-[8px] px-4 py-2.5 text-sm font-bold focus-visible:ring-2 focus-visible:outline-none"
+            className="bg-navy text-primary-foreground hover:bg-navy-deep focus-visible:ring-steel cursor-pointer rounded-lg px-4 py-2.5 text-sm font-bold focus-visible:ring-2 focus-visible:outline-none"
           >
             Save blocklist
           </Button>
         </div>
       ) : null}
-    </div>
+    </Field>
   )
 }

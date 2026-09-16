@@ -3,34 +3,57 @@
 import { useCallback, useState, type ChangeEvent } from "react"
 
 import { staffWrite, type SiteRecord } from "@/components/admin/staff-api"
+import { originFromWebsiteUrl } from "@/lib/validation"
 
+import { copyManageSnippet } from "./manage-site-save"
 import { useLeaveGuard } from "./sites-form"
 import { useSiteValidation } from "./use-site-validation"
+
+const linesFromText = (text: string) =>
+  text
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0)
+
+const mergedOrigins = (websiteUrl: string, originsText: string) => {
+  const locked = originFromWebsiteUrl(websiteUrl)
+  const extra = linesFromText(originsText)
+  if (locked === null) {
+    return extra
+  }
+  return [locked, ...extra.filter((origin) => origin !== locked)]
+}
 
 // oxlint-disable-next-line max-lines-per-function
 export const useAddSiteForm = (
   isAdmin: boolean,
   onClose: () => void,
   onCreated: (site: SiteRecord) => void,
+  onSaved: (site: SiteRecord) => void,
   onError: (message: string | null) => void,
 ) => {
   const [name, setName] = useState("")
   const [greeting, setGreeting] = useState("")
   const [privacyUrl, setPrivacyUrl] = useState("")
+  const [websiteUrl, setWebsiteUrl] = useState("")
   const [originsText, setOriginsText] = useState("")
+  const [contactInfoText, setContactInfoText] = useState("")
   const [errors, setErrors] = useState<Record<string, string>>({})
+  const [created, setCreated] = useState<SiteRecord | null>(null)
+  const [checking, setChecking] = useState(false)
+  const [copyNotice, setCopyNotice] = useState<string | null>(null)
+  const lockedOrigin = originFromWebsiteUrl(websiteUrl)
   const dirty =
-    name.trim().length > 0 ||
-    greeting.trim().length > 0 ||
-    privacyUrl.trim().length > 0 ||
-    originsText.trim().length > 0
+    created === null &&
+    (name.trim().length > 0 ||
+      greeting.trim().length > 0 ||
+      privacyUrl.trim().length > 0 ||
+      websiteUrl.trim().length > 0 ||
+      originsText.trim().length > 0 ||
+      contactInfoText.trim().length > 0)
   const { leaveOpen, requestClose, handleStay, handleLeave } = useLeaveGuard(dirty, onClose)
-  const { handleNameBlur, handlePrivacyBlur, handleOriginsBlur, validate } = useSiteValidation(
-    name,
-    privacyUrl,
-    originsText,
-    setErrors,
-  )
+  const { handleNameBlur, handlePrivacyBlur, handleOriginsBlur, handleWebsiteUrlBlur, validate } =
+    useSiteValidation(name, privacyUrl, originsText, websiteUrl, true, setErrors, false)
 
   const handleName = useCallback((event: ChangeEvent<HTMLInputElement>) => {
     setName(event.target.value)
@@ -41,16 +64,29 @@ export const useAddSiteForm = (
   const handlePrivacy = useCallback((event: ChangeEvent<HTMLInputElement>) => {
     setPrivacyUrl(event.target.value)
   }, [])
+  const handleWebsiteUrl = useCallback((event: ChangeEvent<HTMLInputElement>) => {
+    setWebsiteUrl(event.target.value)
+  }, [])
   const handleOrigins = useCallback((event: ChangeEvent<HTMLTextAreaElement>) => {
     setOriginsText(event.target.value)
   }, [])
+  const handleContactInfo = useCallback((event: ChangeEvent<HTMLTextAreaElement>) => {
+    setContactInfoText(event.target.value)
+  }, [])
+  const handleDone = useCallback(() => {
+    onClose()
+  }, [onClose])
   const handleOpenChange = useCallback(
     (next: boolean) => {
       if (!next) {
+        if (created) {
+          onClose()
+          return
+        }
         requestClose()
       }
     },
-    [requestClose],
+    [created, onClose, requestClose],
   )
   const handleSubmit = useCallback(async () => {
     if (!isAdmin) {
@@ -64,42 +100,89 @@ export const useAddSiteForm = (
     if (Object.keys(visibleErrors).length > 0) {
       return
     }
-    const origins = originsText
-      .split("\n")
-      .map((line) => line.trim())
-      .filter((line) => line.length > 0)
     const response = await staffWrite("/api/sites", "POST", {
       name,
       greeting,
       privacy_url: privacyUrl,
-      origins,
+      origins: mergedOrigins(websiteUrl, originsText),
+      website_url: websiteUrl,
+      contact_info: linesFromText(contactInfoText),
     })
     if (!response.ok) {
       onError("Could not create the site. Check the privacy URL and origins.")
       return
     }
+    const site = (await response.json()) as SiteRecord
     onError(null)
-    onCreated((await response.json()) as SiteRecord)
-  }, [greeting, isAdmin, name, onCreated, onError, originsText, privacyUrl, validate])
+    setCreated(site)
+    onCreated(site)
+  }, [
+    contactInfoText,
+    greeting,
+    isAdmin,
+    name,
+    onCreated,
+    onError,
+    originsText,
+    privacyUrl,
+    validate,
+    websiteUrl,
+  ])
+  const handleCheckInstall = useCallback(async () => {
+    if (created === null) {
+      return
+    }
+    setChecking(true)
+    try {
+      const response = await staffWrite(`/api/sites/${created.id}/check-install`, "POST", {})
+      if (!response.ok) {
+        onError("Could not recheck the widget install status.")
+        return
+      }
+      const next = (await response.json()) as SiteRecord
+      onError(null)
+      setCreated(next)
+      onSaved(next)
+    } catch {
+      onError("Could not recheck the widget install status.")
+    } finally {
+      setChecking(false)
+    }
+  }, [created, onError, onSaved])
+  const handleCopy = useCallback(async (snippet: string) => {
+    await copyManageSnippet(snippet, setCopyNotice)
+  }, [])
 
   return {
     name,
     greeting,
     privacyUrl,
+    websiteUrl,
     originsText,
+    contactInfoText,
+    lockedOrigin,
     errors,
+    created,
+    checking,
+    copyNotice,
     leaveOpen,
     requestClose,
     handleStay,
     handleLeave,
+    handleDone,
     handleName,
     handleGreeting,
     handlePrivacy,
+    handleWebsiteUrl,
     handleOrigins,
+    handleContactInfo,
     handleNameBlur,
     handlePrivacyBlur,
+    handleWebsiteUrlBlur,
     handleOriginsBlur,
     handleOpenChange,
     handleSubmit,
+    handleCheckInstall,
+    handleCopy,
   }
 }

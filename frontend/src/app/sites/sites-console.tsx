@@ -45,8 +45,10 @@ export const SitesConsole = ({ isAdmin, displayName: _displayName }: SitesConsol
         <SitesDirectory
           sites={sites}
           isAdmin={isAdmin}
+          checkingIds={actions.checkingIds}
           onOpenAdd={actions.handleOpenAdd}
           onOpenManage={actions.handleOpenManage}
+          onCheckInstall={actions.handleCheckInstall}
         />
       </div>
 
