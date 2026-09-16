@@ -25,7 +25,6 @@ export const siteRecord = (id: string, key: string, name: string) => ({
   public_key: "a".repeat(64),
   origins: [],
   snippet: "",
-  origins_missing_from_frame_ancestors: false,
   bot_enabled: true,
   human_enabled: true,
 })
@@ -54,7 +53,6 @@ const easyPage = (overrides: Record<string, unknown> = {}) => ({
 const sitesList = () =>
   jsonOk({
     items: [siteRecord(SITE_ID, "samplesite", "SampleSite")],
-    frame_ancestors: ["http://localhost:3000"],
     widget_origin: "http://widget.localhost:3000",
   })
 
@@ -150,7 +148,6 @@ const twoBrandSites = () =>
       siteRecord(SITE_ID, "samplesite", "SampleSite"),
       siteRecord(BG_SITE, "backgroundchecks", "Sample Services"),
     ],
-    frame_ancestors: ["http://localhost:3000"],
     widget_origin: "http://widget.localhost:3000",
   })
 

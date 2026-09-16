@@ -99,6 +99,17 @@ describe("host surface routing", () => {
     expect(data.status).toBe(404)
   })
 
+  test("staff and marketing hosts cannot serve widget-only surfaces", async () => {
+    const requests = [
+      requestFor("http://localhost:3000/widget", "localhost:3000"),
+      requestFor("http://localhost:3000/supportchat.js", "localhost:3000"),
+      requestFor("http://host.localhost:3000/api/public/widget-bootstrap", "host.localhost:3000"),
+    ]
+
+    const responses = await Promise.all(requests.map((request) => proxy(request)))
+    expect(responses.map((response) => response.status)).toEqual([404, 404, 404])
+  })
+
   test("every staff page route is blocked on the widget host", () => {
     const uncovered = staffPagePaths().filter((pathname) => !isStaffPath(pathname))
     expect(uncovered).toEqual([])
@@ -108,28 +119,41 @@ describe("host surface routing", () => {
 describe("widget document CSP", () => {
   afterEach(() => {
     vi.unstubAllGlobals()
+    delete process.env.WIDGET_CSP_SERVICE_SECRET
   })
 
-  test("allows only the embedding website even if the API lists others", async () => {
+  test("uses the site-scoped query when Referer is suppressed", async () => {
     const lovable = "https://sample-preview.example.com"
-    vi.stubGlobal(
-      "fetch",
-      vi.fn().mockResolvedValue({
-        ok: true,
-        json: async () => ({
-          ancestors: [lovable, "https://host.deployment.example.com"],
-        }),
-      }),
-    )
+    const publicKey = "a".repeat(64)
+    process.env.WIDGET_CSP_SERVICE_SECRET = "c".repeat(64)
+    const fetcher = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ ancestors: [lovable] }),
+    })
+    vi.stubGlobal("fetch", fetcher)
     const response = await proxy(
-      new NextRequest("http://widget.localhost:3000/widget", {
-        headers: {
-          host: "widget.localhost:3000",
-          referer: `${lovable}/pricing`,
-        },
-      }),
+      new NextRequest(
+        `http://widget.localhost:3000/widget?site_key=lovable-demo&public_key=${publicKey}&parent_origin=${encodeURIComponent(lovable)}`,
+        { headers: { host: "widget.localhost:3000", "x-real-ip": "203.0.113.40" } },
+      ),
     )
     expect(response.headers.get("Content-Security-Policy")).toBe(`frame-ancestors ${lovable}`)
-    expect(response.headers.get("Content-Security-Policy")).not.toContain("sslip")
+    expect(fetcher.mock.calls[0]?.[1]?.headers).toMatchObject({
+      "X-SupportChat-Client-IP": "203.0.113.40",
+    })
+  })
+
+  test("fails closed when the widget URL has no complete site identity", async () => {
+    const fetcher = vi.fn()
+    vi.stubGlobal("fetch", fetcher)
+
+    const response = await proxy(
+      new NextRequest("http://widget.localhost:3000/widget", {
+        headers: { host: "widget.localhost:3000" },
+      }),
+    )
+
+    expect(response.headers.get("Content-Security-Policy")).toBe("frame-ancestors 'none'")
+    expect(fetcher).not.toHaveBeenCalled()
   })
 })

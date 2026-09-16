@@ -19,7 +19,6 @@ export type SiteRecord = {
   public_key: string
   origins: string[]
   snippet: string
-  origins_missing_from_frame_ancestors: boolean
   enabled: boolean
   bot_enabled: boolean
   human_enabled: boolean

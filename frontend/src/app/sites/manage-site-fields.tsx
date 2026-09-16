@@ -42,11 +42,6 @@ const ManageSiteOrigins = ({
         onBlur={onOriginsBlur}
       />
       <FieldError id={errorId}>{errors.origins}</FieldError>
-      {site.origins_missing_from_frame_ancestors ? (
-        <p className="border-ember/20 bg-ember/10 text-ember rounded-lg border px-3 py-2.5 text-xs leading-5">
-          This origin is missing from the widget frame-ancestors header.
-        </p>
-      ) : null}
     </Field>
   )
 }
