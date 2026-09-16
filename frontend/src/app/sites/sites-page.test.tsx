@@ -94,7 +94,7 @@ describe("sites manage modal", () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(mockListFetch()))
   })
 
-  test("manage modal shows the full snippet without a frame-ancestors env warning", async () => {
+  test("manage modal shows the full snippet and persisted approved origin", async () => {
     const user = userEvent.setup()
     renderWithProviders(<SitesConsole isAdmin={true} displayName="Riley Chen" />)
 
@@ -104,9 +104,6 @@ describe("sites manage modal", () => {
     const dialog = await screen.findByRole("dialog", { name: "Manage site" })
     const snippet = within(dialog).getByLabelText("Embed snippet")
     expect(snippet).toHaveValue(SNIPPET)
-    expect(
-      within(dialog).queryByText("This origin is missing from the widget frame-ancestors header."),
-    ).not.toBeInTheDocument()
     expect(within(dialog).getByDisplayValue("https://missing.example")).toBeInTheDocument()
   })
 })
@@ -157,7 +154,6 @@ const CREATED_SITE = {
   public_key: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
   origins: ["https://sample-services.example.com"],
   snippet: SNIPPET.replaceAll("samplesite", "sample-services-a1b2"),
-  origins_missing_from_frame_ancestors: false,
   website_url: "https://sample-services.example.com",
   widget_installed: false,
   widget_checked_at: "2026-09-16T15:00:00Z",
@@ -168,7 +164,6 @@ const emptySitesFetch = () => ({
   status: 200,
   json: async () => ({
     items: [],
-    frame_ancestors: ["http://localhost:3000"],
     widget_origin: "http://widget.localhost:3000",
   }),
 })
@@ -419,7 +414,6 @@ describe("sites contact info", () => {
           status: 200,
           json: async () => ({
             items: [siteWithContact],
-            frame_ancestors: ["http://localhost:3000"],
             widget_origin: "http://widget.localhost:3000",
           }),
         }

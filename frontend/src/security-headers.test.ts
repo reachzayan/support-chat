@@ -15,6 +15,7 @@ describe("security headers", () => {
   test("widget CSP is not baked at build time and staff HTML cannot be framed", async () => {
     const rules = await nextConfig.headers!()
     expect(headerValue(rules, "/widget", "Content-Security-Policy")).toBeUndefined()
+    expect(headerValue(rules, "/widget", "Referrer-Policy")).toBe("no-referrer")
     const staffCsp = headerValue(rules, "/inbox", "Content-Security-Policy")
     expect(staffCsp).toContain("frame-ancestors 'none'")
     expect(staffCsp).toContain("default-src 'self'")

@@ -28,6 +28,12 @@ server {
         proxy_set_header X-Forwarded-Proto $scheme;
     }
 
+    # Server-to-server only. The frontend container reaches this route over the
+    # private Docker network; it must never be exposed at the public edge.
+    location ^~ /api/internal/ {
+        return 404;
+    }
+
     location /api/ {
         proxy_pass http://127.0.0.1:8000;
         proxy_set_header Host $host;

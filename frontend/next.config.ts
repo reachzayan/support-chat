@@ -5,6 +5,7 @@ const wsOrigin = apiOrigin.replace(/^http/, "ws")
 
 const nosniff = { key: "X-Content-Type-Options", value: "nosniff" }
 const referrer = { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" }
+const widgetReferrer = { key: "Referrer-Policy", value: "no-referrer" }
 // HSTS is enforced at the edge in production.
 // Next App Router boots with inline scripts; a static CSP without script-src
 // (falling back to default-src 'self') blocks hydration and the login form
@@ -32,7 +33,7 @@ const nextConfig: NextConfig = {
     return [
       {
         source: "/widget",
-        headers: [nosniff],
+        headers: [nosniff, widgetReferrer],
       },
       {
         source: "/admin/:path*",

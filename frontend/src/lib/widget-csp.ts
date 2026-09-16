@@ -1,27 +1,27 @@
+const exactHttpOrigin = (value: string): string | null => {
+  try {
+    const url = new URL(value)
+    if (url.protocol !== "http:" && url.protocol !== "https:") {
+      return null
+    }
+    if (url.username || url.password || url.pathname !== "/" || url.search || url.hash) {
+      return null
+    }
+    return url.origin === value ? value : null
+  } catch {
+    return null
+  }
+}
+
 export const widgetFrameAncestorsCsp = (origins: readonly string[]): string => {
-  const allowed = origins.filter((origin) => origin.length > 0 && !origin.includes("*"))
+  const allowed = origins
+    .map(exactHttpOrigin)
+    .filter((origin): origin is string => origin !== null)
+    .filter((origin, index, all) => all.indexOf(origin) === index)
   if (allowed.length === 0) {
     return "frame-ancestors 'none'"
   }
   return `frame-ancestors ${allowed.join(" ")}`
-}
-
-export const parentOriginFromReferer = (referer: string | null): string => {
-  if (!referer) {
-    return ""
-  }
-  try {
-    const url = new URL(referer)
-    if (url.protocol !== "http:" && url.protocol !== "https:") {
-      return ""
-    }
-    if (url.username || url.origin.includes("*")) {
-      return ""
-    }
-    return url.origin
-  } catch {
-    return ""
-  }
 }
 
 const ancestorsFromPayload = (payload: unknown): string[] => {
@@ -37,24 +37,40 @@ const ancestorsFromPayload = (payload: unknown): string[] => {
 export const fetchWidgetAncestors = async (
   fetcher: typeof fetch,
   apiOrigin: string,
-  parent: string,
-  fallback: readonly string[],
+  serviceSecret: string,
+  siteKey: string,
+  publicKey: string,
+  parentOrigin: string,
+  clientIp = "",
 ): Promise<string[]> => {
-  if (parent === "" || parent.includes("*")) {
+  if (!serviceSecret || !siteKey || !publicKey || exactHttpOrigin(parentOrigin) === null) {
     return []
   }
   try {
-    const response = await fetcher(
-      `${apiOrigin}/api/public/widget-frame-ancestors?parent=${encodeURIComponent(parent)}`,
-    )
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+      "X-SupportChat-Widget-CSP": serviceSecret,
+    }
+    if (clientIp) {
+      headers["X-SupportChat-Client-IP"] = clientIp
+    }
+    const response = await fetcher(`${apiOrigin}/api/internal/widget-frame-ancestors`, {
+      method: "POST",
+      cache: "no-store",
+      headers,
+      body: JSON.stringify({
+        site_key: siteKey,
+        public_key: publicKey,
+        parent_origin: parentOrigin,
+      }),
+      signal: AbortSignal.timeout(2_000),
+    })
     if (!response.ok) {
-      return fallback.includes(parent) ? [parent] : []
+      return []
     }
-    if (ancestorsFromPayload(await response.json()).includes(parent)) {
-      return [parent]
-    }
-    return []
+    const ancestors = ancestorsFromPayload(await response.json())
+    return ancestors.includes(parentOrigin) ? [parentOrigin] : []
   } catch {
-    return fallback.includes(parent) ? [parent] : []
+    return []
   }
 }

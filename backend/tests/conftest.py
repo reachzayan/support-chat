@@ -16,6 +16,10 @@ os.environ.setdefault("REDIS_URL", DEFAULT_TEST_REDIS_URL)
 os.environ.setdefault("JWT_SECRET", "t" * 64)
 os.environ.setdefault("WIDGET_TOKEN_SECRET", "w" * 64)
 os.environ.setdefault("RATE_KEY_SECRET", "r" * 64)
+os.environ.setdefault(
+    "WIDGET_CSP_SERVICE_SECRET",
+    "e1a4b7c0d3f6a9b2c5d8e1f4a7b0c3d6e9f2a5b8c1d4e7f0a3b6c9d2e5f8a1b4c",
+)
 os.environ.setdefault("COOKIE_SECURE", "false")
 os.environ.setdefault("STAFF_APP_ORIGIN", "http://localhost:3000")
 os.environ.setdefault("WIDGET_ORIGIN", "http://widget.localhost:3000")

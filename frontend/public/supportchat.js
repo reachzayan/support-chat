@@ -173,11 +173,15 @@
     style.textContent = PANEL_STYLE;
     doc.head.appendChild(style);
   };
-  var createPanel = (doc, widgetOrigin) => {
+  var createPanel = (doc, widgetOrigin, siteKey, publicKey, parentOrigin) => {
     ensurePanelStyle(doc);
     const iframe = doc.createElement("iframe");
     iframe.title = "SupportChat";
-    iframe.src = `${widgetOrigin}/widget`;
+    const widgetUrl = new URL("/widget", widgetOrigin);
+    widgetUrl.searchParams.set("site_key", siteKey);
+    widgetUrl.searchParams.set("public_key", publicKey);
+    widgetUrl.searchParams.set("parent_origin", parentOrigin);
+    iframe.src = widgetUrl.toString();
     iframe.setAttribute("data-supportchat-panel", "");
     iframe.style.cssText = [
       "position:fixed",
@@ -589,7 +593,13 @@
       runtime.pendingResume = resume;
     }
     if (runtime.iframe === null) {
-      runtime.iframe = createPanel(runtime.doc, runtime.widgetOrigin);
+      runtime.iframe = createPanel(
+        runtime.doc,
+        runtime.widgetOrigin,
+        runtime.config.siteKey,
+        runtime.config.publicKey,
+        originFromHref(runtime.win.location.href)
+      );
     }
     showPanel(runtime);
     hideHostError(runtime.doc);

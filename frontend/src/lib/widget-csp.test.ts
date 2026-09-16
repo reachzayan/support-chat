@@ -1,65 +1,91 @@
 import { describe, expect, test, vi } from "vitest"
 
-import {
-  fetchWidgetAncestors,
-  parentOriginFromReferer,
-  widgetFrameAncestorsCsp,
-} from "./widget-csp"
+import { fetchWidgetAncestors, widgetFrameAncestorsCsp } from "./widget-csp"
 
 const LOVABLE = "https://sample-preview.example.com"
-const LOCAL = "http://localhost:3000"
-const SSLIP_HOST = "https://host.deployment.example.com"
+const SITE_KEY = "lovable-demo"
+const PUBLIC_KEY = "a".repeat(64)
+const SERVICE_SECRET = "c".repeat(64)
 
 describe("widget frame-ancestors CSP", () => {
-  test("a website only allows itself as the ancestor", () => {
-    expect(widgetFrameAncestorsCsp([LOVABLE])).toBe(`frame-ancestors ${LOVABLE}`)
+  test("keeps only exact canonical http origins", () => {
+    expect(
+      widgetFrameAncestorsCsp([
+        LOVABLE,
+        `${LOVABLE}/path`,
+        "https://user@example.com",
+        "https://evil.test csp-injection",
+        "*",
+      ]),
+    ).toBe(`frame-ancestors ${LOVABLE}`)
   })
 
-  test("strips wildcards and refuses framing when nothing remains", () => {
-    expect(widgetFrameAncestorsCsp(["*"])).toBe("frame-ancestors 'none'")
+  test("refuses framing when no valid origin remains", () => {
     expect(widgetFrameAncestorsCsp([])).toBe("frame-ancestors 'none'")
+    expect(widgetFrameAncestorsCsp(["*"])).toBe("frame-ancestors 'none'")
   })
 })
 
-describe("parent origin from referer", () => {
-  test("keeps the embedding website origin and drops the path", () => {
-    expect(parentOriginFromReferer(`${LOVABLE}/pricing`)).toBe(LOVABLE)
-  })
-
-  test("rejects missing or invalid referers", () => {
-    expect(parentOriginFromReferer(null)).toBe("")
-    expect(parentOriginFromReferer("not-a-url")).toBe("")
-  })
-})
-
-describe("widget ancestor fetch", () => {
-  test("asks only for the embedding website and ignores other sites in the payload", async () => {
+describe("site-scoped widget ancestor fetch", () => {
+  test("posts the exact public site identity and parent origin to the internal API", async () => {
     const fetcher = vi.fn().mockResolvedValue({
       ok: true,
-      json: async () => ({ ancestors: [LOVABLE, SSLIP_HOST] }),
+      json: async () => ({ ancestors: [LOVABLE] }),
     })
 
     await expect(
-      fetchWidgetAncestors(fetcher, "http://127.0.0.1:8000", LOVABLE, [LOCAL]),
+      fetchWidgetAncestors(
+        fetcher,
+        "http://127.0.0.1:8000",
+        SERVICE_SECRET,
+        SITE_KEY,
+        PUBLIC_KEY,
+        LOVABLE,
+      ),
     ).resolves.toEqual([LOVABLE])
-    expect(fetcher.mock.calls[0]?.[0]).toBe(
-      `http://127.0.0.1:8000/api/public/widget-frame-ancestors?parent=${encodeURIComponent(LOVABLE)}`,
+
+    expect(fetcher).toHaveBeenCalledWith(
+      "http://127.0.0.1:8000/api/internal/widget-frame-ancestors",
+      expect.objectContaining({
+        method: "POST",
+        cache: "no-store",
+        headers: {
+          "Content-Type": "application/json",
+          "X-SupportChat-Widget-CSP": SERVICE_SECRET,
+        },
+        body: JSON.stringify({
+          site_key: SITE_KEY,
+          public_key: PUBLIC_KEY,
+          parent_origin: LOVABLE,
+        }),
+      }),
     )
   })
 
-  test("does not fall back to other websites when the endpoint fails", async () => {
-    const fetcher = vi.fn().mockResolvedValue({ ok: false, json: async () => ({}) })
+  test("fails closed without identity or service authentication", async () => {
+    const fetcher = vi.fn()
 
     await expect(
-      fetchWidgetAncestors(fetcher, "http://127.0.0.1:8000", LOVABLE, [LOCAL]),
+      fetchWidgetAncestors(fetcher, "http://127.0.0.1:8000", "", SITE_KEY, PUBLIC_KEY, LOVABLE),
     ).resolves.toEqual([])
+    await expect(
+      fetchWidgetAncestors(fetcher, "http://127.0.0.1:8000", SERVICE_SECRET, "", "", LOVABLE),
+    ).resolves.toEqual([])
+    expect(fetcher).not.toHaveBeenCalled()
   })
 
-  test("allows a platform host from env only when that host is the parent", async () => {
+  test("has no static fallback when the internal API fails", async () => {
     const fetcher = vi.fn().mockRejectedValue(new Error("offline"))
 
     await expect(
-      fetchWidgetAncestors(fetcher, "http://127.0.0.1:8000", LOCAL, [LOCAL]),
-    ).resolves.toEqual([LOCAL])
+      fetchWidgetAncestors(
+        fetcher,
+        "http://127.0.0.1:8000",
+        SERVICE_SECRET,
+        SITE_KEY,
+        PUBLIC_KEY,
+        LOVABLE,
+      ),
+    ).resolves.toEqual([])
   })
 })

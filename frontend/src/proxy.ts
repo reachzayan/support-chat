@@ -1,11 +1,7 @@
 import { NextResponse } from "next/server"
 import type { NextRequest } from "next/server"
 
-import {
-  fetchWidgetAncestors,
-  parentOriginFromReferer,
-  widgetFrameAncestorsCsp,
-} from "./lib/widget-csp"
+import { fetchWidgetAncestors, widgetFrameAncestorsCsp } from "./lib/widget-csp"
 
 const hostFromOrigin = (value: string | undefined) => {
   if (!value) {
@@ -28,12 +24,11 @@ const marketingHost = () => {
 
 const apiOrigin = () => process.env.API_ORIGIN ?? "http://127.0.0.1:8000"
 
-const envFallback = () => {
-  const raw = process.env.WIDGET_FRAME_ANCESTORS ?? process.env.APPROVED_FRAME_ANCESTORS ?? ""
-  return raw
-    .split(",")
-    .map((part) => part.trim())
-    .filter((part) => part.length > 0 && !part.includes("*"))
+const cspServiceSecret = () => process.env.WIDGET_CSP_SERVICE_SECRET ?? ""
+
+const clientIp = (request: NextRequest) => {
+  const raw = request.headers.get("x-real-ip") ?? request.headers.get("x-forwarded-for") ?? ""
+  return raw.split(",", 1)[0]?.trim().slice(0, 64) ?? ""
 }
 
 export const STAFF_PREFIXES = [
@@ -59,19 +54,41 @@ const isStaffPath = (pathname: string) => {
   return STAFF_PREFIXES.some((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`))
 }
 
+const isWidgetOnlyPath = (pathname: string) => {
+  return (
+    pathname === "/widget" ||
+    pathname === "/supportchat.js" ||
+    pathname === "/api/public/widget-bootstrap"
+  )
+}
+
 const applyWidgetCsp = async (request: NextRequest, response: NextResponse) => {
   if (request.nextUrl.pathname !== "/widget") {
     return response
   }
-  const parent = parentOriginFromReferer(request.headers.get("referer"))
-  const origins = await fetchWidgetAncestors(fetch, apiOrigin(), parent, envFallback())
+  const siteKey = request.nextUrl.searchParams.get("site_key") ?? ""
+  const publicKey = request.nextUrl.searchParams.get("public_key") ?? ""
+  const parentOrigin = request.nextUrl.searchParams.get("parent_origin") ?? ""
+  const origins = await fetchWidgetAncestors(
+    fetch,
+    apiOrigin(),
+    cspServiceSecret(),
+    siteKey,
+    publicKey,
+    parentOrigin,
+    clientIp(request),
+  )
   response.headers.set("Content-Security-Policy", widgetFrameAncestorsCsp(origins))
+  response.headers.set("Cache-Control", "private, no-store")
   return response
 }
 
 export const proxy = async (request: NextRequest) => {
   const host = request.headers.get("host") ?? request.nextUrl.host
   const pathname = request.nextUrl.pathname
+  if (host !== widgetHost() && isWidgetOnlyPath(pathname)) {
+    return new NextResponse(null, { status: 404 })
+  }
   if ((host === widgetHost() || host === marketingHost()) && isStaffPath(pathname)) {
     return new NextResponse(null, { status: 404 })
   }

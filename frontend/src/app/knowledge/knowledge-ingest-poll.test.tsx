@@ -47,7 +47,6 @@ describe("knowledge ingest progress", () => {
         if (url === "/api/sites") {
           return jsonOk({
             items: [siteRecord(SITE_ID, "samplesite", "SampleSite")],
-            frame_ancestors: ["http://localhost:3000"],
             widget_origin: "http://widget.localhost:3000",
           })
         }

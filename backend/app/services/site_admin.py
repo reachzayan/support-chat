@@ -144,26 +144,20 @@ class SiteAdminService:
         self._sites = SiteRepository(session)
         self._articles = ArticleRepository(session)
 
-    async def frame_ancestors_for_parent(self, raw: str | None) -> list[str]:
-        origin = parent_origin(raw or "")
-        if origin is None:
-            return []
-        env = [
-            part.strip()
-            for part in get_settings().frame_ancestor_origins()
-            if part.strip() and "*" not in part
-        ]
-        if origin in env or await self._sites.has_allowed_origin(origin):
-            return [origin]
-        return []
+    async def frame_ancestors_for_site(
+        self, site_key: str, public_key: str, raw_parent_origin: str
+    ) -> list[str] | None:
+        origin = parent_origin(raw_parent_origin)
+        if origin is None or origin != raw_parent_origin:
+            return None
+        site = await self._sites.get_enabled_by_public_identity(site_key, public_key)
+        if site is None or origin not in site.allowed_origins:
+            return None
+        return [origin]
 
-    async def list_sites(self) -> tuple[list[Site], list[str], str]:
+    async def list_sites(self) -> tuple[list[Site], str]:
         settings = get_settings()
-        return (
-            await self._sites.list_all(),
-            settings.frame_ancestor_origins(),
-            settings.widget_origin,
-        )
+        return await self._sites.list_all(), settings.widget_origin
 
     async def _allocate_key(self, preferred: str) -> str:
         base = preferred[:56]

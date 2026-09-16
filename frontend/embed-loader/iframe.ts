@@ -24,12 +24,22 @@ const ensurePanelStyle = (doc: Document) => {
   doc.head.appendChild(style)
 }
 
-export const createPanel = (doc: Document, widgetOrigin: string): HTMLIFrameElement => {
+export const createPanel = (
+  doc: Document,
+  widgetOrigin: string,
+  siteKey: string,
+  publicKey: string,
+  parentOrigin: string,
+): HTMLIFrameElement => {
   ensurePanelStyle(doc)
   // oxlint-disable-next-line react/iframe-missing-sandbox -- sandbox unique-origin would break WS Origin
   const iframe = doc.createElement("iframe")
   iframe.title = "SupportChat"
-  iframe.src = `${widgetOrigin}/widget`
+  const widgetUrl = new URL("/widget", widgetOrigin)
+  widgetUrl.searchParams.set("site_key", siteKey)
+  widgetUrl.searchParams.set("public_key", publicKey)
+  widgetUrl.searchParams.set("parent_origin", parentOrigin)
+  iframe.src = widgetUrl.toString()
   iframe.setAttribute("data-supportchat-panel", "")
   iframe.style.cssText = [
     "position:fixed",

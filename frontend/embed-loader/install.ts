@@ -2,7 +2,7 @@ import { requestBootstrap, type PublicWidgetConfig } from "./bootstrap"
 import { acceptWidgetFrame, createPanel, sendBootstrap, sendContext } from "./iframe"
 import { hideHostError, mountLauncher, showHostError } from "./launcher"
 import { watchNavigation } from "./navigation"
-import { originFromScript } from "./sanitize"
+import { originFromHref, originFromScript } from "./sanitize"
 import { clearResumeToken, readResumeToken, writeResumeToken } from "./storage"
 
 type LoaderConfig = { siteKey: string; publicKey: string }
@@ -176,7 +176,13 @@ const applyBootstrap = (
     runtime.pendingResume = resume
   }
   if (runtime.iframe === null) {
-    runtime.iframe = createPanel(runtime.doc, runtime.widgetOrigin)
+    runtime.iframe = createPanel(
+      runtime.doc,
+      runtime.widgetOrigin,
+      runtime.config.siteKey,
+      runtime.config.publicKey,
+      originFromHref(runtime.win.location.href),
+    )
   }
   showPanel(runtime)
   hideHostError(runtime.doc)
