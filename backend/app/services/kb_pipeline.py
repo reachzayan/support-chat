@@ -836,7 +836,7 @@ async def _persist_chunks(
                 display_locator=part.display_locator,
                 body=body,
                 embedding=vectors[ordinal] if vectors else None,
-                enabled=True,
+                enabled=prior.enabled if prior is not None else True,
                 approved=True,
                 review_status="approved",
                 topic_label=(prior.topic_label if prior is not None else heading) or heading,

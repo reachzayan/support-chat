@@ -202,11 +202,25 @@ class KbSourceService:
         if page is None:
             raise AdminError("not_found")
         page.enabled = enabled
-        result = await self._session.execute(select(KbChunk).where(KbChunk.page_id == page.id))
-        for chunk in result.scalars().all():
-            chunk.enabled = enabled
         await self._session.commit()
+        clear_units_cache()
         return page
+
+    async def patch_chunk(self, chunk_id: UUID, *, enabled: bool) -> KbChunk:
+        result = await self._session.execute(
+            select(KbChunk)
+            .join(KbSnapshot, KbSnapshot.id == KbChunk.snapshot_id)
+            .where(KbChunk.id == chunk_id, KbSnapshot.state == "live")
+        )
+        chunk = result.scalar_one_or_none()
+        if chunk is None:
+            if await self._session.get(KbChunk, chunk_id) is None:
+                raise AdminError("not_found")
+            raise AdminError("stale")
+        chunk.enabled = enabled
+        await self._session.commit()
+        clear_units_cache()
+        return chunk
 
     async def list_snapshots(self, source_id: UUID) -> list[KbSnapshot]:
         source = await self._session.get(KbSource, source_id)
