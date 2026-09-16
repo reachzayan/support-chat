@@ -1,6 +1,7 @@
 export const SITE_ID = "11111111-1111-4111-8111-111111111111"
 export const SOURCE_ID = "22222222-2222-4222-8222-222222222222"
 export const PAGE_ID = "33333333-3333-4333-8333-333333333333"
+export const CHUNK_ID = "77777777-7777-4777-8777-777777777777"
 export const PAGE_TITLE = "Turnaround"
 export const PAGE_URL = "https://sample-site.example.com/faq"
 export const TIMING_BODY = "Most negative results are reported within 24-48 hours."
@@ -78,7 +79,7 @@ const pageDetail = () =>
     ...easyPage(),
     skip_reason: null,
     content_text: TIMING_BODY,
-    chunks: [{ ordinal: 0, heading: PAGE_TITLE, body: TIMING_BODY, enabled: true }],
+    chunks: [{ id: CHUNK_ID, ordinal: 0, heading: PAGE_TITLE, body: TIMING_BODY, enabled: true }],
   })
 
 const siteSourcesRoute = (url: string, init?: RequestInit) => {
@@ -95,6 +96,7 @@ const kbPageRoute = (url: string, init?: RequestInit) => {
   return init?.method === "PATCH" ? patchPage(init) : pageDetail()
 }
 
+// oxlint-disable-next-line eslint/complexity -- The test router mirrors the distinct API paths the page consumes.
 const knowledgeRoute = (url: string, init?: RequestInit) => {
   if (url === "/api/sites") {
     return sitesList()
@@ -108,6 +110,16 @@ const knowledgeRoute = (url: string, init?: RequestInit) => {
   }
   if (url === `/api/kb-sources/${SOURCE_ID}/pages`) {
     return sourcePages()
+  }
+  if (url === `/api/kb-chunks/${CHUNK_ID}` && init?.method === "PATCH") {
+    const body = JSON.parse(String(init.body)) as { enabled: boolean }
+    return jsonOk({
+      id: CHUNK_ID,
+      ordinal: 0,
+      heading: PAGE_TITLE,
+      body: TIMING_BODY,
+      enabled: body.enabled,
+    })
   }
   const page = kbPageRoute(url, init)
   if (page) {
