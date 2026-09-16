@@ -449,8 +449,8 @@ def test_two_agents_race_join_one_winner_loser_cannot_send(client: TestClient) -
                 "name": "Ada Lopez",
                 "email": "ada@example.com",
                 "phone": "",
-                "inquiry_type": "results",
-                "message": DOT_QUESTION,
+                "inquiry_type": "other",
+                "message": "",
             }
         )
         collect_until(
