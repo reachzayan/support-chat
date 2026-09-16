@@ -347,7 +347,8 @@ def test_list_includes_fixture_snippet_and_csp_warning_flag(client: TestClient) 
     assert "YOUR_KEY" not in item["snippet"]
     assert "access_token" not in item["snippet"]
     assert "bootstrap_token" not in item["snippet"]
-    assert item["origins_missing_from_frame_ancestors"] is True
+    assert item["origins_missing_from_frame_ancestors"] is False
+    assert "https://missing.example" not in listed.json()["frame_ancestors"]
     assert listed.json()["widget_origin"] == WIDGET_ORIGIN
     assert "*" not in listed.json()["frame_ancestors"]
 

@@ -22,7 +22,7 @@ from app.models.user import User
 from app.models.visitor import Visitor
 from app.repositories.article_repo import ArticleRepository
 from app.repositories.conversation_repo import ConversationRepository
-from app.repositories.origins import InvalidOrigin, canonicalize_origins
+from app.repositories.origins import InvalidOrigin, canonicalize_origins, parent_origin
 from app.repositories.site_repo import SiteRepository
 from app.services.kb_crawl import fetch_html
 from app.settings import get_settings
@@ -144,10 +144,26 @@ class SiteAdminService:
         self._sites = SiteRepository(session)
         self._articles = ArticleRepository(session)
 
+    async def frame_ancestors_for_parent(self, raw: str | None) -> list[str]:
+        origin = parent_origin(raw or "")
+        if origin is None:
+            return []
+        env = [
+            part.strip()
+            for part in get_settings().frame_ancestor_origins()
+            if part.strip() and "*" not in part
+        ]
+        if origin in env or await self._sites.has_allowed_origin(origin):
+            return [origin]
+        return []
+
     async def list_sites(self) -> tuple[list[Site], list[str], str]:
         settings = get_settings()
-        ancestors = settings.frame_ancestor_origins()
-        return await self._sites.list_all(), ancestors, settings.widget_origin
+        return (
+            await self._sites.list_all(),
+            settings.frame_ancestor_origins(),
+            settings.widget_origin,
+        )
 
     async def _allocate_key(self, preferred: str) -> str:
         base = preferred[:56]
