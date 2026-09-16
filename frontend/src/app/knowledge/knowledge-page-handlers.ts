@@ -8,12 +8,14 @@ import {
   type KbPageDetail,
   type KbChunkRecord,
   type KbPageRecord,
+  type KbSourceRecord,
 } from "@/components/admin/staff-api"
 
 // oxlint-disable-next-line eslint/max-lines-per-function -- Page and chunk toggles share one local state boundary so rollback remains consistent.
 export const useKnowledgePageHandlers = (
   setPages: Dispatch<SetStateAction<KbPageRecord[]>>,
   setPageDetail: Dispatch<SetStateAction<KbPageDetail | null>>,
+  setSources: Dispatch<SetStateAction<KbSourceRecord[]>>,
 ) => {
   const [chunkErrors, setChunkErrors] = useState<Record<string, string>>({})
   const [chunkPendingIds, setChunkPendingIds] = useState<string[]>([])
@@ -45,6 +47,18 @@ export const useKnowledgePageHandlers = (
       }
     },
     [setPageDetail, setPages],
+  )
+
+  const handleRetryPage = useCallback(
+    async (page: KbPageRecord) => {
+      const response = await staffWrite(`/api/kb-pages/${page.id}/retry`, "POST", {})
+      if (!response.ok) {
+        return
+      }
+      const source = (await response.json()) as KbSourceRecord
+      setSources((current) => current.map((row) => (row.id === source.id ? source : row)))
+    },
+    [setSources],
   )
 
   const handleToggleChunk = useCallback(
@@ -113,6 +127,7 @@ export const useKnowledgePageHandlers = (
   return {
     handleSelectPage,
     handleTogglePage,
+    handleRetryPage,
     handleToggleChunk,
     chunkErrors,
     chunkPendingIds,

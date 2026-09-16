@@ -40,9 +40,10 @@ const formatDiffStatus = (payload: KbDiff, hasSuperseded: boolean) => {
   const added = payload.added.length
   const changed = payload.changed.length
   const removed = payload.removed.length
-  return hasSuperseded
-    ? `${added} added, ${changed} changed, ${removed} removed. A previous snapshot can be restored.`
-    : `${added} added, ${changed} changed, ${removed} removed.`
+  if (!hasSuperseded) {
+    return `Initial index: ${added} ${added === 1 ? "unit" : "units"}.`
+  }
+  return `${added} added, ${changed} changed, ${removed} removed. A previous snapshot can be restored.`
 }
 
 export const useKnowledgeDiff = (setSources: (value: SetStateAction<KbSourceRecord[]>) => void) => {

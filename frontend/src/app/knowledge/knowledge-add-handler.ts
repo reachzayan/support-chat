@@ -32,16 +32,22 @@ export const useKnowledgeAddHandler = (
       return false
     }
     const response = await staffWrite(`/api/sites/${siteId}/kb-sources`, "POST", {
-      mode: "list",
+      mode: seed.length > 1 ? "list" : "prefix",
       start_url: seed[0],
       seed_urls: seed,
     })
     if (!response.ok) {
-      setError("Could not add this page. Check the URL and try again.")
+      const payload = (await response.json().catch(() => null)) as { detail?: string } | null
+      setError(payload?.detail ?? "Could not add this page. Check the URL and try again.")
       return false
     }
     const created = (await response.json()) as KbSourceRecord
-    setSources((current) => [...current, created])
+    setSources((current) => {
+      const next = current.filter(
+        (row) => row.id !== created.id && row.start_url !== created.start_url,
+      )
+      return [...next, created]
+    })
     setSourceId(created.id)
     setUrls("")
     setError(null)
