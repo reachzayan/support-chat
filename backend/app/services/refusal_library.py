@@ -12,6 +12,7 @@ from app.llm.safety_markers import SensitiveCategory
 from app.models.kb_chunk import KbChunk
 from app.models.kb_page import KbPage
 from app.models.kb_snapshot import KbSnapshot
+from app.models.kb_source import KbSource
 
 REFUSAL_BODIES: dict[SensitiveCategory, str] = {
     SensitiveCategory.SSN: (
@@ -52,12 +53,14 @@ async def lookup_refusal(
         select(KbChunk, KbPage)
         .join(KbPage, KbPage.id == KbChunk.page_id)
         .join(KbSnapshot, KbSnapshot.id == KbChunk.snapshot_id)
+        .join(KbSource, KbSource.id == KbPage.source_id)
         .where(
             KbChunk.site_id == site_id,
             KbChunk.kind == "refusal",
             KbChunk.topic == category.value,
             KbChunk.enabled.is_(True),
             KbPage.enabled.is_(True),
+            KbSource.enabled.is_(True),
             KbSnapshot.state == "live",
         )
         .order_by(KbChunk.ordinal, KbChunk.id)

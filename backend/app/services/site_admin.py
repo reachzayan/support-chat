@@ -1,8 +1,11 @@
+import asyncio
 import json
 import re
+from datetime import UTC, datetime
 from secrets import token_hex
 from uuid import UUID
 
+import structlog
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -21,7 +24,10 @@ from app.repositories.article_repo import ArticleRepository
 from app.repositories.conversation_repo import ConversationRepository
 from app.repositories.origins import InvalidOrigin, canonicalize_origins
 from app.repositories.site_repo import SiteRepository
+from app.services.kb_crawl import fetch_html
 from app.settings import get_settings
+
+log = structlog.get_logger("site_admin")
 
 KEY_RE = re.compile(r"^[a-z][a-z0-9-]{0,62}$")
 NAME_MAX = 120
@@ -29,6 +35,8 @@ GREETING_MAX = 300
 TITLE_MAX = 300
 BODY_MAX = 40_000
 ENABLED_TEXT_MAX = 5 * 1024 * 1024
+CONTACT_INFO_MAX_ITEMS = 10
+CONTACT_INFO_ITEM_MAX = 160
 
 
 class AdminError(Exception):
@@ -67,6 +75,49 @@ def _privacy_url(raw: str) -> str:
     if parsed.scheme not in ("http", "https") or not parsed.netloc or parsed.username:
         raise AdminError("invalid")
     return text
+
+
+def _website_url(raw: str) -> str:
+    from urllib.parse import urlparse
+
+    text = raw.strip()
+    parsed = urlparse(text)
+    if parsed.scheme != "https" or not parsed.netloc or parsed.username:
+        raise AdminError("invalid")
+    return text
+
+
+def _install_hosts(website_url: str) -> set[str]:
+    from urllib.parse import urlparse
+
+    host = urlparse(website_url).hostname
+    if not host:
+        return set()
+    folded = host.casefold()
+    hosts = {folded}
+    if folded.startswith("www."):
+        hosts.add(folded.removeprefix("www."))
+    else:
+        hosts.add(f"www.{folded}")
+    return hosts
+
+
+def _contact_info(raw: list[str] | None) -> list[str]:
+    if raw is None:
+        return []
+    cleaned: list[str] = []
+    seen: set[str] = set()
+    for item in raw:
+        text = (item or "").strip()
+        if not text or text in seen:
+            continue
+        if len(text) > CONTACT_INFO_ITEM_MAX:
+            raise AdminError("invalid")
+        seen.add(text)
+        cleaned.append(text)
+        if len(cleaned) > CONTACT_INFO_MAX_ITEMS:
+            raise AdminError("too_large")
+    return cleaned
 
 
 def _origins(raw: list[str] | None) -> list[str]:
@@ -116,6 +167,9 @@ class SiteAdminService:
         greeting: str,
         privacy_url: str,
         origins: list[str] | None,
+        website_url: str | None = None,
+        contact_info: list[str] | None = None,
+        admin: User | None = None,
     ) -> Site:
         clean_name = _plain(name, NAME_MAX)
         if key is None or not key.strip():
@@ -126,6 +180,8 @@ class SiteAdminService:
                 raise AdminError("invalid")
             if await self._sites.get_by_key(slug) is not None:
                 raise AdminError("conflict")
+        clean_website_url = _website_url(website_url) if website_url else None
+        clean_contact_info = _contact_info(contact_info)
         site = await self._sites.create(
             key=slug,
             name=clean_name,
@@ -134,7 +190,48 @@ class SiteAdminService:
             greeting=_plain(greeting, GREETING_MAX),
             privacy_url=_privacy_url(privacy_url),
         )
+        site.website_url = clean_website_url
+        site.contact_info = clean_contact_info
         await self._session.commit()
+        if clean_website_url is not None:
+            await self._build_kb_from_website(site, admin)
+            await self._check_install(site)
+        return site
+
+    async def _build_kb_from_website(self, site: Site, admin: User | None) -> None:
+        # Best-effort: a slow/unreachable homepage or a queue outage must not
+        # fail site creation. The admin can retry from the knowledge screen.
+        if admin is None:
+            return
+        try:
+            from app.services.kb_source_admin import KbSourceService
+
+            await KbSourceService(self._session).create_source(
+                site.id, admin, mode="prefix", start_url=site.website_url or "", seed_urls=[]
+            )
+        except Exception:
+            log.info("auto_kb_source_failed", site_id=str(site.id))
+
+    async def _check_install(self, site: Site) -> None:
+        assert site.website_url is not None
+        try:
+            html = await asyncio.to_thread(
+                fetch_html, site.website_url, _install_hosts(site.website_url)
+            )
+            installed = site.public_key in html
+        except Exception:
+            installed = False
+        site.widget_installed = installed
+        site.widget_checked_at = datetime.now(UTC)
+        await self._session.commit()
+
+    async def check_install(self, site_id: UUID) -> Site:
+        site = await self._sites.lock_by_id(site_id)
+        if site is None:
+            raise AdminError("not_found")
+        if not site.website_url:
+            raise AdminError("no_website_url")
+        await self._check_install(site)
         return site
 
     async def update_site(  # noqa: C901
@@ -145,6 +242,8 @@ class SiteAdminService:
         greeting: str | None,
         privacy_url: str | None,
         origins: list[str] | None,
+        website_url: str | None = None,
+        contact_info: list[str] | None = None,
         enabled: bool | None = None,
         bot_enabled: bool | None = None,
         human_enabled: bool | None = None,
@@ -161,6 +260,14 @@ class SiteAdminService:
             site.privacy_url = _privacy_url(privacy_url)
         if origins is not None:
             site.allowed_origins = _origins(origins)
+        if contact_info is not None:
+            site.contact_info = _contact_info(contact_info)
+        if website_url is not None:
+            next_website_url = _website_url(website_url) if website_url.strip() else None
+            if next_website_url != site.website_url:
+                site.widget_installed = None
+                site.widget_checked_at = None
+            site.website_url = next_website_url
         if enabled is not None:
             site.enabled = enabled
         next_bot = site.bot_enabled if bot_enabled is None else bot_enabled

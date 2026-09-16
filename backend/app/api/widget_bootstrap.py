@@ -100,6 +100,7 @@ async def widget_bootstrap(request: Request, session: SessionDep) -> JSONRespons
             "name": result.site_name,
             "greeting": result.greeting,
             "privacy_url": result.privacy_url,
+            "contact_info": result.contact_info,
             "bot_enabled": result.bot_enabled,
             "human_enabled": result.human_enabled,
         },

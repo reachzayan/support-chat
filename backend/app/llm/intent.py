@@ -61,6 +61,24 @@ ESCALATE_PHRASES = (
     "real person",
 )
 ESCALATE_WORDS = ("human", "agent", "specialist")
+CONTACT_PHRASES = (
+    "contact you",
+    "contact us",
+    "your contact",
+    "get in touch",
+    "reach you",
+    "reach out to you",
+    "call you",
+    "phone number",
+    "email address",
+    "your email",
+    "your phone",
+    "your number",
+    "how do i contact",
+    "how can i contact",
+    "how do i reach",
+    "how can i reach",
+)
 INTENT_FLOOR = 0.75
 PROTOTYPE_PHRASES: dict[str, str] = {
     "pricing": "how much does a screening cost",
@@ -113,6 +131,13 @@ def is_escalate_request(value: str) -> bool:
         return True
     tokens = set(WORD_RE.findall(text))
     return any(word in tokens for word in ESCALATE_WORDS)
+
+
+def is_contact_request(value: str) -> bool:
+    text = normalize_text(value)
+    if not text:
+        return False
+    return any(phrase in text for phrase in CONTACT_PHRASES)
 
 
 def is_chitchat(value: str) -> bool:

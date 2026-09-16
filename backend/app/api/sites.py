@@ -1,3 +1,4 @@
+from datetime import datetime
 from typing import Any
 from uuid import UUID
 
@@ -20,6 +21,8 @@ class SiteCreateIn(BaseModel):
     greeting: str
     privacy_url: str
     origins: list[str] | None = None
+    website_url: str | None = None
+    contact_info: list[str] | None = None
 
 
 class SitePatchIn(BaseModel):
@@ -29,6 +32,8 @@ class SitePatchIn(BaseModel):
     greeting: str | None = None
     privacy_url: str | None = None
     origins: list[str] | None = None
+    website_url: str | None = None
+    contact_info: list[str] | None = None
     enabled: bool | None = None
     bot_enabled: bool | None = None
     human_enabled: bool | None = None
@@ -50,6 +55,10 @@ class SiteOut(BaseModel):
     human_enabled: bool
     callback_window_hours: int
     off_brand_blocklist: list[str]
+    website_url: str | None
+    widget_installed: bool | None
+    widget_checked_at: datetime | None
+    contact_info: list[str]
 
 
 class OffBrandListIn(BaseModel):
@@ -75,6 +84,11 @@ def _http_error(exc: AdminError) -> HTTPException:
         )
     if exc.code == "too_large":
         return HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail="Too large")
+    if exc.code == "no_website_url":
+        return HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="Add a website URL before checking the install status.",
+        )
     return HTTPException(
         status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail="Invalid request"
     )
@@ -97,6 +111,10 @@ def _site_out(site: Site, ancestors: list[str], widget_origin: str) -> SiteOut:
         human_enabled=site.human_enabled,
         callback_window_hours=int(getattr(site, "callback_window_hours", 24) or 24),
         off_brand_blocklist=list(site.off_brand_blocklist or []),
+        website_url=site.website_url,
+        widget_installed=site.widget_installed,
+        widget_checked_at=site.widget_checked_at,
+        contact_info=list(site.contact_info or []),
     )
 
 
@@ -111,7 +129,7 @@ async def list_sites(session: SessionDep, _staff: CurrentUser) -> SiteListOut:
 
 
 @router.post("/api/sites", response_model=SiteOut, status_code=status.HTTP_201_CREATED)
-async def create_site(payload: SiteCreateIn, session: SessionDep, _admin: CurrentAdmin) -> SiteOut:
+async def create_site(payload: SiteCreateIn, session: SessionDep, admin: CurrentAdmin) -> SiteOut:
     service = SiteAdminService(session)
     try:
         site = await service.create_site(
@@ -120,6 +138,9 @@ async def create_site(payload: SiteCreateIn, session: SessionDep, _admin: Curren
             greeting=payload.greeting,
             privacy_url=payload.privacy_url,
             origins=payload.origins,
+            website_url=payload.website_url,
+            contact_info=payload.contact_info,
+            admin=admin,
         )
     except AdminError as exc:
         raise _http_error(exc) from exc
@@ -139,11 +160,24 @@ async def patch_site(
             greeting=payload.greeting,
             privacy_url=payload.privacy_url,
             origins=payload.origins,
+            website_url=payload.website_url,
+            contact_info=payload.contact_info,
             enabled=payload.enabled,
             bot_enabled=payload.bot_enabled,
             human_enabled=payload.human_enabled,
             callback_window_hours=payload.callback_window_hours,
         )
+    except AdminError as exc:
+        raise _http_error(exc) from exc
+    _, ancestors, widget_origin = await service.list_sites()
+    return _site_out(site, ancestors, widget_origin)
+
+
+@router.post("/api/sites/{site_id}/check-install", response_model=SiteOut)
+async def check_install(site_id: UUID, session: SessionDep, _admin: CurrentAdmin) -> SiteOut:
+    service = SiteAdminService(session)
+    try:
+        site = await service.check_install(site_id)
     except AdminError as exc:
         raise _http_error(exc) from exc
     _, ancestors, widget_origin = await service.list_sites()

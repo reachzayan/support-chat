@@ -416,6 +416,6 @@ def test_canned_replies_are_site_scoped_and_require_staff(client: TestClient) ->
     assert other_replies.status_code == 200
     easy_items = easy_replies.json()["items"]
     other_items = other_replies.json()["items"]
-    assert easy_items == [{"shortcut": "hours", "body": HOURS_BODY}]
+    assert easy_items == [{"shortcut": "hours", "body": HOURS_BODY, "scope": "website"}]
     assert other_items[0]["body"] != HOURS_BODY
     assert other_items[0]["shortcut"] == "hours"

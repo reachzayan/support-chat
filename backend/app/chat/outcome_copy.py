@@ -59,7 +59,23 @@ _THANKS_TOKENS = frozenset({"thanks", "thank", "cheers", "np"})
 _BYE_TOKENS = frozenset({"bye", "goodbye", "cya", "later", "goodnight"})
 
 
-def chitchat_reply(text: str) -> str | None:
+def contact_line(contact_info: list[str]) -> str:
+    items = [item for item in contact_info if item]
+    if len(items) <= 1:
+        joined = items[0] if items else ""
+    else:
+        joined = ", ".join(items[:-1]) + f" or {items[-1]}"
+    return f"You can also reach us at {joined}."
+
+
+def bye_line(contact_info: list[str] | None = None) -> str:
+    items = [item for item in (contact_info or []) if item]
+    if not items:
+        return BYE_LINE
+    return f"{BYE_LINE} {contact_line(items)}"
+
+
+def chitchat_reply(text: str, contact_info: list[str] | None = None) -> str | None:
     from app.services.kb_tokens import tokenize
 
     tokens = set(tokenize(text))
@@ -70,7 +86,7 @@ def chitchat_reply(text: str) -> str | None:
     if tokens <= _THANKS_TOKENS:
         return THANKS_LINE
     if tokens <= _BYE_TOKENS:
-        return BYE_LINE
+        return bye_line(contact_info)
     return None
 
 

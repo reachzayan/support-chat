@@ -18,6 +18,7 @@ from app.chat.outcome_copy import (
     DISENGAGE_LINE,
     KEEP_HELPING_LINE,
     chitchat_reply,
+    contact_line,
     is_transfer_offer_body,
     transfer_offer_line,
 )
@@ -27,6 +28,7 @@ from app.llm.intent import (
     classify_intent,
     classify_sensitive,
     is_chitchat,
+    is_contact_request,
     is_escalate_request,
     is_transfer_consent,
     is_transfer_decline,
@@ -43,7 +45,6 @@ from app.models.site import Site
 from app.models.user import User
 from app.models.visitor import Visitor
 from app.repositories.article_repo import ArticleRepository
-from app.repositories.canned_reply_repo import CannedReplyRepository
 from app.repositories.conversation_repo import ConversationRepository
 from app.repositories.kb_chunk_repo import KbChunkRepository
 from app.repositories.message_repo import MessageRepository
@@ -117,6 +118,7 @@ class BootstrapResult:
     site_name: str
     greeting: str
     privacy_url: str
+    contact_info: list[str]
     site_id: UUID
     visitor_id: UUID
     conversation_id: UUID
@@ -187,7 +189,6 @@ class ConversationService:
         self._conversations = ConversationRepository(session)
         self._messages = MessageRepository(session)
         self._users = UserRepository(session)
-        self._canned = CannedReplyRepository(session)
         self._articles = ArticleRepository(session)
         self._chunks = KbChunkRepository(session)
         self._responder = responder if responder is not None else BotResponder()
@@ -247,6 +248,7 @@ class ConversationService:
             site_name=site.name,
             greeting=site.greeting,
             privacy_url=site.privacy_url,
+            contact_info=list(site.contact_info or []),
             site_id=site.id,
             visitor_id=visitor.id,
             conversation_id=conversation.id,
@@ -725,9 +727,15 @@ class ConversationService:
                 original_question=text,
             )
             return None
+        if is_contact_request(text) and site.contact_info:
+            conversation.active_generation_id = None
+            await self._insert_message(
+                conversation, "system", contact_line(list(site.contact_info))
+            )
+            return None
         if is_chitchat(text):
             conversation.active_generation_id = None
-            reply = chitchat_reply(text)
+            reply = chitchat_reply(text, site.contact_info)
             if reply:
                 await self._insert_message(conversation, "system", reply)
             return None
@@ -982,7 +990,16 @@ class ConversationService:
         result = await self._session.execute(
             select(KbChunk, KbPage)
             .join(KbPage, KbPage.id == KbChunk.page_id)
-            .where(KbChunk.id.in_(chunk_ids), KbChunk.site_id == site.id)
+            .join(KbSnapshot, KbSnapshot.id == KbChunk.snapshot_id)
+            .join(KbSource, KbSource.id == KbPage.source_id)
+            .where(
+                KbChunk.id.in_(chunk_ids),
+                KbChunk.site_id == site.id,
+                KbChunk.enabled.is_(True),
+                KbPage.enabled.is_(True),
+                KbSource.enabled.is_(True),
+                KbSnapshot.state == "live",
+            )
         )
         by_id = {chunk.id: (chunk, page) for chunk, page in result.all()}
         documents = [by_id[unit.id][0] for unit in units if unit.id in by_id]
@@ -1437,10 +1454,6 @@ class ConversationService:
             },
             "messages": [self._inbox_message(message, author) for message, author in rows],
         }
-
-    async def list_canned_replies(self, site_id: UUID) -> list[dict]:
-        replies = await self._canned.list_for_site(site_id)
-        return [{"shortcut": reply.shortcut, "body": reply.body} for reply in replies]
 
     def _inbox_message(self, message: Message, author_user: User | None = None) -> dict:
         author = _user_ref(author_user) if author_user is not None else None
