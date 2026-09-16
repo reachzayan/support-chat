@@ -43,11 +43,15 @@ class SiteRepository:
         result = await self._session.execute(select(Site).order_by(Site.key, Site.id))
         return list(result.scalars().all())
 
-    async def has_allowed_origin(self, origin: str) -> bool:
+    async def get_enabled_by_public_identity(self, key: str, public_key: str) -> Site | None:
         result = await self._session.execute(
-            select(Site.id).where(Site.allowed_origins.contains([origin])).limit(1)
+            select(Site).where(
+                Site.key == key,
+                Site.public_key == public_key,
+                Site.enabled.is_(True),
+            )
         )
-        return result.scalar_one_or_none() is not None
+        return result.scalar_one_or_none()
 
     async def lock_by_id(self, site_id: UUID) -> Site | None:
         result = await self._session.execute(

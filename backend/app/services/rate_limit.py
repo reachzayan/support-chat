@@ -62,6 +62,21 @@ class RateLimiter:
             self.hash_value(site_key),
         )
 
+    async def hit_widget_csp(self, ip: str | None, site_key: str, public_key: str) -> None:
+        settings = self._settings
+        await self.hit(
+            "widget-csp-ip",
+            settings.rate_widget_csp_ip,
+            settings.rate_widget_csp_window,
+            self.hash_value(ip or "none"),
+        )
+        await self.hit(
+            "widget-csp-site",
+            settings.rate_widget_csp_site,
+            settings.rate_widget_csp_window,
+            self.hash_value(f"{site_key}:{public_key}"),
+        )
+
     async def hit_visitor_create(self, ip: str | None, site_id: str) -> None:
         settings = self._settings
         await self.hit(

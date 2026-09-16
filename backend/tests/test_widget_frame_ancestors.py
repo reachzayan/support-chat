@@ -1,5 +1,6 @@
 from fastapi.testclient import TestClient
 
+from app.models.site import Site
 from app.models.user import User
 from app.security.passwords import hash_password
 from tests.ws_helpers import (
@@ -15,8 +16,8 @@ from tests.ws_helpers import (
 
 LOVABLE_ORIGIN = "https://sample-preview.example.com"
 SSLIP_HOST_ORIGIN = "https://host.deployment.example.com"
-ENV_ANCESTOR = "http://localhost:3000"
 FIXTURE_PUBLIC_KEY = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+SERVICE_SECRET = "c" * 64
 ADMIN_EMAIL = "admin@example.local"
 ADMIN_PASSWORD = "secret"
 GREETING = "Talk to a specialist about screening."
@@ -25,6 +26,29 @@ PRIVACY = "https://example.com/privacy"
 
 def _auth(token: str) -> dict[str, str]:
     return {"Authorization": f"Bearer {token}"}
+
+
+def _service_headers(secret: str = SERVICE_SECRET) -> dict[str, str]:
+    return {"X-SupportChat-Widget-CSP": secret}
+
+
+def _lookup(
+    client: TestClient,
+    *,
+    site_key: str = "lovable-demo",
+    public_key: str = FIXTURE_PUBLIC_KEY,
+    parent_origin: str = LOVABLE_ORIGIN,
+    secret: str = SERVICE_SECRET,
+):
+    return client.post(
+        "/api/internal/widget-frame-ancestors",
+        headers=_service_headers(secret),
+        json={
+            "site_key": site_key,
+            "public_key": public_key,
+            "parent_origin": parent_origin,
+        },
+    )
 
 
 def _login_admin(client: TestClient) -> str:
@@ -45,7 +69,10 @@ def _login_admin(client: TestClient) -> str:
     return login_staff(client, ADMIN_EMAIL, ADMIN_PASSWORD)
 
 
-def test_frame_ancestors_for_lovable_parent_are_only_lovable(client: TestClient) -> None:
+def test_exact_enabled_site_returns_only_its_requested_allowed_origin(
+    client: TestClient, monkeypatch
+) -> None:
+    monkeypatch.setenv("WIDGET_CSP_SERVICE_SECRET", SERVICE_SECRET)
     insert_site(
         "lovable-demo",
         "Lovable demo",
@@ -59,19 +86,18 @@ def test_frame_ancestors_for_lovable_parent_are_only_lovable(client: TestClient)
         allowed_origins=[SSLIP_HOST_ORIGIN],
     )
 
-    listed = client.get(
-        "/api/public/widget-frame-ancestors",
-        params={"parent": f"{LOVABLE_ORIGIN}/pricing"},
-    )
+    response = _lookup(client)
 
-    assert listed.status_code == 200
-    assert listed.json() == {"ancestors": [LOVABLE_ORIGIN]}
-    assert SSLIP_HOST_ORIGIN not in listed.json()["ancestors"]
-    assert ENV_ANCESTOR not in listed.json()["ancestors"]
-    assert "*" not in listed.json()["ancestors"]
+    assert response.status_code == 200
+    assert response.json() == {"ancestors": [LOVABLE_ORIGIN]}
+    assert response.headers["cache-control"] == "private, no-store"
+    assert "access-control-allow-origin" not in response.headers
 
 
-def test_frame_ancestors_for_sslip_parent_are_only_sslip(client: TestClient) -> None:
+def test_site_identity_cannot_authorize_another_sites_origin(
+    client: TestClient, monkeypatch
+) -> None:
+    monkeypatch.setenv("WIDGET_CSP_SERVICE_SECRET", SERVICE_SECRET)
     insert_site(
         "lovable-demo",
         "Lovable demo",
@@ -85,17 +111,16 @@ def test_frame_ancestors_for_sslip_parent_are_only_sslip(client: TestClient) -> 
         allowed_origins=[SSLIP_HOST_ORIGIN],
     )
 
-    listed = client.get(
-        "/api/public/widget-frame-ancestors",
-        params={"parent": SSLIP_HOST_ORIGIN},
-    )
+    response = _lookup(client, parent_origin=SSLIP_HOST_ORIGIN)
 
-    assert listed.status_code == 200
-    assert listed.json() == {"ancestors": [SSLIP_HOST_ORIGIN]}
-    assert LOVABLE_ORIGIN not in listed.json()["ancestors"]
+    assert response.status_code == 404
+    assert response.json() == {"detail": "Not found"}
 
 
-def test_unknown_parent_cannot_frame_the_widget(client: TestClient) -> None:
+def test_lookup_hides_unknown_mismatched_and_disabled_sites(
+    client: TestClient, monkeypatch
+) -> None:
+    monkeypatch.setenv("WIDGET_CSP_SERVICE_SECRET", SERVICE_SECRET)
     insert_site(
         "lovable-demo",
         "Lovable demo",
@@ -103,13 +128,88 @@ def test_unknown_parent_cannot_frame_the_widget(client: TestClient) -> None:
         allowed_origins=[LOVABLE_ORIGIN],
     )
 
-    listed = client.get(
-        "/api/public/widget-frame-ancestors",
-        params={"parent": "https://evil.test"},
+    unknown = _lookup(client, site_key="unknown")
+    wrong_key = _lookup(client, public_key="f" * 64)
+
+    session = next(sync_session())
+    try:
+        site = session.query(Site).filter_by(key="lovable-demo").one()
+        site.enabled = False
+        session.commit()
+    finally:
+        session.close()
+    disabled = _lookup(client)
+
+    for response in (unknown, wrong_key, disabled):
+        assert response.status_code == 404
+        assert response.json() == {"detail": "Not found"}
+
+
+def test_lookup_rejects_missing_or_wrong_service_secret_before_parsing_body(
+    client: TestClient, monkeypatch
+) -> None:
+    monkeypatch.setenv("WIDGET_CSP_SERVICE_SECRET", SERVICE_SECRET)
+    missing = client.post("/api/internal/widget-frame-ancestors", content=b"not-json")
+    wrong = client.post(
+        "/api/internal/widget-frame-ancestors",
+        headers=_service_headers("x" * 64),
+        content=b"not-json",
     )
 
-    assert listed.status_code == 200
-    assert listed.json() == {"ancestors": []}
+    assert missing.status_code == 404
+    assert wrong.status_code == 404
+    assert missing.json() == wrong.json() == {"detail": "Not found"}
+
+
+def test_lookup_rejects_non_ascii_service_secret_without_error(
+    client: TestClient, monkeypatch
+) -> None:
+    monkeypatch.setenv("WIDGET_CSP_SERVICE_SECRET", SERVICE_SECRET)
+
+    response = client.post(
+        "/api/internal/widget-frame-ancestors",
+        headers={"X-SupportChat-Widget-CSP": b"\xff" * 64},
+        content=b"not-json",
+    )
+
+    assert response.status_code == 404
+    assert response.json() == {"detail": "Not found"}
+
+
+def test_lookup_rejects_noncanonical_parent_origin(client: TestClient, monkeypatch) -> None:
+    monkeypatch.setenv("WIDGET_CSP_SERVICE_SECRET", SERVICE_SECRET)
+    insert_site(
+        "lovable-demo",
+        "Lovable demo",
+        FIXTURE_PUBLIC_KEY,
+        allowed_origins=[LOVABLE_ORIGIN],
+    )
+
+    response = _lookup(client, parent_origin=f"{LOVABLE_ORIGIN}/page")
+
+    assert response.status_code == 404
+    assert response.json() == {"detail": "Not found"}
+
+
+def test_lookup_rate_limit_fails_closed_before_database_work(
+    client: TestClient, monkeypatch
+) -> None:
+    monkeypatch.setenv("WIDGET_CSP_SERVICE_SECRET", SERVICE_SECRET)
+    monkeypatch.setenv("RATE_WIDGET_CSP_IP", "1")
+    insert_site(
+        "lovable-demo",
+        "Lovable demo",
+        FIXTURE_PUBLIC_KEY,
+        allowed_origins=[LOVABLE_ORIGIN],
+    )
+
+    first = _lookup(client)
+    second = _lookup(client)
+
+    assert first.status_code == 200
+    assert second.status_code == 429
+    assert second.json() == {"detail": "Too many requests"}
+    assert second.headers["cache-control"] == "private, no-store"
 
 
 def test_same_admin_two_websites_do_not_share_a_chatbot(client: TestClient) -> None:
@@ -173,7 +273,7 @@ def test_same_admin_two_websites_do_not_share_a_chatbot(client: TestClient) -> N
     assert lovable_with_sslip_snippet.status_code == 403
 
 
-def test_list_sites_does_not_publish_a_shared_origin_union(client: TestClient) -> None:
+def test_sites_api_has_no_static_frame_ancestor_contract(client: TestClient) -> None:
     insert_site(
         "lovable-demo",
         "Lovable demo",
@@ -183,11 +283,10 @@ def test_list_sites_does_not_publish_a_shared_origin_union(client: TestClient) -
     insert_staff(ALEX_EMAIL, ALEX_NAME, ALEX_PASSWORD)
     alex = login_staff(client)
 
-    listed = client.get("/api/sites", headers=_auth(alex))
+    response = client.get("/api/sites", headers=_auth(alex))
 
-    assert listed.status_code == 200
-    body = listed.json()
+    assert response.status_code == 200
+    body = response.json()
     assert body["items"][0]["origins"] == [LOVABLE_ORIGIN]
-    assert body["items"][0]["origins_missing_from_frame_ancestors"] is False
-    assert LOVABLE_ORIGIN not in body["frame_ancestors"]
-    assert "*" not in body["frame_ancestors"]
+    assert "origins_missing_from_frame_ancestors" not in body["items"][0]
+    assert "frame_ancestors" not in body

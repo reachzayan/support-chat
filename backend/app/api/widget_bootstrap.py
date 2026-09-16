@@ -1,4 +1,5 @@
 import json
+from hmac import compare_digest
 from typing import Any
 
 from fastapi import APIRouter, Request
@@ -15,6 +16,7 @@ from app.settings import get_settings
 
 router = APIRouter()
 BOOTSTRAP_MAX_BYTES = 8192
+FRAME_ANCESTORS_MAX_BYTES = 512
 
 
 class BootstrapBody(BaseModel):
@@ -23,6 +25,14 @@ class BootstrapBody(BaseModel):
     site_key: str
     public_key: str
     resume_token: str | None = None
+
+
+class FrameAncestorsBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    site_key: str
+    public_key: str
+    parent_origin: str
 
 
 def _cors_headers(origin: str) -> dict[str, str]:
@@ -45,16 +55,70 @@ def _command_error_response(exc: CommandError) -> JSONResponse:
     return JSONResponse({"detail": "Invalid request"}, status_code=400)
 
 
-@router.get("/api/public/widget-frame-ancestors")
-async def widget_frame_ancestors(
-    request: Request, session: SessionDep, parent: str | None = None
-) -> JSONResponse:
-    raw = parent or request.headers.get("referer")
-    ancestors = await SiteAdminService(session).frame_ancestors_for_parent(raw)
+def _private_json(body: dict[str, Any], status_code: int = 200) -> JSONResponse:
     return JSONResponse(
-        {"ancestors": ancestors},
-        headers={"Cache-Control": "private, max-age=15", "Vary": "Referer"},
+        body,
+        status_code=status_code,
+        headers={"Cache-Control": "private, no-store"},
     )
+
+
+def _service_secret_matches(request: Request, configured_secret: str) -> bool:
+    supplied_secret = request.headers.get("x-supportchat-widget-csp", "")
+    return bool(configured_secret) and compare_digest(
+        configured_secret.encode("utf-8"), supplied_secret.encode("utf-8")
+    )
+
+
+async def _frame_ancestors_body(request: Request) -> FrameAncestorsBody | JSONResponse:
+    content_length = request.headers.get("content-length")
+    if content_length is not None:
+        try:
+            if int(content_length) > FRAME_ANCESTORS_MAX_BYTES:
+                return _private_json({"detail": "Invalid request"}, status_code=400)
+        except ValueError:
+            return _private_json({"detail": "Invalid request"}, status_code=400)
+    raw = await request.body()
+    if len(raw) > FRAME_ANCESTORS_MAX_BYTES:
+        return _private_json({"detail": "Invalid request"}, status_code=400)
+    try:
+        return FrameAncestorsBody.model_validate(json.loads(raw.decode("utf-8")))
+    except (UnicodeDecodeError, json.JSONDecodeError, ValidationError):
+        return _private_json({"detail": "Invalid request"}, status_code=400)
+
+
+@router.post("/api/internal/widget-frame-ancestors", include_in_schema=False)
+async def widget_frame_ancestors(request: Request, session: SessionDep) -> JSONResponse:
+    settings = get_settings()
+    if not _service_secret_matches(request, settings.widget_csp_service_secret):
+        return _private_json({"detail": "Not found"}, status_code=404)
+
+    payload = await _frame_ancestors_body(request)
+    if isinstance(payload, JSONResponse):
+        return payload
+
+    client_ip = request.headers.get("x-supportchat-client-ip")
+    if not client_ip:
+        client_ip = request.client.host if request.client else None
+    try:
+        await RateLimiter(settings).hit_widget_csp(
+            client_ip,
+            payload.site_key,
+            payload.public_key,
+        )
+    except RateLimitExceeded:
+        return _private_json({"detail": "Too many requests"}, status_code=429)
+    except RateLimitUnavailable:
+        return _private_json({"detail": "Unavailable"}, status_code=503)
+
+    ancestors = await SiteAdminService(session).frame_ancestors_for_site(
+        payload.site_key,
+        payload.public_key,
+        payload.parent_origin,
+    )
+    if ancestors is None:
+        return _private_json({"detail": "Not found"}, status_code=404)
+    return _private_json({"ancestors": ancestors})
 
 
 @router.post("/api/public/widget-bootstrap")

@@ -1,6 +1,6 @@
 from ipaddress import ip_network
 
-from pydantic import AliasChoices, Field, field_validator, model_validator
+from pydantic import field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -33,19 +33,15 @@ class Settings(BaseSettings):
     staff_app_origin: str = "http://localhost:3000"
     widget_origin: str = "http://widget.localhost:3000"
     marketing_host_origin: str = "http://host.localhost:3000"
-    approved_frame_ancestors: str = Field(
-        default="http://localhost:3000",
-        validation_alias=AliasChoices(
-            "WIDGET_FRAME_ANCESTORS",
-            "APPROVED_FRAME_ANCESTORS",
-            "approved_frame_ancestors",
-        ),
-    )
+    widget_csp_service_secret: str = ""
     trusted_proxy_cidrs: str = ""
     app_env: str = "local"
     chat_retention_days: int = 30
     rate_bootstrap: int = 60
     rate_bootstrap_window: int = 600
+    rate_widget_csp_ip: int = 120
+    rate_widget_csp_site: int = 3000
+    rate_widget_csp_window: int = 60
     rate_visitor_create: int = 10
     rate_visitor_create_window: int = 3600
     rate_visitor_submit: int = 20
@@ -86,9 +82,6 @@ class Settings(BaseSettings):
     kb_llm_extract_prompt_version: str = "v1"
     kb_ingest_retry_sleep: float = 0.0
 
-    def frame_ancestor_origins(self) -> list[str]:
-        return [part.strip() for part in self.approved_frame_ancestors.split(",") if part.strip()]
-
     def trusted_proxy_networks(self) -> list:
         networks = []
         for part in self.trusted_proxy_cidrs.split(","):
@@ -117,6 +110,13 @@ class Settings(BaseSettings):
     def rate_key_secret_min_length(cls, value: str) -> str:
         if len(value) < 64:
             raise ValueError("RATE_KEY_SECRET must be at least 64 characters")
+        return value
+
+    @field_validator("widget_csp_service_secret")
+    @classmethod
+    def widget_csp_service_secret_min_length(cls, value: str) -> str:
+        if value and len(value) < 64:
+            raise ValueError("WIDGET_CSP_SERVICE_SECRET must be at least 64 characters")
         return value
 
     @field_validator("anthropic_model")
@@ -170,6 +170,9 @@ class Settings(BaseSettings):
         _reject_weak_production_secret("JWT_SECRET", self.jwt_secret)
         _reject_weak_production_secret("WIDGET_TOKEN_SECRET", self.widget_token_secret)
         _reject_weak_production_secret("RATE_KEY_SECRET", self.rate_key_secret)
+        if not self.widget_csp_service_secret:
+            raise ValueError("WIDGET_CSP_SERVICE_SECRET is required in production")
+        _reject_weak_production_secret("WIDGET_CSP_SERVICE_SECRET", self.widget_csp_service_secret)
         if self.openai_embed_dim != 1536:
             raise ValueError("OPENAI_EMBED_DIM must be 1536 in production")
         if not self.openai_api_key or not self.openai_api_key.strip():

@@ -332,7 +332,7 @@ def test_staff_read_and_admin_only_mutation(client: TestClient) -> None:
     assert still.json()["items"][0]["name"] == EASY_NAME
 
 
-def test_list_includes_fixture_snippet_and_csp_warning_flag(client: TestClient) -> None:
+def test_list_includes_fixture_snippet_without_static_csp_fields(client: TestClient) -> None:
     insert_site(
         EASY_KEY, EASY_NAME, FIXTURE_PUBLIC_KEY, allowed_origins=["https://missing.example"]
     )
@@ -347,10 +347,9 @@ def test_list_includes_fixture_snippet_and_csp_warning_flag(client: TestClient) 
     assert "YOUR_KEY" not in item["snippet"]
     assert "access_token" not in item["snippet"]
     assert "bootstrap_token" not in item["snippet"]
-    assert item["origins_missing_from_frame_ancestors"] is False
-    assert "https://missing.example" not in listed.json()["frame_ancestors"]
+    assert "origins_missing_from_frame_ancestors" not in item
+    assert "frame_ancestors" not in listed.json()
     assert listed.json()["widget_origin"] == WIDGET_ORIGIN
-    assert "*" not in listed.json()["frame_ancestors"]
 
 
 def test_wrong_public_key_matches_unknown_site_404_and_leaks_nothing(
