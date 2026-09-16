@@ -94,7 +94,7 @@ describe("sites manage modal", () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(mockListFetch()))
   })
 
-  test("manage modal shows the full snippet and origin warning", async () => {
+  test("manage modal shows the full snippet without a frame-ancestors env warning", async () => {
     const user = userEvent.setup()
     renderWithProviders(<SitesConsole isAdmin={true} displayName="Riley Chen" />)
 
@@ -105,8 +105,8 @@ describe("sites manage modal", () => {
     const snippet = within(dialog).getByLabelText("Embed snippet")
     expect(snippet).toHaveValue(SNIPPET)
     expect(
-      within(dialog).getByText("This origin is missing from the widget frame-ancestors header."),
-    ).toBeInTheDocument()
+      within(dialog).queryByText("This origin is missing from the widget frame-ancestors header."),
+    ).not.toBeInTheDocument()
     expect(within(dialog).getByDisplayValue("https://missing.example")).toBeInTheDocument()
   })
 })
