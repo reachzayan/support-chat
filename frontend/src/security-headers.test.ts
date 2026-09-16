@@ -12,12 +12,9 @@ const headerValue = (
 }
 
 describe("security headers", () => {
-  test("widget CSP is the approved union and staff HTML cannot be framed", async () => {
+  test("widget CSP is not baked at build time and staff HTML cannot be framed", async () => {
     const rules = await nextConfig.headers!()
-    expect(headerValue(rules, "/widget", "Content-Security-Policy")).toBe(
-      "frame-ancestors http://localhost:3000",
-    )
-    expect(headerValue(rules, "/widget", "Content-Security-Policy")?.includes("*")).toBe(false)
+    expect(headerValue(rules, "/widget", "Content-Security-Policy")).toBeUndefined()
     const staffCsp = headerValue(rules, "/inbox", "Content-Security-Policy")
     expect(staffCsp).toContain("frame-ancestors 'none'")
     expect(staffCsp).toContain("default-src 'self'")

@@ -68,3 +68,18 @@ def sanitize_visitor_url(raw: str, bound_origin: str, max_len: int = 2048) -> st
         raise InvalidOrigin("origin mismatch")
     path = parsed.path if parsed.path else "/"
     return f"{origin}{path}"
+
+
+def parent_origin(raw: str) -> str | None:
+    text = raw.strip()
+    if not text or "*" in text:
+        return None
+    parsed = urlparse(text)
+    if parsed.scheme not in ("http", "https") or parsed.username or parsed.password:
+        return None
+    if parsed.hostname is None:
+        return None
+    try:
+        return canonicalize_origin(f"{parsed.scheme}://{parsed.netloc}")
+    except InvalidOrigin:
+        return None

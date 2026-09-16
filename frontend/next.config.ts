@@ -3,18 +3,6 @@ import type { NextConfig } from "next"
 const apiOrigin = process.env.API_ORIGIN ?? "http://127.0.0.1:8000"
 const wsOrigin = apiOrigin.replace(/^http/, "ws")
 
-const frameAncestors = () => {
-  const raw =
-    process.env.WIDGET_FRAME_ANCESTORS ??
-    process.env.APPROVED_FRAME_ANCESTORS ??
-    "http://localhost:3000"
-  const allowed = raw
-    .split(",")
-    .map((part) => part.trim())
-    .filter((part) => part.length > 0 && !part.includes("*"))
-  return allowed.join(" ") || "http://localhost:3000"
-}
-
 const nosniff = { key: "X-Content-Type-Options", value: "nosniff" }
 const referrer = { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" }
 // HSTS is enforced at the edge in production.
@@ -44,13 +32,7 @@ const nextConfig: NextConfig = {
     return [
       {
         source: "/widget",
-        headers: [
-          {
-            key: "Content-Security-Policy",
-            value: `frame-ancestors ${frameAncestors()}`,
-          },
-          nosniff,
-        ],
+        headers: [nosniff],
       },
       {
         source: "/admin/:path*",

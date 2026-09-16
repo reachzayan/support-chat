@@ -10,6 +10,7 @@ from app.security.client_ip import resolve_client_ip
 from app.security.widget_tokens import create_widget_token
 from app.services.conversation_service import CommandError, ConversationService
 from app.services.rate_limit import RateLimiter, RateLimitExceeded, RateLimitUnavailable
+from app.services.site_admin import SiteAdminService
 from app.settings import get_settings
 
 router = APIRouter()
@@ -42,6 +43,18 @@ def _command_error_response(exc: CommandError) -> JSONResponse:
     if exc.code == "unavailable":
         return JSONResponse({"detail": "Unavailable"}, status_code=503)
     return JSONResponse({"detail": "Invalid request"}, status_code=400)
+
+
+@router.get("/api/public/widget-frame-ancestors")
+async def widget_frame_ancestors(
+    request: Request, session: SessionDep, parent: str | None = None
+) -> JSONResponse:
+    raw = parent or request.headers.get("referer")
+    ancestors = await SiteAdminService(session).frame_ancestors_for_parent(raw)
+    return JSONResponse(
+        {"ancestors": ancestors},
+        headers={"Cache-Control": "private, max-age=15", "Vary": "Referer"},
+    )
 
 
 @router.post("/api/public/widget-bootstrap")

@@ -43,6 +43,12 @@ class SiteRepository:
         result = await self._session.execute(select(Site).order_by(Site.key, Site.id))
         return list(result.scalars().all())
 
+    async def has_allowed_origin(self, origin: str) -> bool:
+        result = await self._session.execute(
+            select(Site.id).where(Site.allowed_origins.contains([origin])).limit(1)
+        )
+        return result.scalar_one_or_none() is not None
+
     async def lock_by_id(self, site_id: UUID) -> Site | None:
         result = await self._session.execute(
             select(Site)

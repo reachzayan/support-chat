@@ -94,8 +94,7 @@ def _http_error(exc: AdminError) -> HTTPException:
     )
 
 
-def _site_out(site: Site, ancestors: list[str], widget_origin: str) -> SiteOut:
-    missing = any(origin not in ancestors for origin in site.allowed_origins)
+def _site_out(site: Site, widget_origin: str) -> SiteOut:
     return SiteOut(
         id=site.id,
         key=site.key,
@@ -105,7 +104,7 @@ def _site_out(site: Site, ancestors: list[str], widget_origin: str) -> SiteOut:
         public_key=site.public_key,
         origins=list(site.allowed_origins),
         snippet=build_snippet(site.key, site.public_key, widget_origin),
-        origins_missing_from_frame_ancestors=missing,
+        origins_missing_from_frame_ancestors=False,
         enabled=bool(getattr(site, "enabled", True)),
         bot_enabled=site.bot_enabled,
         human_enabled=site.human_enabled,
@@ -122,7 +121,7 @@ def _site_out(site: Site, ancestors: list[str], widget_origin: str) -> SiteOut:
 async def list_sites(session: SessionDep, _staff: CurrentUser) -> SiteListOut:
     sites, ancestors, widget_origin = await SiteAdminService(session).list_sites()
     return SiteListOut(
-        items=[_site_out(site, ancestors, widget_origin) for site in sites],
+        items=[_site_out(site, widget_origin) for site in sites],
         frame_ancestors=ancestors,
         widget_origin=widget_origin,
     )
@@ -144,8 +143,8 @@ async def create_site(payload: SiteCreateIn, session: SessionDep, admin: Current
         )
     except AdminError as exc:
         raise _http_error(exc) from exc
-    _, ancestors, widget_origin = await service.list_sites()
-    return _site_out(site, ancestors, widget_origin)
+    _, _, widget_origin = await service.list_sites()
+    return _site_out(site, widget_origin)
 
 
 @router.patch("/api/sites/{site_id}", response_model=SiteOut)
@@ -169,8 +168,8 @@ async def patch_site(
         )
     except AdminError as exc:
         raise _http_error(exc) from exc
-    _, ancestors, widget_origin = await service.list_sites()
-    return _site_out(site, ancestors, widget_origin)
+    _, _, widget_origin = await service.list_sites()
+    return _site_out(site, widget_origin)
 
 
 @router.post("/api/sites/{site_id}/check-install", response_model=SiteOut)
@@ -180,8 +179,8 @@ async def check_install(site_id: UUID, session: SessionDep, _admin: CurrentAdmin
         site = await service.check_install(site_id)
     except AdminError as exc:
         raise _http_error(exc) from exc
-    _, ancestors, widget_origin = await service.list_sites()
-    return _site_out(site, ancestors, widget_origin)
+    _, _, widget_origin = await service.list_sites()
+    return _site_out(site, widget_origin)
 
 
 @router.delete("/api/sites/{site_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -201,5 +200,5 @@ async def patch_off_brand_list(
         site = await service.update_off_brand_list(site_id, payload.items)
     except AdminError as exc:
         raise _http_error(exc) from exc
-    _, ancestors, widget_origin = await service.list_sites()
-    return _site_out(site, ancestors, widget_origin)
+    _, _, widget_origin = await service.list_sites()
+    return _site_out(site, widget_origin)

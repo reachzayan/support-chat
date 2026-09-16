@@ -13,7 +13,7 @@ export const SITE = {
   public_key: PUBLIC_KEY,
   origins: ["https://missing.example"],
   snippet: SNIPPET,
-  origins_missing_from_frame_ancestors: true,
+  origins_missing_from_frame_ancestors: false,
   enabled: true,
   bot_enabled: true,
   human_enabled: true,
