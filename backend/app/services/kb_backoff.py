@@ -5,10 +5,10 @@ TRANSIENT_CODES = frozenset(
         "timeout",
         "rate_limit",
         "overload",
-        "browser",
         "embed",
         "http",
         "ingest",
+        "browser_crash",
     }
 )
 PERMANENT_CODES = frozenset(
@@ -19,6 +19,7 @@ PERMANENT_CODES = frozenset(
         "robots",
         "non_html",
         "http_4xx",
+        "browser",
     }
 )
 CONTENT_DROP_CODES = frozenset({"empty", "injection", "hallucination"})

@@ -1,3 +1,4 @@
+import asyncio
 import fnmatch
 from urllib.parse import urljoin, urlparse, urlunparse
 from uuid import UUID
@@ -186,6 +187,14 @@ def _robots_body(url: str, hosts: set[str], fetch, cache: dict[str, str | None])
         body = _try_fetch(robots_url, hosts, fetch_text)
     cache[key] = body
     return body
+
+
+async def robots_body(url: str, hosts: set[str], fetch, cache: dict[str, str | None]) -> str | None:
+    return await asyncio.to_thread(_robots_body, url, hosts, fetch, cache)
+
+
+async def try_fetch(url: str, hosts: set[str], fetch) -> str | None:
+    return await asyncio.to_thread(_try_fetch, url, hosts, fetch)
 
 
 def _try_fetch(url: str, hosts: set[str], fetch) -> str | None:

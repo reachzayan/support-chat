@@ -23,7 +23,7 @@ class KbSnapshot(Base):
     __tablename__ = "kb_snapshots"
     __table_args__ = (
         CheckConstraint(
-            "state IN ('building','validated','live','superseded','failed')",
+            "state IN ('building','validated','live','superseded','failed','unchanged')",
             name="ck_kb_snapshots_state",
         ),
         UniqueConstraint("id", "site_id", name="uq_kb_snapshots_id_site"),

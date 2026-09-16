@@ -6,6 +6,7 @@ from sqlalchemy import func, select
 from app.db import session_maker
 from app.models.kb_chunk import KbChunk
 from app.models.kb_page import KbPage
+from app.models.kb_page_job import KbPageJob
 from app.models.kb_source import KbSource
 from app.repositories.kb_source_repo import KbSourceRepository
 from app.services.kb_embedder import FakeEmbedder, configured_embedder_id
@@ -137,16 +138,23 @@ async def test_worker_drains_queued_source_when_redis_wakeup_is_missing(
         source = await _queued_source(session, [FAQ_URL])
         source_id = source.id
 
-    from app.services.kb_crawl import FetchError
+    from app.services.kb_fetcher import FetchResult, _digest
 
-    async def _no_browser(_url: str):
-        raise FetchError("browser")
+    async def _fake_page(url: str, allowed_hosts: set[str], fetch=None, crawler=None):
+        html = fake_fetch(url, allowed_hosts)
+        return FetchResult(
+            url=url,
+            status=200,
+            html=html,
+            markdown="",
+            content_sha256=_digest(html),
+            renderer="injected",
+        )
 
     redis = _IdleThenHangRedis()
     monkeypatch.setattr(kb_ingest_worker, "_queue_redis", lambda: redis)
     monkeypatch.setattr(kb_ingest_worker, "default_embedder", lambda: FakeEmbedder())
-    monkeypatch.setattr("app.services.kb_fetcher._crawl4ai", _no_browser)
-    monkeypatch.setattr("app.services.kb_fetcher.fetch_html", fake_fetch)
+    monkeypatch.setattr("app.services.kb_pipeline.fetch_page", _fake_page)
     monkeypatch.setattr("app.services.kb_crawl.fetch_html", fake_fetch)
     task = asyncio.create_task(kb_ingest_worker.run_worker())
     try:
@@ -168,3 +176,98 @@ async def test_worker_drains_queued_source_when_redis_wakeup_is_missing(
             await task
         except asyncio.CancelledError:
             pass
+
+
+async def test_prefix_crawl_follows_links_beyond_the_first_frontier(migrated_db) -> None:
+    pages = {
+        HOME_URL: '<main><h1>Home</h1><p>Useful home page copy.</p><a href="/one">One</a></main>',
+        "https://sample-site.example.com/one": (
+            '<main><h1>One</h1><p>Useful first page copy.</p><a href="/two">Two</a></main>'
+        ),
+        "https://sample-site.example.com/two": (
+            "<main><h1>Two</h1><p>Useful second page copy.</p></main>"
+        ),
+    }
+
+    def crawl_fetch(url: str, _hosts: set[str], hops: int = 0) -> str:
+        return pages[url]
+
+    async with session_maker()() as session:
+        source = await _queued_source(session, [HOME_URL])
+        source.mode = "prefix"
+        source.max_pages = 10
+        await session.commit()
+        source_id = source.id
+        await ingest_source(session, source_id, fetch=crawl_fetch)
+
+    async with session_maker()() as session:
+        urls = set(
+            (await session.scalars(select(KbPage.url).where(KbPage.source_id == source_id))).all()
+        )
+        assert urls == set(pages)
+
+
+async def test_unexpected_page_exception_is_persisted_as_a_failed_job(
+    migrated_db, monkeypatch
+) -> None:
+    def explode(*_args, **_kwargs):
+        raise ValueError("broken extractor")
+
+    monkeypatch.setattr("app.services.kb_pipeline.extract_html", explode)
+    async with session_maker()() as session:
+        source = await _queued_source(session, [FAQ_URL])
+        source_id = source.id
+        await ingest_source(session, source_id, fetch=fake_fetch)
+
+    async with session_maker()() as session:
+        page = await session.scalar(select(KbPage).where(KbPage.source_id == source_id))
+        job = await session.scalar(select(KbPageJob).where(KbPageJob.source_id == source_id))
+        source = await session.get(KbSource, source_id)
+        assert page is not None and page.processing_status == "failed"
+        assert job is not None and job.state == "dead_letter"
+        assert job.last_error_code == "extract"
+        assert source is not None and source.pages_failed == 1
+
+
+async def test_failed_resync_does_not_replace_live_page_or_reenable_it(
+    migrated_db, monkeypatch
+) -> None:
+    from app.services.kb_extract.types import EvidenceUnit
+
+    async with session_maker()() as session:
+        source = await _queued_source(session, [FAQ_URL])
+        source_id = source.id
+        await ingest_source(session, source_id, fetch=fake_fetch)
+        page = await session.scalar(select(KbPage).where(KbPage.source_id == source_id))
+        assert page is not None
+        original = (page.title, page.content_text, page.raw_html, page.content_sha256)
+        page.enabled = False
+        source.status = "queued"
+        await session.commit()
+
+        monkeypatch.setattr(
+            "app.services.kb_pipeline.extract_html",
+            lambda *_args, **_kwargs: [
+                EvidenceUnit(
+                    kind="section",
+                    heading="Changed",
+                    canonical_question=None,
+                    answer_verbatim="Changed copy without the source fact.",
+                    body_for_search="Changed copy without the source fact.",
+                    display_locator=None,
+                )
+            ],
+        )
+
+        def changed_fetch(url: str, _hosts: set[str], hops: int = 0) -> str:
+            return "<main><h1>Changed</h1><p>Delivery takes 99 days.</p></main>"
+
+        await ingest_source(session, source_id, fetch=changed_fetch)
+
+    async with session_maker()() as session:
+        page = await session.scalar(select(KbPage).where(KbPage.source_id == source_id))
+        source = await session.get(KbSource, source_id)
+        assert page is not None
+        assert source is not None and source.status == "failed"
+        assert (page.title, page.content_text, page.raw_html, page.content_sha256) == original
+        assert page.enabled is False

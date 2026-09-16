@@ -12,6 +12,7 @@ from sqlalchemy import (
     func,
     text,
 )
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import Base
@@ -50,6 +51,9 @@ class KbPageJob(Base):
     max_attempts: Mapped[int] = mapped_column(Integer, server_default=text("5"))
     last_error_code: Mapped[str | None] = mapped_column(String, nullable=True)
     last_error_message: Mapped[str | None] = mapped_column(String, nullable=True)
+    renderer: Mapped[str | None] = mapped_column(String, nullable=True)
+    http_status: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    events: Mapped[list] = mapped_column(JSONB, server_default=text("'[]'::jsonb"))
     next_run_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )

@@ -109,6 +109,36 @@ const knowledgeRoute = (url: string, init?: RequestInit) => {
   if (url === `/api/kb-sources/${SOURCE_ID}/pages`) {
     return sourcePages()
   }
+  if (url === `/api/kb-sources/${SOURCE_ID}/diff`) {
+    return jsonOk({
+      added: [
+        {
+          kind: "section",
+          canonical_question: null,
+          heading: PAGE_TITLE,
+          answer_verbatim: TIMING_BODY,
+          display_locator: null,
+        },
+      ],
+      changed: [],
+      removed: [],
+    })
+  }
+  if (url === `/api/kb-sources/${SOURCE_ID}/snapshots`) {
+    return jsonOk({
+      items: [
+        {
+          id: "88888888-8888-4888-8888-888888888888",
+          state: "live",
+          created_at: "2026-09-16T12:00:00+00:00",
+          promoted_at: "2026-09-16T12:00:00+00:00",
+          token_estimate: 12,
+          validation_errors: [],
+          error_code: null,
+        },
+      ],
+    })
+  }
   if (url === `/api/kb-chunks/${CHUNK_ID}` && init?.method === "PATCH") {
     const body = JSON.parse(String(init.body)) as { enabled: boolean }
     return jsonOk({

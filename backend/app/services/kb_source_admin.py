@@ -54,12 +54,18 @@ class KbSourceService:
         except CanonicalError:
             raise AdminError("invalid") from None
         raw_seeds = seed_urls if mode == "list" else [start_url]
+        host_seeds = seed_urls if seed_urls else [start_url]
+        self._assert_seed_hosts(self._normalized_seed_urls(host_seeds), site, start_url)
         urls = self._normalized_seed_urls(raw_seeds)
-        self._assert_seed_hosts(urls, site, start_url)
+        resolved_mode = mode
         existing = await KbSourceRepository(self._session).get_by_site_start_url(site_id, start_url)
         if existing is not None:
-            existing.mode = mode
-            existing.seed_urls = urls
+            if existing.mode == "prefix" or resolved_mode == "prefix":
+                existing.mode = "prefix"
+                existing.seed_urls = [existing.start_url]
+            else:
+                existing.mode = "list"
+                existing.seed_urls = urls
             existing.status = "queued"
             existing.stage = "idle"
             existing.error_code = None
@@ -68,10 +74,15 @@ class KbSourceService:
             await self._session.commit()
             await enqueue_wakeup(existing.id)
             return existing
+        overlap = await self._session.scalar(
+            select(KbPage.id).where(KbPage.site_id == site_id, KbPage.url == start_url)
+        )
+        if overlap is not None:
+            raise AdminError("overlap")
         source = KbSource(
             site_id=site_id,
             start_url=start_url,
-            mode=mode,
+            mode=resolved_mode,
             seed_urls=urls,
             status="queued",
             embedder_id=configured_embedder_id(),
@@ -144,6 +155,23 @@ class KbSourceService:
             raise AdminError("not_found")
         if source.status == "running":
             return source
+        source.status = "queued"
+        source.stage = "idle"
+        source.error_code = None
+        await self._session.commit()
+        await enqueue_wakeup(source.id)
+        return source
+
+    async def retry_page(self, page_id: UUID) -> KbSource:
+        page = await self._session.get(KbPage, page_id)
+        if page is None:
+            raise AdminError("not_found")
+        source = await self._session.get(KbSource, page.source_id)
+        if source is None:
+            raise AdminError("not_found")
+        if source.status == "running":
+            raise AdminError("busy")
+        source.retry_urls = [page.url]
         source.status = "queued"
         source.stage = "idle"
         source.error_code = None
@@ -256,7 +284,10 @@ class KbSourceService:
         start = from_id or (previous.id if previous is not None else None)
         end = to_id or (live.id if live is not None else None)
         if start is None or end is None:
-            return {"added": [], "changed": [], "removed": []}
+            if end is None:
+                return {"added": [], "changed": [], "removed": []}
+            after = await self._units_for_snapshot(end)
+            return {"added": after, "changed": [], "removed": []}
         before = await self._units_for_snapshot(start)
         after = await self._units_for_snapshot(end)
         before_map = {item["key"]: item for item in before}
@@ -288,23 +319,28 @@ class KbSourceService:
 
     async def _units_for_snapshot(self, snapshot_id: UUID) -> list[dict]:
         result = await self._session.execute(
-            select(KbChunk).where(KbChunk.snapshot_id == snapshot_id).order_by(KbChunk.ordinal)
+            select(KbChunk)
+            .where(KbChunk.snapshot_id == snapshot_id)
+            .order_by(KbChunk.page_id, KbChunk.ordinal, KbChunk.id)
         )
-        units = []
-        seen: set[str] = set()
+        units: list[dict] = []
+        by_key: dict[str, dict] = {}
         for chunk in result.scalars().all():
-            key = f"{chunk.canonical_question or chunk.heading}::{chunk.answer_verbatim}"
-            if key in seen:
+            key = f"{chunk.page_id}::{chunk.canonical_question or chunk.heading}"
+            existing = by_key.get(key)
+            if existing is not None:
+                existing["answer_verbatim"] = (
+                    f"{existing['answer_verbatim']}\n\n{chunk.answer_verbatim}"
+                )
                 continue
-            seen.add(key)
-            units.append(
-                {
-                    "key": key,
-                    "kind": chunk.kind,
-                    "canonical_question": chunk.canonical_question,
-                    "heading": chunk.heading,
-                    "answer_verbatim": chunk.answer_verbatim,
-                    "display_locator": chunk.display_locator,
-                }
-            )
+            item = {
+                "key": key,
+                "kind": chunk.kind,
+                "canonical_question": chunk.canonical_question,
+                "heading": chunk.heading,
+                "answer_verbatim": chunk.answer_verbatim,
+                "display_locator": chunk.display_locator,
+            }
+            by_key[key] = item
+            units.append(item)
         return units

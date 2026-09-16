@@ -94,6 +94,7 @@ export type KbSourceRecord = {
   enabled: boolean
   snapshot_state?: string | null
   snapshot_error_code?: string | null
+  validation_errors?: string[]
 }
 
 export type KbSnapshotRecord = {
@@ -148,4 +149,28 @@ export type KbPageDetail = KbPageRecord & {
   skip_reason: string | null
   content_text: string
   chunks: KbChunkRecord[]
+}
+
+export type KbProgressEvent = {
+  timestamp: string | null
+  stage: string
+  state: string
+  page_url: string
+  duration_ms: number | null
+  error_code: string | null
+  error_message: string | null
+  renderer: string | null
+  http_status: number | null
+}
+
+export type KbProgressRecord = {
+  source: KbSourceRecord
+  recent_events: KbProgressEvent[]
+  current_jobs: Array<{
+    page_url: string
+    stage: string
+    attempt: number
+    started_at: string | null
+    renderer: string | null
+  }>
 }

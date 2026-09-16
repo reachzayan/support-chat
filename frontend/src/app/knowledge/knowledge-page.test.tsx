@@ -91,10 +91,18 @@ describe("knowledge add website", () => {
       throw new Error("expected create POST")
     }
     expect(JSON.parse(String((posted[1] as RequestInit).body))).toEqual({
-      mode: "list",
+      mode: "prefix",
       start_url: "https://sample-site.example.com/dot",
       seed_urls: ["https://sample-site.example.com/dot"],
     })
+  })
+
+  test("view changes on a first index lists the added units", async () => {
+    const user = userEvent.setup()
+    renderWithProviders(<KnowledgeConsole isAdmin={true} displayName="Riley Chen" />)
+    await user.click(await screen.findByRole("button", { name: "View changes" }))
+    await waitFor(() => expect(screen.getByText("Initial index: 1 unit.")).toBeInTheDocument())
+    expect(screen.queryByText("No added units.")).not.toBeInTheDocument()
   })
 
   test("add website shows an inline error for a non-https URL", async () => {
@@ -127,8 +135,7 @@ describe("knowledge page detail", () => {
     if (trigger === null) {
       throw new Error("expected indexed copy trigger")
     }
-    expect(trigger).toHaveAttribute("aria-expanded", "false")
-    await user.click(trigger)
+    expect(trigger).toHaveAttribute("aria-expanded", "true")
     const panel = screen.getByText("Indexed copy").closest("section")
     if (panel === null) {
       throw new Error("expected indexed copy panel")

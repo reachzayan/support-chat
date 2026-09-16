@@ -99,6 +99,8 @@ def test_progress_endpoint_lists_recent_finished_jobs(client: TestClient) -> Non
                 stage="persist",
                 state="done",
                 attempts=1,
+                renderer="crawl4ai",
+                http_status=200,
                 started_at=started,
                 finished_at=started + timedelta(milliseconds=812),
             )
@@ -115,4 +117,6 @@ def test_progress_endpoint_lists_recent_finished_jobs(client: TestClient) -> Non
     assert payload["recent_events"][0]["page_url"] == "https://sample-site.example.com/faq"
     assert payload["recent_events"][0]["state"] == "done"
     assert payload["recent_events"][0]["duration_ms"] == 812
+    assert payload["recent_events"][0]["renderer"] == "crawl4ai"
+    assert payload["recent_events"][0]["http_status"] == 200
     assert payload["current_jobs"] == []

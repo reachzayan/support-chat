@@ -2,12 +2,13 @@
 
 /* oxlint-disable react-perf/jsx-no-new-function-as-prop -- Retrieved-answer controls close over each immutable chunk record. */
 
-import { ChevronDown, ExternalLink, Globe2, Plus, RefreshCw } from "lucide-react"
+import { ChevronDown, ExternalLink, Globe2, Plus, RefreshCw, Search } from "lucide-react"
 import { useCallback, useMemo, useState, type ChangeEvent } from "react"
 
 import type {
   KbPageDetail,
   KbPageRecord,
+  KbProgressRecord,
   KbSourceRecord,
   SiteRecord,
 } from "@/components/admin/staff-api"
@@ -85,6 +86,7 @@ export const KnowledgeConsole = ({ isAdmin, displayName: _displayName }: Knowled
             onSelect={state.handleSelectSource}
             onViewChanges={state.handleViewChanges}
           />
+          <CrawlActivity progress={state.progress} />
           <SnapshotDiffSheet
             open={state.diffSource !== null}
             onOpenChange={state.handleDiffOpen}
@@ -100,6 +102,7 @@ export const KnowledgeConsole = ({ isAdmin, displayName: _displayName }: Knowled
             isAdmin={isAdmin}
             onSelect={state.handleSelectPage}
             onToggle={state.handleTogglePage}
+            onRetry={state.handleRetryPage}
           />
           <IndexedCopy
             detail={state.pageDetail}
@@ -273,10 +276,10 @@ const AddWebsiteDialog = ({
           <div className="bg-ember/10 text-ember mb-2 flex size-10 items-center justify-center rounded-[10px]">
             <Plus aria-hidden="true" className="size-5" strokeWidth={2.2} />
           </div>
-          <DialogTitle className="text-lg tracking-[-0.025em]">Add website pages</DialogTitle>
+          <DialogTitle className="text-lg tracking-[-0.025em]">Add a website</DialogTitle>
           <DialogDescription className="max-w-md leading-5">
-            Add public pages to {siteName}. We’ll index the content so the assistant can retrieve
-            it.
+            Paste a homepage to crawl {siteName}. Add more than one HTTPS URL to index only those
+            pages.
           </DialogDescription>
         </DialogHeader>
         <div className="flex flex-col gap-3 px-6 py-6">
@@ -285,7 +288,7 @@ const AddWebsiteDialog = ({
               Website URL
             </label>
             <p className="text-mute mt-1 text-xs">
-              Use HTTPS. Add one page per line if you have more than one.
+              One HTTPS URL crawls the site. Additional lines index only those pages.
             </p>
           </div>
           <Textarea
@@ -325,6 +328,39 @@ const AddWebsiteDialog = ({
   )
 }
 
+const SourceTableHeader = ({
+  count,
+  query,
+  onQuery,
+}: {
+  count: number
+  query: string
+  onQuery: (value: string) => void
+}) => (
+  <div className="border-line flex flex-col gap-1 border-b px-5 py-5 sm:flex-row sm:items-end sm:justify-between">
+    <div>
+      <p className="text-mute text-[10px] font-bold tracking-[0.14em] uppercase">Content inputs</p>
+      <h2 className="text-navy mt-1 text-lg font-extrabold tracking-[-0.025em]">Sources</h2>
+      <p className="text-mute mt-1 text-xs">Websites and pages connected to this knowledge base.</p>
+    </div>
+    <div className="flex items-center gap-3">
+      <label className="border-line bg-ice flex items-center gap-2 rounded-[9px] border px-3 py-2">
+        <Search aria-hidden="true" className="text-mute size-3.5" />
+        <span className="sr-only">Search sources</span>
+        <input
+          type="search"
+          aria-label="Search sources"
+          value={query}
+          onChange={(event) => onQuery(event.target.value)}
+          placeholder="Search sources"
+          className="text-ink placeholder:text-mute w-40 bg-transparent text-xs outline-none"
+        />
+      </label>
+      <span className="text-mute text-xs font-semibold">{count} connected</span>
+    </div>
+  </div>
+)
+
 const SourceTable = ({
   isAdmin,
   sources,
@@ -342,6 +378,10 @@ const SourceTable = ({
   onSelect: (source: KbSourceRecord) => void
   onViewChanges: (source: KbSourceRecord) => void
 }) => {
+  const [query, setQuery] = useState("")
+  const filtered = sources.filter((source) =>
+    source.start_url.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase()),
+  )
   if (sources.length === 0) {
     return (
       <section className="border-line bg-paper rounded-[8px] border px-6 py-12 text-center">
@@ -353,18 +393,7 @@ const SourceTable = ({
   }
   return (
     <section className="border-line bg-paper overflow-hidden rounded-xl border">
-      <div className="border-line flex flex-col gap-1 border-b px-5 py-5 sm:flex-row sm:items-end sm:justify-between">
-        <div>
-          <p className="text-mute text-[10px] font-bold tracking-[0.14em] uppercase">
-            Content inputs
-          </p>
-          <h2 className="text-navy mt-1 text-lg font-extrabold tracking-[-0.025em]">Sources</h2>
-          <p className="text-mute mt-1 text-xs">
-            Websites and pages connected to this knowledge base.
-          </p>
-        </div>
-        <span className="text-mute text-xs font-semibold">{sources.length} connected</span>
-      </div>
+      <SourceTableHeader count={sources.length} query={query} onQuery={setQuery} />
       <div className="overflow-x-auto">
         <table className="w-full min-w-[760px] border-collapse text-left text-sm">
           <thead className="bg-ice-2">
@@ -376,7 +405,7 @@ const SourceTable = ({
             </tr>
           </thead>
           <tbody>
-            {sources.map((source) => (
+            {filtered.map((source) => (
               <SourceRow
                 key={source.id}
                 source={source}
@@ -431,7 +460,7 @@ const SourceRowActions = ({
             className="text-steel hover:text-navy inline-flex items-center gap-1.5 text-xs font-bold transition-[color,transform] duration-150 ease-out active:scale-[0.98] motion-safe:hover:-translate-y-px"
           >
             <RefreshCw aria-hidden="true" className="size-3.5" />
-            Sync
+            {source.status === "failed" || (source.pages_failed ?? 0) > 0 ? "Retry crawl" : "Sync"}
           </button>
           <button
             type="button"
@@ -471,7 +500,6 @@ const SourceRow = ({
   onViewChanges: (source: KbSourceRecord) => void
 }) => {
   const handleSelect = useCallback(() => onSelect(source), [onSelect, source])
-  const pill = snapshotPill(source)
   return (
     <tr className="border-line hover:bg-ice/60 border-t transition-colors duration-150">
       <td className="px-5 py-3">
@@ -484,16 +512,13 @@ const SourceRow = ({
         </button>
       </td>
       <td className="text-mute px-5 py-3 text-xs">
-        <div className="flex flex-col gap-1">
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="text-ink inline-flex items-center gap-1.5 font-semibold">
-              <span
-                className={`size-2 rounded-full ${source.status === "ready" ? "bg-[#29915E]" : "bg-ember"}`}
-              />
-              {sourceStatusLabel(source)}
-            </span>
-            {pill ? <span className={snapshotPillClass(source)}>{pill}</span> : null}
-          </div>
+        <div className="flex flex-col gap-1" aria-live="polite">
+          <span className="text-ink inline-flex items-center gap-1.5 font-semibold">
+            <span
+              className={`size-2 rounded-full ${source.status === "ready" ? "bg-[#29915E]" : "bg-ember"}`}
+            />
+            {sourceStatusLabel(source)}
+          </span>
           <SourceProgress source={source} />
         </div>
       </td>
@@ -521,14 +546,51 @@ const ingestIsActive = (source: KbSourceRecord) =>
     source.stage === "promoting")
 
 const sourceStatusLabel = (source: KbSourceRecord) => {
-  if (source.status === "ready") {
-    return "Ready"
-  }
-  if (source.status === "running") {
+  if (ingestIsActive(source) || source.status === "running") {
     return "Syncing"
   }
-  return source.status.charAt(0).toUpperCase() + source.status.slice(1)
+  if (source.status === "queued") {
+    return "Queued"
+  }
+  if (source.status === "failed") {
+    const reason = sourceFailureReason(source)
+    if (source.snapshot_state === "live") {
+      return reason ? `Sync failed — live unchanged (${reason})` : "Sync failed — live unchanged"
+    }
+    return reason ? `Failed — ${reason}` : "Failed"
+  }
+  return "Ready"
 }
+
+const sourceFailureReason = (source: KbSourceRecord) => {
+  const rules = source.validation_errors ?? []
+  if (rules.length > 0) {
+    return rules.map(humanizeCode).join(", ")
+  }
+  const code = source.error_code ?? source.snapshot_error_code
+  return code ? humanizeCode(code) : null
+}
+
+const humanizeCode = (code: string) =>
+  (
+    ({
+      faq_pair_preservation: "FAQ answers did not match",
+      numeric_fact_preservation: "numeric facts were lost",
+      smoke_assertions: "required content was missing",
+      no_truncation: "content was truncated",
+      dedupe: "duplicate content was found",
+      size_cap: "content exceeded the size limit",
+      validation: "validation failed",
+      empty: "no usable content",
+      extract: "extraction failed",
+      persist: "could not save the page",
+      timeout: "the crawl timed out",
+      browser: "browser renderer unavailable",
+      browser_crash: "browser renderer crashed",
+      url_overlap: "page belongs to another source",
+      page_failures: "pages failed during the crawl",
+    }) as Record<string, string>
+  )[code] ?? code.replaceAll("_", " ")
 
 const ingestProgressLabel = (source: KbSourceRecord, discovered: number, embedded: number) => {
   if (source.stage === "discovering") {
@@ -546,18 +608,32 @@ const ingestProgressLabel = (source: KbSourceRecord, discovered: number, embedde
   return source.status
 }
 
-const SourceProgress = ({ source }: { source: KbSourceRecord }) => {
-  const discovered = source.pages_discovered ?? 0
-  const embedded = source.pages_embedded ?? 0
-  const failed = source.pages_failed ?? 0
-  const active = ingestIsActive(source)
-  if (!active && failed === 0) {
-    return null
+const sourceNextStep = (source: KbSourceRecord) => {
+  const rules = source.validation_errors ?? []
+  if (rules.length > 0) {
+    return "Live answers were left unchanged. Review the failed rule, then retry the crawl."
   }
-  const label = ingestProgressLabel(source, discovered, embedded)
+  if ((source.pages_failed ?? 0) > 0) {
+    return "Open a failed page and retry it, or retry the crawl."
+  }
+  if (source.status === "failed") {
+    return "Review crawl activity, then retry the crawl."
+  }
+  return null
+}
+
+const IngestProgressBar = ({
+  source,
+  discovered,
+  embedded,
+}: {
+  source: KbSourceRecord
+  discovered: number
+  embedded: number
+}) => {
   return (
-    <div className="flex flex-col gap-1">
-      {active && discovered > 0 ? (
+    <>
+      {discovered > 0 ? (
         <progress
           aria-label="Ingestion progress"
           aria-valuemin={0}
@@ -568,38 +644,82 @@ const SourceProgress = ({ source }: { source: KbSourceRecord }) => {
           className="bg-ice-2 [&::-moz-progress-bar]:bg-steel [&::-webkit-progress-bar]:bg-ice-2 [&::-webkit-progress-value]:bg-steel h-1.5 w-full overflow-hidden rounded-full [&::-webkit-progress-bar]:rounded-full [&::-webkit-progress-value]:rounded-full [&::-webkit-progress-value]:transition-[width] [&::-webkit-progress-value]:duration-200"
         />
       ) : null}
-      {active ? <span>{label}</span> : null}
-      {failed > 0 ? (
-        <span className="bg-ice text-ember inline-flex w-fit rounded-[8px] px-2 py-0.5 text-[10px] font-bold">
-          {failed} pages failed
-        </span>
+      <span>{ingestProgressLabel(source, discovered, embedded)}</span>
+    </>
+  )
+}
+
+const SourceFailureHints = ({ failed, nextStep }: { failed: number; nextStep: string | null }) => (
+  <>
+    {failed > 0 ? (
+      <span className="text-ember text-[10px] font-bold">
+        {failed} {failed === 1 ? "page" : "pages"} failed
+      </span>
+    ) : null}
+    {nextStep !== null ? <span className="text-mute">{nextStep}</span> : null}
+  </>
+)
+
+const SourceProgress = ({ source }: { source: KbSourceRecord }) => {
+  const discovered = source.pages_discovered ?? 0
+  const embedded = source.pages_embedded ?? 0
+  const failed = source.pages_failed ?? 0
+  const active = ingestIsActive(source)
+  const nextStep = active ? null : sourceNextStep(source)
+  if (!active && failed === 0 && nextStep === null) {
+    return null
+  }
+  return (
+    <div className="flex flex-col gap-1">
+      {active ? (
+        <IngestProgressBar source={source} discovered={discovered} embedded={embedded} />
       ) : null}
+      <SourceFailureHints failed={failed} nextStep={nextStep} />
     </div>
   )
 }
 
-const snapshotPill = (source: KbSourceRecord) => {
-  const state = source.snapshot_state
-  if (state === "live") {
-    return "live"
+const CrawlActivity = ({ progress }: { progress: KbProgressRecord | null }) => {
+  if (!progress || (progress.current_jobs.length === 0 && progress.recent_events.length === 0)) {
+    return null
   }
-  if (state === "building") {
-    return "building"
-  }
-  if (state === "validated") {
-    return "validated"
-  }
-  if (state === "failed") {
-    return source.snapshot_error_code ? `failed (${source.snapshot_error_code})` : "failed"
-  }
-  return null
-}
-
-const snapshotPillClass = (source: KbSourceRecord) => {
-  if (source.snapshot_state === "live") {
-    return "inline-flex items-center gap-1.5 rounded-full bg-[#E8F5EE] px-2.5 py-1 text-[10px] font-bold tracking-[0.06em] text-[#247A4D] uppercase dark:bg-[#163627] dark:text-[#8DDEAE]"
-  }
-  return "bg-ice-2 text-mute inline-flex w-fit rounded-full px-2.5 py-1 text-[10px] font-bold tracking-[0.06em] uppercase"
+  return (
+    <section className="border-line bg-paper rounded-xl border px-5 py-5" aria-live="polite">
+      <p className="text-mute text-[10px] font-bold tracking-[0.14em] uppercase">Crawl activity</p>
+      <h2 className="text-navy mt-1 text-base font-extrabold">Latest page runs</h2>
+      {progress.current_jobs.length > 0 ? (
+        <ul className="mt-3 space-y-2">
+          {progress.current_jobs.map((job) => (
+            <li key={`${job.page_url}:${job.started_at}`} className="text-ink text-xs">
+              <span className="font-mono">{job.page_url}</span> — {humanizeCode(job.stage)}
+              {job.renderer ? ` via ${job.renderer}` : ""}
+            </li>
+          ))}
+        </ul>
+      ) : null}
+      <ul className="border-line mt-3 divide-y border-t">
+        {progress.recent_events.slice(0, 10).map((event) => (
+          <li
+            key={`${event.page_url}:${event.timestamp}`}
+            className="flex flex-col gap-1 py-2 text-xs sm:flex-row sm:items-center sm:justify-between"
+          >
+            <span className="text-ink min-w-0 truncate font-mono">{event.page_url}</span>
+            <span className={event.error_code ? "text-ember font-semibold" : "text-mute"}>
+              {event.error_code ? humanizeCode(event.error_code) : humanizeCode(event.state)}
+              {event.renderer ? ` · ${event.renderer}` : ""}
+              {event.http_status ? ` · HTTP ${event.http_status}` : ""}
+              {event.duration_ms !== null ? ` · ${event.duration_ms} ms` : ""}
+            </span>
+            {event.error_message ? (
+              <span className="text-ember sm:max-w-80 sm:truncate" title={event.error_message}>
+                {event.error_message}
+              </span>
+            ) : null}
+          </li>
+        ))}
+      </ul>
+    </section>
+  )
 }
 
 const PageTable = ({
@@ -608,26 +728,49 @@ const PageTable = ({
   isAdmin,
   onSelect,
   onToggle,
+  onRetry,
 }: {
   pages: KbPageRecord[]
   selectedId: string | null
   isAdmin: boolean
   onSelect: (page: KbPageRecord) => void
   onToggle: (page: KbPageRecord) => void
+  onRetry: (page: KbPageRecord) => void
 }) => {
+  const [query, setQuery] = useState("")
+  const normalized = query.trim().toLocaleLowerCase()
+  const filtered = pages.filter((page) =>
+    `${page.title} ${page.url} ${page.processing_status ?? ""}`
+      .toLocaleLowerCase()
+      .includes(normalized),
+  )
   if (pages.length === 0) {
     return null
   }
   return (
     <section className="border-line bg-paper overflow-hidden rounded-xl border">
-      <div className="border-line border-b px-5 py-5">
-        <p className="text-mute text-[10px] font-bold tracking-[0.14em] uppercase">
-          Indexed content
-        </p>
-        <h2 className="text-navy mt-1 text-lg font-extrabold tracking-[-0.025em]">Pages</h2>
-        <p className="text-mute mt-1 text-xs">
-          Open a page to inspect the copy the assistant retrieves.
-        </p>
+      <div className="border-line flex flex-col gap-3 border-b px-5 py-5 sm:flex-row sm:items-end sm:justify-between">
+        <div>
+          <p className="text-mute text-[10px] font-bold tracking-[0.14em] uppercase">
+            Indexed content
+          </p>
+          <h2 className="text-navy mt-1 text-lg font-extrabold tracking-[-0.025em]">Pages</h2>
+          <p className="text-mute mt-1 text-xs">
+            Open a page to inspect the copy the assistant retrieves.
+          </p>
+        </div>
+        <label className="border-line bg-ice flex items-center gap-2 rounded-[9px] border px-3 py-2">
+          <Search aria-hidden="true" className="text-mute size-3.5" />
+          <span className="sr-only">Search pages</span>
+          <input
+            type="search"
+            aria-label="Search pages"
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            placeholder="Search pages"
+            className="text-ink placeholder:text-mute w-44 bg-transparent text-xs outline-none"
+          />
+        </label>
       </div>
       <div className="overflow-x-auto">
         <table className="w-full min-w-[680px] border-collapse text-left text-sm">
@@ -640,7 +783,7 @@ const PageTable = ({
             </tr>
           </thead>
           <tbody>
-            {pages.map((page) => (
+            {filtered.map((page) => (
               <PageRow
                 key={page.id}
                 page={page}
@@ -648,6 +791,7 @@ const PageTable = ({
                 isAdmin={isAdmin}
                 onSelect={onSelect}
                 onToggle={onToggle}
+                onRetry={onRetry}
               />
             ))}
           </tbody>
@@ -663,15 +807,18 @@ const PageRow = ({
   isAdmin,
   onSelect,
   onToggle,
+  onRetry,
 }: {
   page: KbPageRecord
   selected: boolean
   isAdmin: boolean
   onSelect: (page: KbPageRecord) => void
   onToggle: (page: KbPageRecord) => void
+  onRetry: (page: KbPageRecord) => void
 }) => {
   const handleSelect = useCallback(() => onSelect(page), [onSelect, page])
   const handleToggle = useCallback(() => onToggle(page), [onToggle, page])
+  const handleRetry = useCallback(() => onRetry(page), [onRetry, page])
   return (
     <tr
       className={`border-line hover:bg-ice/60 border-t transition-colors duration-150 ${selected ? "bg-ice-2" : "bg-paper"}`}
@@ -694,17 +841,32 @@ const PageRow = ({
           {page.url}
         </button>
       </td>
-      <td className="text-mute px-5 py-3 text-xs">{pageStatusLabel(page)}</td>
+      <td
+        className={`px-5 py-3 text-xs ${page.processing_status === "failed" ? "text-ember font-semibold" : "text-mute"}`}
+      >
+        {pageStatusLabel(page)}
+      </td>
       {isAdmin ? (
         <td className="px-5 py-3">
-          <button
-            type="button"
-            onClick={handleToggle}
-            aria-label={page.enabled ? "Disable page" : "Enable page"}
-            className={`${page.enabled ? "text-ember" : "text-steel"} hover:text-navy text-xs font-bold transition-[color,transform] duration-150 ease-out active:scale-[0.98] motion-safe:hover:-translate-y-px`}
-          >
-            {page.enabled ? "Disable" : "Enable"}
-          </button>
+          <div className="flex items-center gap-3">
+            {page.processing_status === "failed" ? (
+              <button
+                type="button"
+                onClick={handleRetry}
+                className="text-steel hover:text-navy text-xs font-bold"
+              >
+                Retry page
+              </button>
+            ) : null}
+            <button
+              type="button"
+              onClick={handleToggle}
+              aria-label={page.enabled ? "Disable page" : "Enable page"}
+              className={`${page.enabled ? "text-ember" : "text-steel"} hover:text-navy text-xs font-bold transition-[color,transform] duration-150 ease-out active:scale-[0.98] motion-safe:hover:-translate-y-px`}
+            >
+              {page.enabled ? "Disable" : "Enable"}
+            </button>
+          </div>
         </td>
       ) : null}
     </tr>
@@ -713,7 +875,7 @@ const PageRow = ({
 
 const pageStatusLabel = (page: KbPageRecord) => {
   if (page.processing_status === "failed") {
-    return page.failure_reason ? `Skipped (${page.failure_reason})` : "Failed"
+    return page.failure_reason ? `Skipped (${humanizeCode(page.failure_reason)})` : "Failed"
   }
   if (page.processing_status === "fetching") {
     return "Fetching"
@@ -871,7 +1033,10 @@ const IndexedCopy = ({
     <section className="border-line bg-paper rounded-xl border p-5 lg:p-6">
       <IndexedCopyHeader detail={detail} />
       {detail.skip_reason ? (
-        <p className="text-ember mt-4 text-sm">Skipped: {detail.skip_reason}</p>
+        <p className="text-ember mt-4 text-sm">Skipped: {humanizeCode(detail.skip_reason)}</p>
+      ) : null}
+      {detail.failure_reason && detail.failure_reason !== detail.skip_reason ? (
+        <p className="text-ember mt-2 text-sm">Failed: {humanizeCode(detail.failure_reason)}</p>
       ) : null}
       {notice ? (
         <output className="border-ember/20 bg-ember/10 text-ember mt-4 block rounded-[8px] border px-3 py-2 text-sm">
@@ -880,7 +1045,7 @@ const IndexedCopy = ({
       ) : null}
       <div className="flex flex-col gap-3">
         <Collapsible
-          defaultOpen={false}
+          defaultOpen={true}
           className="border-line bg-paper overflow-hidden rounded-[12px] border shadow-[0_8px_24px_rgba(13,31,58,0.08)] dark:border-[#202833] dark:bg-[#07090C] dark:shadow-[0_8px_24px_rgba(0,0,0,0.24)]"
         >
           <CollapsibleTrigger className="group text-ink hover:bg-ice-2 px-5 py-4 transition-[background-color,border-color,transform] duration-[180ms] ease-[cubic-bezier(0.23,1,0.32,1)] active:scale-[0.997] dark:text-white dark:hover:bg-[#12171E]">

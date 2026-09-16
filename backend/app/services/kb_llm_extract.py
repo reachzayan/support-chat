@@ -62,7 +62,11 @@ SYSTEM_EXTRACT = (
 
 
 def needs_llm_extraction(units: list[EvidenceUnit]) -> bool:
-    return not any(unit.kind in {"faq", "definition"} for unit in units)
+    if any(unit.kind in {"faq", "definition"} for unit in units):
+        return False
+    sections = [unit for unit in units if unit.kind == "section"]
+    useful_chars = sum(len(unit.answer_verbatim.strip()) for unit in sections)
+    return len(sections) < 2 or useful_chars < 500
 
 
 def _unsafe(value: str) -> bool:
@@ -71,8 +75,20 @@ def _unsafe(value: str) -> bool:
     return any(marker in lowered for marker in markers)
 
 
+def _fold_on_page(value: str) -> str:
+    folded = (
+        (value or "")
+        .replace("\u00a0", " ")
+        .replace("\u201c", '"')
+        .replace("\u201d", '"')
+        .replace("\u2018", "'")
+        .replace("\u2019", "'")
+    )
+    return " ".join(folded.split())
+
+
 def _on_page(value: str, markdown: str) -> bool:
-    return bool(value) and value in markdown
+    return bool(value) and _fold_on_page(value) in _fold_on_page(markdown)
 
 
 class HaikuExtractClient:

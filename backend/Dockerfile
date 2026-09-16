@@ -7,7 +7,8 @@ WORKDIR /app
 ENV UV_COMPILE_BYTECODE=1 \
     UV_LINK_MODE=copy \
     PATH="/app/.venv/bin:$PATH" \
-    PYTHONUNBUFFERED=1
+    PYTHONUNBUFFERED=1 \
+    PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
 
 COPY pyproject.toml uv.lock ./
 RUN uv sync --frozen --no-dev --no-install-project
@@ -20,7 +21,9 @@ COPY docker/entrypoint.sh /entrypoint.sh
 
 RUN chmod +x /entrypoint.sh \
     && uv sync --frozen --no-dev \
-    && (uv run crawl4ai-setup || true)
+    && uv run playwright install-deps chromium \
+    && uv run playwright install chromium \
+    && uv run crawl4ai-setup
 
 EXPOSE 8000
 

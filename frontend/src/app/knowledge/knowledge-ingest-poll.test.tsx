@@ -1,10 +1,17 @@
 import { screen, waitFor } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
 import { describe, expect, test, vi } from "vitest"
 
 import { renderWithProviders } from "@/test/render"
 
 import { KnowledgeConsole } from "./knowledge-console"
-import { createIngestQueuedFetch } from "./knowledge-ingest-queued-fetch"
+import {
+  createIngestQueuedFetch,
+  createFailedProgressFetch,
+  createSelectedPagePollFetch,
+  DOT_COPY,
+  TIMING_COPY,
+} from "./knowledge-ingest-queued-fetch"
 import {
   jsonOk,
   PAGE_ID,
@@ -32,6 +39,27 @@ describe("knowledge ingest queued", () => {
       )
       const indexedLabel = screen.getByText("Indexed pages")
       expect(indexedLabel.parentElement?.querySelector(".tabular-nums")).toHaveTextContent("1")
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+})
+
+describe("knowledge ingest selection", () => {
+  test("polling after ingest keeps the selected page", async () => {
+    vi.stubGlobal("fetch", vi.fn(createSelectedPagePollFetch()))
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    try {
+      const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
+      renderWithProviders(<KnowledgeConsole isAdmin={true} displayName="Riley Chen" />)
+      await waitFor(() => expect(screen.getByRole("button", { name: "DOT" })).toBeInTheDocument())
+      await user.click(screen.getByRole("button", { name: "DOT" }))
+      await waitFor(() => expect(screen.getByText(DOT_COPY)).toBeInTheDocument())
+      await vi.advanceTimersByTimeAsync(2_000)
+      await waitFor(() => expect(screen.getByText("Ready")).toBeInTheDocument())
+      expect(screen.queryByText("live")).not.toBeInTheDocument()
+      expect(screen.getByText(DOT_COPY)).toBeInTheDocument()
+      expect(screen.queryByText(TIMING_COPY)).not.toBeInTheDocument()
     } finally {
       vi.useRealTimers()
     }
@@ -94,5 +122,33 @@ describe("knowledge ingest progress", () => {
     expect(bar).toHaveAttribute("aria-valuemax", "12")
     expect(screen.getByText("2 pages failed")).toBeInTheDocument()
     await waitFor(() => expect(screen.getByText("Embedding")).toBeInTheDocument())
+  })
+})
+
+describe("knowledge terminal failures", () => {
+  test("keeps terminal failures visible and explains the latest crawl event", async () => {
+    const user = userEvent.setup()
+    const fetchMock = vi.fn(createFailedProgressFetch())
+    vi.stubGlobal("fetch", fetchMock)
+    renderWithProviders(<KnowledgeConsole isAdmin={true} displayName="Riley Chen" />)
+    await waitFor(() =>
+      expect(
+        screen.getByText("Sync failed — live unchanged (FAQ answers did not match)"),
+      ).toBeInTheDocument(),
+    )
+    expect(screen.getByText("1 page failed")).toBeInTheDocument()
+    expect(
+      screen.getByText(
+        "Live answers were left unchanged. Review the failed rule, then retry the crawl.",
+      ),
+    ).toBeInTheDocument()
+    await waitFor(() => expect(screen.getByText("Skipped (validation failed)")).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByText("Crawl activity")).toBeInTheDocument())
+    expect(screen.getByText(/browser renderer crashed · crawl4ai/)).toBeInTheDocument()
+    await user.click(await screen.findByRole("button", { name: "Retry page" }))
+    expect(fetchMock).toHaveBeenCalledWith(
+      `/api/kb-pages/${PAGE_ID}/retry`,
+      expect.objectContaining({ method: "POST" }),
+    )
   })
 })

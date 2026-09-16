@@ -78,6 +78,7 @@ class Settings(BaseSettings):
     kb_ingest_source_concurrency: int = 2
     kb_ingest_host_delay_ms: int = 500
     kb_ingest_stuck_minutes: int = 10
+    kb_ingest_source_timeout_seconds: float = 600.0
     kb_llm_extract_concurrency: int = 4
     kb_llm_extract_prompt_version: str = "v1"
     kb_ingest_retry_sleep: float = 0.0

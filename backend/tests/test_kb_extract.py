@@ -37,6 +37,90 @@ def test_definition_list_pairs_dt_with_dd() -> None:
     )
 
 
+def test_nested_heading_wrapper_keeps_section_body() -> None:
+    html = """
+    <html><body>
+    <main>
+      <section>
+        <div><h2>Title</h2></div>
+        <div><p>Body copy that must be indexed.</p></div>
+      </section>
+    </main>
+    </body></html>
+    """
+    units = extract_html(html, url="https://example.com/services")
+    sections = [unit for unit in units if unit.kind == "section"]
+    title = next(unit for unit in sections if unit.heading == "Title")
+    assert "Body copy that must be indexed." in title.answer_verbatim
+
+
+def test_hero_in_header_is_kept_and_nav_is_dropped() -> None:
+    html = """
+    <html><body>
+    <header>
+      <nav><a href="/careers">Careers</a></nav>
+      <h1>Employment screening</h1>
+      <p>FCRA compliant sample services for employers.</p>
+    </header>
+    <footer>Privacy</footer>
+    </body></html>
+    """
+    units = extract_html(html, url="https://example.com/")
+    answers = " ".join(unit.answer_verbatim for unit in units)
+    headings = " ".join(unit.heading for unit in units)
+    assert "Employment screening" in headings
+    assert "FCRA compliant sample services for employers." in answers
+    assert "Careers" not in answers
+    assert "Privacy" not in answers
+
+
+def test_jsonld_faq_wins_over_near_duplicate_dom_answer() -> None:
+    html = """
+    <html><body>
+      <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "FAQPage",
+        "mainEntity": [{
+          "@type": "Question",
+          "name": "What are collection solutions?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "Collection solutions are data, verification, and contact tools."
+          }
+        }]
+      }
+      </script>
+      <details>
+        <summary>What are collection solutions?</summary>
+        <p>Collection solutions are the data, verification, and contact tools.</p>
+      </details>
+    </body></html>
+    """
+    units = extract_html(html, url="https://sample-data.example.com/collections")
+    faqs = [unit for unit in units if unit.canonical_question == "What are collection solutions?"]
+    assert [unit.answer_verbatim for unit in faqs] == [
+        "Collection solutions are data, verification, and contact tools."
+    ]
+
+
+def test_fallback_keeps_unique_prose_next_to_structured_faq() -> None:
+    html = """
+    <html><head><title>Data services</title></head><body><main>
+      <details>
+        <summary>What is identity verification?</summary>
+        <p>Identity verification checks submitted information against trusted records.</p>
+      </details>
+      <p>Our collection specialists also locate updated phone and address information.</p>
+    </main></body></html>
+    """
+    units = extract_html(html, url="https://sample-data.example.com/collections")
+    answers = "\n".join(unit.answer_verbatim for unit in units)
+    assert (
+        "Our collection specialists also locate updated phone and address information." in answers
+    )
+
+
 def test_headings_preserve_paragraph_breaks_and_list_bullets() -> None:
     html = """
     <html><body>

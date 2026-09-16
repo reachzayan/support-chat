@@ -39,6 +39,14 @@ class KbPageJobRepository:
         )
         return list(result.scalars().all())
 
+    async def get_for_page_snapshot(self, page_id: UUID, snapshot_id: UUID) -> KbPageJob | None:
+        return await self._session.scalar(
+            select(KbPageJob).where(
+                KbPageJob.page_id == page_id,
+                KbPageJob.snapshot_id == snapshot_id,
+            )
+        )
+
     async def reap_stuck(self, now: datetime | None = None) -> int:
         settings = get_settings()
         stamp = now or datetime.now(UTC)

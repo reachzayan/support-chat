@@ -43,13 +43,11 @@ def _resolve_ips(host: str) -> list[ipaddress.IPv4Address | ipaddress.IPv6Addres
     return found
 
 
-def allowed_fetch_url(url: str, allowed_hosts: set[str]):
+def public_fetch_url(url: str):
     parsed = urlparse(url)
     if parsed.scheme != "https" or parsed.username or parsed.password or not parsed.hostname:
         raise FetchError("ssrf")
     host = parsed.hostname.casefold()
-    if host not in allowed_hosts:
-        raise FetchError("ssrf")
     try:
         literal = ipaddress.ip_address(host)
     except ValueError:
@@ -59,6 +57,13 @@ def allowed_fetch_url(url: str, allowed_hosts: set[str]):
     for address in _resolve_ips(host):
         if _blocked(address):
             raise FetchError("ssrf")
+    return parsed
+
+
+def allowed_fetch_url(url: str, allowed_hosts: set[str]):
+    parsed = public_fetch_url(url)
+    if parsed.hostname.casefold() not in allowed_hosts:
+        raise FetchError("ssrf")
     return parsed
 
 

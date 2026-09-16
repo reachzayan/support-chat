@@ -2,7 +2,7 @@ from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, Query, status
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from app.db import SessionDep
 from app.models.kb_chunk import KbChunk
@@ -62,6 +62,7 @@ class SourceOut(BaseModel):
     enabled: bool
     snapshot_state: str | None = None
     snapshot_error_code: str | None = None
+    validation_errors: list[str] = Field(default_factory=list)
 
 
 class SourceListOut(BaseModel):
@@ -140,6 +141,10 @@ class ProgressEventOut(BaseModel):
     state: str
     page_url: str
     duration_ms: int | None = None
+    error_code: str | None = None
+    error_message: str | None = None
+    renderer: str | None = None
+    http_status: int | None = None
 
 
 class ProgressJobOut(BaseModel):
@@ -147,6 +152,7 @@ class ProgressJobOut(BaseModel):
     stage: str
     attempt: int
     started_at: str | None
+    renderer: str | None = None
 
 
 class ProgressOut(BaseModel):
@@ -168,13 +174,27 @@ def _http_error(exc: AdminError) -> HTTPException:
         )
     if exc.code == "too_large":
         return HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail="Too large")
+    if exc.code == "overlap":
+        return HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="This page already belongs to another knowledge source.",
+        )
+    if exc.code == "busy":
+        return HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="This source is already syncing.",
+        )
     return HTTPException(
         status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail="Invalid request"
     )
 
 
 async def _source_out(session, source: KbSource) -> SourceOut:
-    snap = await KbSourceService(session).status_snapshot(source.id)
+    rows = await KbSourceService(session).list_snapshots(source.id)
+    latest = rows[0] if rows else None
+    live = next((row for row in rows if row.state == "live"), None)
+    serving = live or latest
+    failed_run = latest if latest is not None and latest.state == "failed" else None
     return SourceOut(
         id=source.id,
         site_id=source.site_id,
@@ -193,8 +213,15 @@ async def _source_out(session, source: KbSource) -> SourceOut:
         last_run_started_at=_iso(source.last_run_started_at),
         last_run_finished_at=_iso(source.last_run_finished_at),
         enabled=source.enabled,
-        snapshot_state=snap.state if snap is not None else None,
-        snapshot_error_code=snap.error_code if snap is not None else None,
+        snapshot_state=serving.state if serving is not None else None,
+        snapshot_error_code=(
+            failed_run.error_code
+            if failed_run is not None
+            else (serving.error_code if serving is not None else None)
+        ),
+        validation_errors=list((failed_run or serving).validation_errors or [])
+        if (failed_run or serving) is not None
+        else [],
     )
 
 
@@ -309,6 +336,15 @@ async def sync_source(source_id: UUID, session: SessionDep, admin: CurrentAdmin)
     return await _source_out(session, source)
 
 
+@router.post("/api/kb-pages/{page_id}/retry", response_model=SourceOut)
+async def retry_page(page_id: UUID, session: SessionDep, admin: CurrentAdmin) -> SourceOut:
+    try:
+        source = await KbSourceService(session).retry_page(page_id)
+    except AdminError as exc:
+        raise _http_error(exc) from exc
+    return await _source_out(session, source)
+
+
 @router.delete("/api/kb-sources/{source_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_source(source_id: UUID, session: SessionDep, admin: CurrentAdmin) -> None:
     try:
@@ -346,7 +382,27 @@ async def source_progress(source_id: UUID, session: SessionDep, _staff: CurrentU
         duration = None
         if job.started_at is not None and job.finished_at is not None:
             duration = round((job.finished_at - job.started_at).total_seconds() * 1000)
-        if job.finished_at is not None and len(recent) < 10:
+        for event in reversed(job.events or []):
+            if len(recent) >= 20:
+                break
+            recent.append(
+                ProgressEventOut(
+                    timestamp=event.get("timestamp"),
+                    stage=str(event.get("stage") or job.stage),
+                    state=str(event.get("state") or job.state),
+                    page_url=page.url,
+                    duration_ms=(
+                        duration
+                        if event.get("state") in {"done", "dead_letter", "unchanged"}
+                        else None
+                    ),
+                    error_code=event.get("error_code"),
+                    error_message=(job.last_error_message if event.get("error_code") else None),
+                    renderer=event.get("renderer") or job.renderer,
+                    http_status=event.get("http_status") or job.http_status,
+                )
+            )
+        if not job.events and job.finished_at is not None and len(recent) < 20:
             recent.append(
                 ProgressEventOut(
                     timestamp=_iso(job.finished_at),
@@ -354,6 +410,10 @@ async def source_progress(source_id: UUID, session: SessionDep, _staff: CurrentU
                     state=job.state,
                     page_url=page.url,
                     duration_ms=duration,
+                    error_code=job.last_error_code,
+                    error_message=job.last_error_message,
+                    renderer=job.renderer,
+                    http_status=job.http_status,
                 )
             )
         if job.state == "running":
@@ -363,6 +423,7 @@ async def source_progress(source_id: UUID, session: SessionDep, _staff: CurrentU
                     stage=job.stage,
                     attempt=job.attempts,
                     started_at=_iso(job.started_at),
+                    renderer=job.renderer,
                 )
             )
     return ProgressOut(

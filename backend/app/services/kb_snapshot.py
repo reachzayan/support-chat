@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.kb_snapshot import KbSnapshot
 from app.models.kb_source import KbSource
 from app.services.kb_extract.types import EvidenceUnit
-from app.services.kb_validate import ValidationResult
+from app.services.kb_validate import PageEvidence, ValidationResult, validate_snapshot_with_pages
 from app.services.kb_validate import validate_snapshot as run_validation
 
 
@@ -71,8 +71,14 @@ async def append_unit(session: AsyncSession, snapshot_id: UUID, unit: EvidenceUn
     await session.flush()
 
 
-async def validate_snapshot(session: AsyncSession, snapshot_id: UUID) -> ValidationResult:
-    return await run_validation(session, snapshot_id)
+async def validate_snapshot(
+    session: AsyncSession,
+    snapshot_id: UUID,
+    staged_pages: dict[UUID, PageEvidence] | None = None,
+) -> ValidationResult:
+    if staged_pages is None:
+        return await run_validation(session, snapshot_id)
+    return await validate_snapshot_with_pages(session, snapshot_id, staged_pages)
 
 
 async def promote(session: AsyncSession, snapshot_id: UUID) -> None:
@@ -98,4 +104,13 @@ async def fail(session: AsyncSession, snapshot_id: UUID, error_code: str) -> Non
         raise ValueError("snapshot_not_found")
     snapshot.state = "failed"
     snapshot.error_code = error_code
+    await session.flush()
+
+
+async def mark_unchanged(session: AsyncSession, snapshot_id: UUID, content_hash: str) -> None:
+    snapshot = await session.get(KbSnapshot, snapshot_id)
+    if snapshot is None:
+        return
+    snapshot.state = "unchanged"
+    snapshot.content_hash = content_hash
     await session.flush()

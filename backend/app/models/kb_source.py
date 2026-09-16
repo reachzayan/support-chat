@@ -48,6 +48,7 @@ class KbSource(Base):
     start_url: Mapped[str] = mapped_column(String)
     mode: Mapped[str] = mapped_column(String, server_default=text("'list'"))
     seed_urls: Mapped[list] = mapped_column(JSONB, server_default=text("'[]'::jsonb"))
+    retry_urls: Mapped[list] = mapped_column(JSONB, server_default=text("'[]'::jsonb"))
     include_globs: Mapped[list] = mapped_column(JSONB, server_default=text("'[]'::jsonb"))
     exclude_globs: Mapped[list] = mapped_column(JSONB, server_default=text("'[]'::jsonb"))
     max_depth: Mapped[int] = mapped_column(Integer, server_default=text("3"))

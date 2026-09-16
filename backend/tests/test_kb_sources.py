@@ -1,5 +1,5 @@
 import hashlib
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from fastapi.testclient import TestClient
 
@@ -308,10 +308,116 @@ def test_fragment_and_root_url_collapse_to_one_source(client: TestClient) -> Non
     assert len(items) == 1
     assert items[0]["id"] == first.json()["id"]
     assert items[0]["start_url"] == "https://sample-site.example.com/"
+    assert items[0]["mode"] == "list"
     assert items[0]["status"] == "queued"
     assert items[0]["page_count"] == 0
     assert items[0]["stage"] == "idle"
     assert items[0]["pages_discovered"] == 0
+
+
+def test_admin_create_respects_explicit_list_mode(client: TestClient) -> None:
+    _insert_admin()
+    admin = login_staff(client, ADMIN_EMAIL, ADMIN_PASSWORD)
+    site_id = _create_easy_site(client, admin)
+    created = client.post(
+        f"/api/sites/{site_id}/kb-sources",
+        headers=_auth(admin),
+        json={
+            "mode": "list",
+            "start_url": "https://sample-site.example.com/faq",
+            "seed_urls": ["https://sample-site.example.com/faq"],
+        },
+    )
+    assert created.status_code == 201
+    assert created.json()["mode"] == "list"
+
+
+def test_admin_create_rejects_a_url_owned_by_another_source(client: TestClient) -> None:
+    _insert_admin()
+    admin = login_staff(client, ADMIN_EMAIL, ADMIN_PASSWORD)
+    site_id = _create_easy_site(client, admin)
+    first = client.post(
+        f"/api/sites/{site_id}/kb-sources",
+        headers=_auth(admin),
+        json={"mode": "list", "start_url": FAQ_URL, "seed_urls": [FAQ_URL]},
+    )
+    assert first.status_code == 201
+    source_id = UUID(first.json()["id"])
+    session = next(sync_session())
+    try:
+        source = session.get(KbSource, source_id)
+        assert source is not None
+        session.add(
+            KbPage(
+                source_id=source.id,
+                site_id=source.site_id,
+                url="https://sample-site.example.com/privacy",
+                title="Privacy",
+                content_text="Privacy policy copy.",
+                content_sha256="b" * 64,
+                http_status=200,
+                enabled=True,
+            )
+        )
+        session.commit()
+    finally:
+        session.close()
+
+    second = client.post(
+        f"/api/sites/{site_id}/kb-sources",
+        headers=_auth(admin),
+        json={
+            "mode": "list",
+            "start_url": "https://sample-site.example.com/privacy",
+            "seed_urls": ["https://sample-site.example.com/privacy"],
+        },
+    )
+    assert second.status_code == 409
+    assert second.json()["detail"] == "This page already belongs to another knowledge source."
+
+
+def test_admin_can_queue_a_single_failed_page_retry(client: TestClient) -> None:
+    _insert_admin()
+    admin = login_staff(client, ADMIN_EMAIL, ADMIN_PASSWORD)
+    site_id = _create_easy_site(client, admin)
+    created = client.post(
+        f"/api/sites/{site_id}/kb-sources",
+        headers=_auth(admin),
+        json={"mode": "list", "start_url": FAQ_URL, "seed_urls": [FAQ_URL]},
+    )
+    source_id = UUID(created.json()["id"])
+    session = next(sync_session())
+    try:
+        source = session.get(KbSource, source_id)
+        assert source is not None
+        source.status = "failed"
+        page = KbPage(
+            source_id=source.id,
+            site_id=source.site_id,
+            url=FAQ_URL,
+            title="Turnaround",
+            content_text=TIMING_BODY,
+            content_sha256="a" * 64,
+            http_status=200,
+            enabled=True,
+            processing_status="failed",
+        )
+        session.add(page)
+        session.commit()
+        page_id = page.id
+    finally:
+        session.close()
+
+    response = client.post(f"/api/kb-pages/{page_id}/retry", headers=_auth(admin))
+    assert response.status_code == 200
+    assert response.json()["status"] == "queued"
+    session = next(sync_session())
+    try:
+        source = session.get(KbSource, source_id)
+        assert source is not None
+        assert source.retry_urls == [FAQ_URL]
+    finally:
+        session.close()
 
 
 async def test_snapshots_diff_and_rollback(migrated_db) -> None:
@@ -371,3 +477,163 @@ async def test_snapshots_diff_and_rollback(migrated_db) -> None:
         rolled = client.post(f"/api/kb-sources/{source_id}/rollback", headers=_auth(admin))
         assert rolled.json()["id"] == str(first_id)
         assert rolled.json()["state"] == "live"
+
+
+async def test_first_live_diff_lists_units_and_same_heading_change_is_changed(
+    migrated_db,
+) -> None:
+    from app.services.kb_snapshot import begin_snapshot, promote
+    from app.services.kb_source_admin import KbSourceService
+
+    async with session_maker()() as session:
+        site = await insert_site(session, f"easy-{uuid4().hex[:8]}", "SampleSite")
+        source = KbSource(
+            site_id=site.id,
+            start_url=FAQ_URL,
+            mode="list",
+            seed_urls=[FAQ_URL],
+            status="ready",
+            page_count=1,
+            embedder_id=configured_embedder_id(),
+            enabled=True,
+        )
+        session.add(source)
+        await session.flush()
+        page = KbPage(
+            source_id=source.id,
+            site_id=site.id,
+            url=FAQ_URL,
+            title=TIMING_TITLE,
+            content_text=TIMING_BODY,
+            content_sha256=hashlib.sha256(TIMING_BODY.encode()).hexdigest(),
+            http_status=200,
+            enabled=True,
+        )
+        session.add(page)
+        await session.flush()
+        first_id = await begin_snapshot(session, source.id)
+        session.add(
+            KbChunk(
+                page_id=page.id,
+                site_id=site.id,
+                snapshot_id=first_id,
+                ordinal=0,
+                kind="section",
+                heading=TIMING_TITLE,
+                canonical_question=None,
+                answer_verbatim=TIMING_BODY,
+                body=TIMING_BODY,
+                aliases=[],
+                enabled=True,
+            )
+        )
+        await promote(session, first_id)
+        await session.commit()
+        service = KbSourceService(session)
+        first_diff = await service.diff_snapshots(source.id, None, None)
+        assert [item["answer_verbatim"] for item in first_diff["added"]] == [TIMING_BODY]
+        assert first_diff["changed"] == []
+        assert first_diff["removed"] == []
+
+        second_id = await begin_snapshot(session, source.id)
+        session.add(
+            KbChunk(
+                page_id=page.id,
+                site_id=site.id,
+                snapshot_id=second_id,
+                ordinal=0,
+                kind="section",
+                heading=TIMING_TITLE,
+                canonical_question=None,
+                answer_verbatim="Rapid negatives can arrive in minutes.",
+                body="Rapid negatives can arrive in minutes.",
+                aliases=[],
+                enabled=True,
+            )
+        )
+        await promote(session, second_id)
+        await session.commit()
+        second_diff = await service.diff_snapshots(source.id, first_id, second_id)
+        assert second_diff["added"] == []
+        assert second_diff["removed"] == []
+        assert len(second_diff["changed"]) == 1
+        assert second_diff["changed"][0]["before"]["answer_verbatim"] == TIMING_BODY
+        assert (
+            second_diff["changed"][0]["after"]["answer_verbatim"]
+            == "Rapid negatives can arrive in minutes."
+        )
+
+
+async def test_snapshot_diff_compares_every_chunk_in_a_section(migrated_db) -> None:
+    from app.services.kb_snapshot import begin_snapshot, promote
+
+    async with session_maker()() as session:
+        site = await insert_site(session, f"easy-{uuid4().hex[:8]}", "SampleSite")
+        source = KbSource(
+            site_id=site.id,
+            start_url=FAQ_URL,
+            mode="list",
+            seed_urls=[FAQ_URL],
+            status="ready",
+            page_count=1,
+            embedder_id=configured_embedder_id(),
+            enabled=True,
+        )
+        session.add(source)
+        await session.flush()
+        page = KbPage(
+            source_id=source.id,
+            site_id=site.id,
+            url=FAQ_URL,
+            title="Screening process",
+            content_text="Step one. Step two.",
+            content_sha256="a" * 64,
+            http_status=200,
+            enabled=True,
+        )
+        session.add(page)
+        await session.flush()
+        first_id = await begin_snapshot(session, source.id)
+        for ordinal, answer in enumerate(("Step one.", "Step two.")):
+            session.add(
+                KbChunk(
+                    page_id=page.id,
+                    site_id=site.id,
+                    snapshot_id=first_id,
+                    ordinal=ordinal,
+                    kind="section",
+                    heading="Screening process",
+                    canonical_question=None,
+                    answer_verbatim=answer,
+                    body=answer,
+                    aliases=[],
+                    enabled=True,
+                )
+            )
+        await promote(session, first_id)
+        second_id = await begin_snapshot(session, source.id)
+        for ordinal, answer in enumerate(("Step one.", "Step two changed.")):
+            session.add(
+                KbChunk(
+                    page_id=page.id,
+                    site_id=site.id,
+                    snapshot_id=second_id,
+                    ordinal=ordinal,
+                    kind="section",
+                    heading="Screening process",
+                    canonical_question=None,
+                    answer_verbatim=answer,
+                    body=answer,
+                    aliases=[],
+                    enabled=True,
+                )
+            )
+        await promote(session, second_id)
+        await session.commit()
+
+        diff = await KbSourceService(session).diff_snapshots(source.id, first_id, second_id)
+        assert diff["added"] == []
+        assert diff["removed"] == []
+        assert len(diff["changed"]) == 1
+        assert diff["changed"][0]["before"]["answer_verbatim"] == "Step one.\n\nStep two."
+        assert diff["changed"][0]["after"]["answer_verbatim"] == "Step one.\n\nStep two changed."
