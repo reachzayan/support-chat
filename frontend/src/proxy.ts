@@ -34,6 +34,7 @@ export const STAFF_PREFIXES = [
   "/api/canned-replies",
   "/api/kb-sources",
   "/api/kb-pages",
+  "/api/kb-chunks",
   "/api/handoffs",
   "/api/logs",
 ]

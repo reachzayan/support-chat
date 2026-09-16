@@ -50,7 +50,7 @@
     ],
     "react/react-in-jsx-scope": "off",
     "import/no-unassigned-import": ["error", { "allow": ["**/*.css"] }],
-    "eslint/no-underscore-dangle": ["error", { "allow": ["__supportchat"] }]
+    "eslint/no-underscore-dangle": ["error", { "allow": ["__supportchat", "__supportchatInstalled"] }]
   },
   "overrides": [
     {

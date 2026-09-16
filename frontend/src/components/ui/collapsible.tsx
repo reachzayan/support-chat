@@ -1,7 +1,18 @@
+/* oxlint-disable react-perf/jsx-no-new-object-as-prop */
+
 "use client"
 
 import { cn } from "cn"
-import { useCallback, useMemo, useState, type ReactNode } from "react"
+import { AnimatePresence, motion, useReducedMotion } from "motion/react"
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useMemo,
+  useState,
+  type ComponentProps,
+  type ReactNode,
+} from "react"
 
 type CollapsibleProps = {
   defaultOpen?: boolean
@@ -13,8 +24,6 @@ type CollapsibleContextValue = {
   open: boolean
   setOpen: (open: boolean) => void
 }
-
-import { createContext, useContext } from "react"
 
 const CollapsibleContext = createContext<CollapsibleContextValue | null>(null)
 
@@ -30,7 +39,7 @@ const Collapsible = ({ defaultOpen = false, children, className }: CollapsiblePr
   )
 }
 
-const CollapsibleTrigger = ({ className, children, ...props }: React.ComponentProps<"button">) => {
+const CollapsibleTrigger = ({ className, children, ...props }: ComponentProps<"button">) => {
   const ctx = useContext(CollapsibleContext)
   const handleToggle = useCallback(() => {
     ctx?.setOpen(!(ctx?.open ?? false))
@@ -55,15 +64,34 @@ const CollapsibleTrigger = ({ className, children, ...props }: React.ComponentPr
   )
 }
 
-const CollapsibleContent = ({ className, children, ...props }: React.ComponentProps<"div">) => {
+// Quiet, functional motion: height + opacity only, matching the theme's 150-200ms guidance.
+const COLLAPSE_TRANSITION = { duration: 0.2, ease: [0.23, 1, 0.32, 1] } as const
+
+const CollapsibleContent = ({ className, children, ...props }: ComponentProps<"div">) => {
   const ctx = useContext(CollapsibleContext)
-  if (ctx === null || !ctx.open) {
+  const reducedMotion = useReducedMotion()
+  if (ctx === null) {
     return null
   }
+  const transition = reducedMotion ? { duration: 0 } : COLLAPSE_TRANSITION
   return (
-    <div data-slot="collapsible-content" className={cn("mt-2", className)} {...props}>
-      {children}
-    </div>
+    <AnimatePresence initial={false}>
+      {ctx.open ? (
+        <motion.div
+          key="collapsible-content"
+          data-slot="collapsible-content-frame"
+          initial={{ height: 0, opacity: 0 }}
+          animate={{ height: "auto", opacity: 1 }}
+          exit={{ height: 0, opacity: 0 }}
+          transition={transition}
+          className="overflow-hidden"
+        >
+          <div data-slot="collapsible-content" className={cn("mt-2", className)} {...props}>
+            {children}
+          </div>
+        </motion.div>
+      ) : null}
+    </AnimatePresence>
   )
 }
 
