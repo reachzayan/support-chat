@@ -6,5 +6,6 @@ export type ChatEmbedConfig = {
 declare global {
   interface Window {
     __supportchat?: ChatEmbedConfig
+    __supportchatInstalled?: boolean
   }
 }

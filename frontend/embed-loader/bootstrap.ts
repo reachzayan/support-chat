@@ -2,6 +2,7 @@ export type PublicWidgetConfig = {
   name: string
   greeting: string
   privacy_url: string
+  contact_info: string[]
   bot_enabled: boolean
   human_enabled: boolean
 }
@@ -27,10 +28,16 @@ const parseWidget = (value: unknown): PublicWidgetConfig | null => {
   ) {
     return null
   }
+  const contactInfo = Array.isArray(value.contact_info)
+    ? value.contact_info.filter(
+        (item): item is string => typeof item === "string" && item.trim() !== "",
+      )
+    : []
   return {
     name: value.name,
     greeting: value.greeting,
     privacy_url: value.privacy_url,
+    contact_info: contactInfo,
     bot_enabled: value.bot_enabled !== false,
     human_enabled: value.human_enabled !== false,
   }

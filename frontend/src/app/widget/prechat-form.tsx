@@ -108,7 +108,7 @@ export const PrechatForm = ({ name, privacyUrl, onSubmit }: PrechatFormProps) =>
     <form
       onSubmit={handleSubmit}
       noValidate
-      className="widget-enter bg-paper flex min-h-0 flex-1 flex-col"
+      className="widget-enter flex min-h-0 flex-1 flex-col bg-transparent"
     >
       <PrechatFields
         displayName={displayName}
@@ -132,7 +132,7 @@ const PrechatFields = ({
   onPrivacy: () => void
 }) => (
   <>
-    <div className="bg-ice flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-5 py-6">
+    <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-5 py-4">
       <div>
         <p className="text-steel text-[10px] font-extrabold tracking-[0.14em] uppercase">
           Start a conversation
@@ -175,7 +175,7 @@ const PrechatFields = ({
         Message
         <Textarea id="prechat-message" name="message" rows={3} maxLength={2000} className={FIELD} />
       </label>
-      <p className="border-line text-mute border-l-ember bg-paper rounded-[8px] border-l-2 px-3 py-2.5 text-xs leading-5">
+      <p className="text-mute rounded-[18px] bg-white/70 px-3 py-2.5 text-xs leading-5 shadow-[0_6px_18px_rgba(13,31,58,0.06)] backdrop-blur-xl">
         {PRIVACY}
       </p>
       <Button
@@ -188,11 +188,11 @@ const PrechatFields = ({
         Privacy notice
       </Button>
     </div>
-    <div className="border-line bg-paper shrink-0 border-t px-5 py-4">
+    <div className="shrink-0 bg-transparent px-3 pt-2 pb-3">
       <Button
         type="submit"
         variant="default"
-        className="bg-steel focus-visible:ring-steel hover:bg-navy dark:text-navy-deep min-h-11 w-full rounded-[8px] px-4 py-2.5 text-sm font-bold text-white focus-visible:ring-2 focus-visible:outline-none"
+        className="bg-ember focus-visible:ring-ember/30 hover:bg-ember-mid min-h-11 w-full rounded-[22px] px-4 py-2.5 text-sm font-bold text-white shadow-[0_10px_24px_rgba(196,85,22,0.22)] focus-visible:ring-4 focus-visible:outline-none"
       >
         Start the chat
       </Button>

@@ -36,6 +36,7 @@ describe("supportchat loader", () => {
     document.body.innerHTML = ""
     vi.unstubAllGlobals()
     window.__supportchat = { siteKey: DEMO_KEY, publicKey: PUBLIC }
+    window.__supportchatInstalled = false
   })
 
   afterEach(() => {
@@ -82,6 +83,15 @@ describe("supportchat loader", () => {
     expect(window.localStorage.getItem(`supportchat.visitor.${DEMO_KEY}`)).toBeNull()
     expect(document.querySelector("iframe")?.getAttribute("src")).toBe(`${WIDGET_ORIGIN}/widget`)
     expect(document.querySelector("iframe")?.getAttribute("title")).toBe("SupportChat")
+  })
+
+  test("running the snippet twice mounts only one launcher", () => {
+    vi.stubGlobal("fetch", vi.fn())
+
+    installSupportChat(window, document, attachScript())
+    installSupportChat(window, document, attachScript())
+
+    expect(document.querySelectorAll('[aria-label="Open chat"]')).toHaveLength(1)
   })
 
   test("closing before Start stores nothing", async () => {

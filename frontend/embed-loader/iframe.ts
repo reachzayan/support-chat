@@ -10,7 +10,7 @@ type PanelState = {
 }
 
 const PANEL_STYLE = [
-  "[data-supportchat-panel]{transform-origin:bottom right;transition:width 220ms cubic-bezier(0.22,1,0.36,1),height 220ms cubic-bezier(0.22,1,0.36,1),opacity 200ms ease,transform 220ms cubic-bezier(0.22,1,0.36,1)}",
+  "[data-supportchat-panel]{transform-origin:bottom right;transition:opacity 220ms ease,transform 300ms cubic-bezier(0.22,1,0.36,1),border-radius 300ms cubic-bezier(0.22,1,0.36,1);will-change:transform,opacity}",
   "@media (prefers-reduced-motion: reduce){[data-supportchat-panel]{transition:none}}",
 ].join("")
 
@@ -38,14 +38,14 @@ export const createPanel = (doc: Document, widgetOrigin: string): HTMLIFrameElem
     "width:420px",
     "height:680px",
     "border:0",
-    "border-radius:16px",
+    "border-radius:30px",
     "z-index:2147483646",
-    "background:#FFFFFF",
-    "box-shadow:0 16px 40px rgba(11,35,71,0.28)",
+    "background:transparent",
+    "box-shadow:0 20px 60px rgba(13,31,58,0.22)",
     "max-width:calc(100vw - 32px)",
     "max-height:calc(100vh - 32px)",
-    "opacity:1",
-    "transform:translateY(0) scale(1)",
+    "opacity:0",
+    "transform:translateY(16px) scale(0.96)",
   ].join(";")
   doc.body.appendChild(iframe)
   return iframe
@@ -157,12 +157,52 @@ const dispatchWidgetFrame = (
   }
 }
 
+const prefersReducedMotion = (iframe: HTMLIFrameElement) =>
+  iframe.ownerDocument.defaultView?.matchMedia?.("(prefers-reduced-motion: reduce)").matches ??
+  false
+
+const resetWidgetTransform = (iframe: HTMLIFrameElement) => {
+  iframe.style.transform = "translateY(0) scale(1)"
+}
+
+const animateWidgetResize = (
+  iframe: HTMLIFrameElement,
+  currentWidth: number,
+  currentHeight: number,
+  targetWidth: number,
+  targetHeight: number,
+) => {
+  iframe.style.transition = "none"
+  iframe.style.transform = `translateY(0) scale(${currentWidth / targetWidth}, ${currentHeight / targetHeight})`
+  iframe.getBoundingClientRect()
+  const startTransition = () => {
+    iframe.style.transition = ""
+    resetWidgetTransform(iframe)
+  }
+  const widgetWindow = iframe.ownerDocument.defaultView
+  if (widgetWindow?.requestAnimationFrame) {
+    widgetWindow.requestAnimationFrame(startTransition)
+    return
+  }
+  startTransition()
+}
+
 const applyWidgetResize = (state: PanelState, frame: { height: number; width?: number }) => {
   if (state.iframe === null) {
     return
   }
-  state.iframe.style.height = `${frame.height}px`
-  if (frame.width !== undefined) {
-    state.iframe.style.width = `${frame.width}px`
+  const iframe = state.iframe
+  const targetWidth = frame.width ?? Number.parseFloat(iframe.style.width)
+  const targetHeight = frame.height
+  const bounds = iframe.getBoundingClientRect()
+  const currentWidth = bounds.width || Number.parseFloat(iframe.style.width)
+  const currentHeight = bounds.height || Number.parseFloat(iframe.style.height)
+
+  iframe.style.height = `${targetHeight}px`
+  iframe.style.width = `${targetWidth}px`
+  if (prefersReducedMotion(iframe) || currentWidth === 0 || currentHeight === 0) {
+    resetWidgetTransform(iframe)
+    return
   }
+  animateWidgetResize(iframe, currentWidth, currentHeight, targetWidth, targetHeight)
 }

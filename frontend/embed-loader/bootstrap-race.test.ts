@@ -19,6 +19,7 @@ describe("bootstrap race", () => {
     document.body.innerHTML = ""
     vi.unstubAllGlobals()
     window.__supportchat = { siteKey: DEMO_KEY, publicKey: PUBLIC }
+    window.__supportchatInstalled = false
   })
 
   test("widget.ready retries bootstrap until the iframe receives host.bootstrap", async () => {
