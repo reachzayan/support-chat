@@ -157,7 +157,7 @@ export const staffFetch = vi.fn<
   if (url.includes("/api/canned-replies")) {
     const siteId = new URL(url, "http://localhost").searchParams.get("site_id")
     if (siteId === EASY_SITE) {
-      return jsonResponse({ items: [{ shortcut: "hours", body: HOURS_BODY }] })
+      return jsonResponse({ items: [{ shortcut: "hours", body: HOURS_BODY, scope: "website" }] })
     }
     return jsonResponse({ items: [] })
   }

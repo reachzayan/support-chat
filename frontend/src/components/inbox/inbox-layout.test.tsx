@@ -40,6 +40,25 @@ describe("inbox layout", () => {
   test("renders three panes, Chrome on macOS, and does not link javascript URLs", async () => {
     await openQueuedAda()
     expect(screen.getByRole("navigation", { name: "Inbox filters" })).toBeInTheDocument()
+    expect(screen.getByRole("navigation", { name: "Inbox filters" }).className).toMatch(
+      /rounded-full/,
+    )
+    expect(
+      screen.getByRole("heading", { name: "Conversations" }).closest("section")?.className,
+    ).toMatch(/lg:w-\[420px\]/)
+    expect(screen.getByRole("button", { name: "Needs Attention" })).toHaveTextContent(
+      "Needs Attention",
+    )
+    expect(screen.getByRole("button", { name: "Closed" })).toHaveTextContent("Closed")
+    const transcriptHeader = screen.getByRole("heading", { level: 1 }).closest("div.border-b")
+    const visitorHeader = screen
+      .getByRole("complementary", { name: "Visitor facts" })
+      .querySelector(".border-b")
+    expect(transcriptHeader?.className).toMatch(/\bh-16\b/)
+    expect(visitorHeader?.className).toMatch(/\bh-16\b/)
+    expect(
+      screen.getByRole("heading", { name: "Conversations" }).closest("div")?.className,
+    ).toMatch(/\bh-16\b/)
     expect(screen.getByRole("list", { name: "Conversations" })).toBeInTheDocument()
     expect(screen.getByRole("log", { name: "Transcript" })).toBeInTheDocument()
     expect(screen.getByRole("complementary", { name: "Visitor facts" })).toBeInTheDocument()
