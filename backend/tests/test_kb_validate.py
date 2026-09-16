@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 from uuid import UUID, uuid4
 
@@ -277,3 +278,63 @@ async def test_markdown_hour_range_missing_from_answers_fails_numeric(migrated_d
         )
         result = await validate_snapshot(session, snapshot_id)
         assert "numeric_fact_preservation" in result.failed_rules
+
+
+async def test_long_jsonld_faq_can_span_multiple_chunks_without_failing_pair_validation(
+    migrated_db,
+) -> None:
+    answer = "Verification records are checked carefully. " * 60
+    payload = {
+        "@context": "https://schema.org",
+        "@type": "FAQPage",
+        "mainEntity": [
+            {
+                "@type": "Question",
+                "name": "How are records checked?",
+                "acceptedAnswer": {"@type": "Answer", "text": answer},
+            }
+        ],
+    }
+    html = (
+        "<html><body><script type='application/ld+json'>"
+        f"{json.dumps(payload)}"
+        "</script><main><h1>Record checks</h1><p>"
+        f"{answer}"
+        "</p></main></body></html>"
+    )
+    url = "https://sample-data.example.com/records"
+    async with session_maker()() as session:
+        site = await insert_site(session, f"data-{uuid4().hex[:8]}", "Sample Data Solutions")
+        site.allowed_origins = ["https://sample-data.example.com"]
+        source = KbSource(
+            site_id=site.id,
+            start_url=url,
+            mode="list",
+            seed_urls=[url],
+            status="queued",
+            embedder_id=configured_embedder_id(),
+            enabled=True,
+        )
+        session.add(source)
+        await session.commit()
+        source_id = source.id
+        await ingest_source(session, source_id, fetch=_fetch(html))
+
+    async with session_maker()() as session:
+        source = await session.get(KbSource, source_id)
+        assert source is not None
+        assert source.status == "ready"
+        faq_chunks = list(
+            (
+                await session.scalars(
+                    select(KbChunk)
+                    .join(KbSnapshot, KbSnapshot.id == KbChunk.snapshot_id)
+                    .where(
+                        KbSnapshot.source_id == source_id,
+                        KbSnapshot.state == "live",
+                        KbChunk.canonical_question == "How are records checked?",
+                    )
+                )
+            ).all()
+        )
+        assert len(faq_chunks) == 2

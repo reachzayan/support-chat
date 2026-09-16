@@ -12,7 +12,6 @@ def test_timeout_and_rate_limit_are_transient() -> None:
     assert classify_error("timeout") == "transient"
     assert classify_error("rate_limit") == "transient"
     assert classify_error("overload") == "transient"
-    assert classify_error("browser") == "transient"
     assert classify_error("embed") == "transient"
     assert classify_error("http") == "transient"
 
@@ -24,6 +23,11 @@ def test_ssrf_oversize_and_client_errors_are_permanent() -> None:
     assert classify_error("robots") == "permanent"
     assert classify_error("non_html") == "permanent"
     assert classify_error("http_4xx") == "permanent"
+    assert classify_error("browser") == "permanent"
+
+
+def test_browser_crash_is_transient() -> None:
+    assert classify_error("browser_crash") == "transient"
 
 
 def test_empty_and_injection_are_content_drop() -> None:

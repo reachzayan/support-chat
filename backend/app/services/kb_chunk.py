@@ -143,6 +143,7 @@ def _apply_overlap(pieces: list[str], overlap: int, target: int) -> list[str]:
         if room <= 0 or not prefix:
             overlapped.append(piece)
             continue
-        take = min(prefix_len, room)
-        overlapped.append(prev[-take:] + piece)
+        separator = " " if not piece[:1].isspace() else ""
+        take = min(prefix_len, max(0, room - len(separator)))
+        overlapped.append(prev[-take:] + separator + piece)
     return overlapped

@@ -4,8 +4,10 @@ from uuid import UUID
 import redis.asyncio as redis
 import structlog
 from redis.exceptions import TimeoutError as RedisTimeoutError
+from sqlalchemy import select
 
 from app.db import session_maker
+from app.models.kb_snapshot import KbSnapshot
 from app.repositories.kb_page_job_repo import KbPageJobRepository
 from app.repositories.kb_source_repo import KbSourceRepository
 from app.services.kb_embedder import default_embedder
@@ -94,13 +96,15 @@ async def _drain_queued(hinted: UUID | None, embedder) -> None:
                 return
             source_id = claimed.id
             try:
-                await ingest_source(
-                    session,
-                    source_id,
-                    embedder=embedder,
-                    llm_client=default_llm_client(),
-                )
+                async with asyncio.timeout(get_settings().kb_ingest_source_timeout_seconds):
+                    await ingest_source(
+                        session,
+                        source_id,
+                        embedder=embedder,
+                        llm_client=default_llm_client(),
+                    )
             except Exception as exc:
+                error_code = "timeout" if isinstance(exc, TimeoutError) else "ingest"
                 log.info(
                     "ingest_job_failed",
                     source_id=str(source_id),
@@ -109,7 +113,19 @@ async def _drain_queued(hinted: UUID | None, embedder) -> None:
                 try:
                     claimed.status = "failed"
                     claimed.stage = "failed"
-                    claimed.error_code = "ingest"
+                    claimed.error_code = error_code
+                    claimed.last_error_code = error_code
+                    building = await session.scalar(
+                        select(KbSnapshot)
+                        .where(
+                            KbSnapshot.source_id == source_id,
+                            KbSnapshot.state.in_(("building", "validated")),
+                        )
+                        .order_by(KbSnapshot.created_at.desc())
+                    )
+                    if building is not None:
+                        building.state = "failed"
+                        building.error_code = error_code
                     await session.commit()
                 except Exception:
                     await session.rollback()

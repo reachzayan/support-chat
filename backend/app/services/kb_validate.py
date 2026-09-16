@@ -14,7 +14,7 @@ from app.models.kb_smoke_assertion import KbSmokeAssertion
 from app.models.kb_snapshot import KbSnapshot
 from app.models.kb_source import KbSource
 from app.services.kb_extract.jsonld import parse_faqpage
-from app.services.kb_extract.text import answer_hash, visible_copy
+from app.services.kb_extract.text import answer_hash, tidy_text, visible_copy
 from app.settings import get_settings
 
 log = structlog.get_logger("kb_validate")
@@ -32,12 +32,20 @@ class ValidationResult:
     failed_rules: list[str]
 
 
+@dataclass(frozen=True)
+class PageEvidence:
+    id: UUID
+    url: str
+    raw_html: str | None
+    markdown: str | None
+
+
 async def _snapshot_failures(
     session: AsyncSession,
     snapshot: KbSnapshot,
     source: KbSource | None,
     chunks: list[KbChunk],
-    pages: list[KbPage],
+    pages: list[PageEvidence],
 ) -> list[str]:
     failed: list[str] = []
     if _schema_fail(snapshot, chunks):
@@ -86,6 +94,14 @@ async def _apply_snapshot_validation(
 
 
 async def validate_snapshot(session: AsyncSession, snapshot_id: UUID) -> ValidationResult:
+    return await validate_snapshot_with_pages(session, snapshot_id)
+
+
+async def validate_snapshot_with_pages(
+    session: AsyncSession,
+    snapshot_id: UUID,
+    staged_pages: dict[UUID, PageEvidence] | None = None,
+) -> ValidationResult:
     snapshot = await session.get(KbSnapshot, snapshot_id)
     if snapshot is None:
         return ValidationResult(failed_rules=["schema"])
@@ -96,7 +112,8 @@ async def validate_snapshot(session: AsyncSession, snapshot_id: UUID) -> Validat
     pages = list(
         (await session.scalars(select(KbPage).where(KbPage.source_id == snapshot.source_id))).all()
     )
-    failed = await _snapshot_failures(session, snapshot, source, chunks, pages)
+    snapshot_pages = _pages_for_snapshot(pages, chunks, staged_pages or {})
+    failed = await _snapshot_failures(session, snapshot, source, chunks, snapshot_pages)
     await _apply_snapshot_validation(session, snapshot, source, snapshot_id, failed)
     return ValidationResult(failed_rules=failed)
 
@@ -123,7 +140,7 @@ def _truncation_fail(chunks: list[KbChunk]) -> bool:
     return False
 
 
-def _numeric_source(pages: list[KbPage]) -> str:
+def _numeric_source(pages: list[PageEvidence]) -> str:
     parts: list[str] = []
     for page in pages:
         copy = (page.markdown or "").strip()
@@ -131,6 +148,27 @@ def _numeric_source(pages: list[KbPage]) -> str:
             copy = visible_copy(page.raw_html or "")
         parts.append(copy)
     return "\n".join(parts)
+
+
+def _pages_for_snapshot(
+    pages: list[KbPage],
+    chunks: list[KbChunk],
+    staged_pages: dict[UUID, PageEvidence],
+) -> list[PageEvidence]:
+    page_ids = {chunk.page_id for chunk in chunks}
+    return [
+        staged_pages.get(
+            page.id,
+            PageEvidence(
+                id=page.id,
+                url=page.url,
+                raw_html=page.raw_html,
+                markdown=page.markdown,
+            ),
+        )
+        for page in pages
+        if page.id in page_ids
+    ]
 
 
 def _numeric_fail(raw_html: str, chunks: list[KbChunk]) -> bool:
@@ -141,23 +179,55 @@ def _numeric_fail(raw_html: str, chunks: list[KbChunk]) -> bool:
     return False
 
 
-def _faq_pair_fail(pages: list[KbPage], chunks: list[KbChunk]) -> bool:
-    questions: list[str] = []
+def _faq_pair_fail(pages: list[PageEvidence], chunks: list[KbChunk]) -> bool:
+    expected: list[tuple[UUID, str, str]] = []
     for page in pages:
         if not page.raw_html:
             continue
-        questions.extend(
-            unit.canonical_question
+        expected.extend(
+            (page.id, unit.canonical_question, unit.answer_verbatim)
             for unit in parse_faqpage(page.raw_html, page.url)
             if unit.canonical_question
         )
-    present = {chunk.canonical_question for chunk in chunks if chunk.canonical_question}
-    for question in questions:
-        if question not in present:
+    for page_id, question, answer in expected:
+        matching = sorted(
+            (
+                chunk
+                for chunk in chunks
+                if chunk.page_id == page_id and chunk.canonical_question == question
+            ),
+            key=lambda chunk: (chunk.ordinal, str(chunk.id)),
+        )
+        if not matching:
             return True
-        matching = [chunk for chunk in chunks if chunk.canonical_question == question]
-        identities = {answer_hash(chunk.answer_verbatim) for chunk in matching}
-        if len(identities) != 1:
+        if not _chunks_cover_answer(answer, [chunk.answer_verbatim for chunk in matching]):
+            return True
+    return False
+
+
+def _chunks_cover_answer(answer: str, parts: list[str]) -> bool:
+    if not parts:
+        return False
+    expected = " ".join(tidy_text(answer).split())
+    intervals: list[tuple[int, int]] = []
+    for raw in parts:
+        part = " ".join(tidy_text(raw).split())
+        if not part:
+            return False
+        start = 0
+        found = False
+        while (index := expected.find(part, start)) >= 0:
+            intervals.append((index, index + len(part)))
+            found = True
+            start = index + 1
+        if not found:
+            return False
+    covered = 0
+    for start, end in sorted(intervals):
+        if start > covered:
+            break
+        covered = max(covered, end)
+        if covered == len(expected):
             return True
     return False
 

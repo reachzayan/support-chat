@@ -36,6 +36,24 @@ def test_verbatim_faq_is_kept_when_answer_is_on_the_page() -> None:
     assert facts[0].topic == "process"
 
 
+def test_whitespace_and_quote_folding_still_counts_as_on_page() -> None:
+    payload = {
+        "facts": [
+            {
+                "statement": "Most  negative results are reported within 24-48 hours.",
+                "category": "process",
+                "source_section": "Turnaround",
+            }
+        ],
+        "faqs": [],
+        "page_summary": "Turnaround times.",
+    }
+    units = evidence_from_extraction(payload, MARKDOWN)
+    assert [item.answer_verbatim for item in units] == [
+        "Most  negative results are reported within 24-48 hours."
+    ]
+
+
 def test_paraphrased_answer_is_dropped() -> None:
     payload = {
         "facts": [],
@@ -87,6 +105,38 @@ def test_llm_extraction_is_skipped_when_structured_units_exist() -> None:
     assert needs_llm_extraction([faq]) is False
     assert needs_llm_extraction([prose]) is True
     assert needs_llm_extraction([]) is True
+
+
+def test_weak_heading_extraction_still_uses_llm_fallback() -> None:
+    weak = EvidenceUnit(
+        kind="section",
+        heading="Collection",
+        canonical_question=None,
+        answer_verbatim="View",
+        body_for_search="Collection\nView",
+        display_locator=None,
+    )
+    rich = EvidenceUnit(
+        kind="section",
+        heading="Services",
+        canonical_question=None,
+        answer_verbatim="Detailed service information. " * 20,
+        body_for_search="Detailed service information. " * 20,
+        display_locator=None,
+    )
+    assert needs_llm_extraction([weak]) is True
+    assert needs_llm_extraction([rich, rich]) is False
+
+
+def test_long_visible_copy_is_sent_to_llm_in_overlapping_windows() -> None:
+    from app.services.kb_pipeline import _llm_text_windows
+
+    text = "a" * 19_900 + "tail fact" + "b" * 2_000
+    windows = _llm_text_windows(text)
+    assert len(windows) == 2
+    assert "tail fact" in windows[0]
+    assert "tail fact" in windows[1]
+    assert windows[-1].endswith("b" * 2_000)
 
 
 async def test_llm_extract_cache_skips_second_client_call(migrated_db) -> None:

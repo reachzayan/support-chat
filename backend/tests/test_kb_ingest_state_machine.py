@@ -6,6 +6,7 @@ from app.db import session_maker
 from app.models.kb_chunk import KbChunk
 from app.models.kb_page import KbPage
 from app.models.kb_page_job import KbPageJob
+from app.models.kb_snapshot import KbSnapshot
 from app.models.kb_source import KbSource
 from app.repositories.kb_page_job_repo import KbPageJobRepository
 from app.services.kb_crawl import FetchError
@@ -176,6 +177,110 @@ async def test_unchanged_recrawl_skips_embed_and_counts_skip(migrated_db) -> Non
         assert source.status == "ready"
         assert source.pages_skipped_unchanged == 2
         assert calls["n"] == first
+        unchanged = list(
+            (
+                await session.scalars(
+                    select(KbSnapshot).where(
+                        KbSnapshot.source_id == source_id,
+                        KbSnapshot.state == "unchanged",
+                    )
+                )
+            ).all()
+        )
+        assert len(unchanged) == 1
+        jobs = list(
+            (
+                await session.scalars(
+                    select(KbPageJob).where(KbPageJob.snapshot_id == unchanged[0].id)
+                )
+            ).all()
+        )
+        assert len(jobs) == 2
+        assert all(job.renderer == "injected" for job in jobs)
+        assert all(job.events for job in jobs)
+
+
+async def test_failed_page_on_resync_keeps_its_previous_live_chunks(migrated_db) -> None:
+    async with session_maker()() as session:
+        source = await _source(session, [FAQ_URL, DOT_URL])
+        source_id = source.id
+        await ingest_source(session, source_id, embedder=FakeEmbedder(), fetch=_fetch(PAGES))
+        source.status = "queued"
+        await session.commit()
+
+        def partial_fetch(url: str, hosts: set[str], hops: int = 0) -> str:
+            if url == DOT_URL:
+                raise FetchError("timeout")
+            return _fetch(PAGES)(url, hosts, hops)
+
+        await ingest_source(session, source_id, embedder=FakeEmbedder(), fetch=partial_fetch)
+
+    async with session_maker()() as session:
+        source = await session.get(KbSource, source_id)
+        assert source is not None
+        assert source.status == "ready"
+        assert source.pages_failed == 1
+        assert source.page_count == 2
+        live_answers = set(
+            (
+                await session.scalars(
+                    select(KbChunk.answer_verbatim)
+                    .join(KbSnapshot, KbSnapshot.id == KbChunk.snapshot_id)
+                    .where(
+                        KbSnapshot.source_id == source_id,
+                        KbSnapshot.state == "live",
+                    )
+                )
+            ).all()
+        )
+        assert (
+            "DOT-regulated testing follows federal rules for prohibited substances." in live_answers
+        )
+
+
+async def test_single_page_retry_fetches_only_that_page_and_keeps_other_live_pages(
+    migrated_db,
+) -> None:
+    updated_dot = (
+        "<html><body><main><h1>DOT</h1>"
+        "<p>DOT testing follows updated federal collection rules.</p>"
+        "</main></body></html>"
+    )
+    fetched: list[str] = []
+
+    def retry_fetch(url: str, _hosts: set[str], hops: int = 0) -> str:
+        if url.endswith("/robots.txt"):
+            raise KeyError(url)
+        fetched.append(url)
+        if url != DOT_URL:
+            raise AssertionError(f"unexpected page fetch: {url}")
+        return updated_dot
+
+    async with session_maker()() as session:
+        source = await _source(session, [FAQ_URL, DOT_URL])
+        source_id = source.id
+        await ingest_source(session, source_id, embedder=FakeEmbedder(), fetch=_fetch(PAGES))
+        source.retry_urls = [DOT_URL]
+        source.status = "queued"
+        await session.commit()
+        await ingest_source(session, source_id, embedder=FakeEmbedder(), fetch=retry_fetch)
+
+    assert fetched == [DOT_URL]
+    async with session_maker()() as session:
+        live_answers = set(
+            (
+                await session.scalars(
+                    select(KbChunk.answer_verbatim)
+                    .join(KbSnapshot, KbSnapshot.id == KbChunk.snapshot_id)
+                    .where(
+                        KbSnapshot.source_id == source_id,
+                        KbSnapshot.state == "live",
+                    )
+                )
+            ).all()
+        )
+        assert "Most negative results are reported within 24-48 hours." in live_answers
+        assert "DOT testing follows updated federal collection rules." in live_answers
 
 
 async def test_prefix_sitemap_supplies_url_list(migrated_db) -> None:
