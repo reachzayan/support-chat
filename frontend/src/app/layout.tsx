@@ -1,6 +1,6 @@
 import type { Metadata } from "next"
 import { Manrope } from "next/font/google"
-import { cookies } from "next/headers"
+import { cookies, headers } from "next/headers"
 
 import { AppProviders } from "@/components/app-providers"
 
@@ -29,25 +29,39 @@ const readTheme = (value: string | undefined): Theme => {
   return "light"
 }
 
+const htmlClassName = (theme: Theme) =>
+  theme === "dark"
+    ? `${manrope.variable} h-full antialiased dark`
+    : `${manrope.variable} h-full antialiased`
+
+const staffChrome = async () => {
+  const jar = await cookies()
+  return {
+    theme: readTheme(jar.get("supportchat_theme")?.value),
+    sidebarOpen: jar.get("sidebar_state")?.value !== "false",
+  }
+}
+
 export default async function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode
 }>) {
-  const jar = await cookies()
-  const initialTheme = readTheme(jar.get("supportchat_theme")?.value)
-  const initialSidebarOpen = jar.get("sidebar_state")?.value !== "false"
+  const isWidget = (await headers()).get("x-supportchat-surface") === "widget"
+  const chrome = isWidget ? { theme: "light" as Theme, sidebarOpen: true } : await staffChrome()
 
   return (
-    <html
-      lang="en"
-      className={`${manrope.variable} h-full antialiased${initialTheme === "dark" ? " dark" : ""}`}
-      suppressHydrationWarning
-    >
-      <body className="flex h-full min-h-dvh flex-col font-sans">
-        <AppProviders initialTheme={initialTheme} initialSidebarOpen={initialSidebarOpen}>
-          {children}
-        </AppProviders>
+    <html lang="en" className={htmlClassName(chrome.theme)} suppressHydrationWarning>
+      <body
+        className={`flex h-full min-h-dvh flex-col font-sans${isWidget ? " bg-transparent" : ""}`}
+      >
+        {isWidget ? (
+          children
+        ) : (
+          <AppProviders initialTheme={chrome.theme} initialSidebarOpen={chrome.sidebarOpen}>
+            {children}
+          </AppProviders>
+        )}
       </body>
     </html>
   )

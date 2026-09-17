@@ -57,15 +57,13 @@ const ClosedFooter = ({
 }) => (
   <div className="bg-transparent px-3 pt-2 pb-3">
     <section className="widget-enter mb-3 rounded-[20px] bg-white/72 px-4 py-3.5 text-center shadow-[0_10px_24px_rgba(13,31,58,0.10)] backdrop-blur-xl">
-      <h2 className="text-ink text-sm font-extrabold tracking-[-0.02em]">
-        Thanks for chatting with us.
-      </h2>
+      <h2 className="text-ink heading text-sm">Thanks for chatting with us.</h2>
       <p className="text-mute mt-1 text-xs leading-5">
         Take care — we’ll be here when you need us.
       </p>
       {contactInfo.length ? (
         <div className="border-line/70 mt-3 border-t pt-3">
-          <p className="text-ink text-[10px] font-extrabold tracking-[0.12em] uppercase">
+          <p className="text-ink text-[10px] font-semibold tracking-[0.2em] uppercase">
             Contact us
           </p>
           <ul className="text-steel mt-1.5 space-y-0.5 text-xs font-bold">
@@ -79,7 +77,7 @@ const ClosedFooter = ({
     <button
       type="button"
       onClick={onRestart}
-      className="bg-ember hover:bg-ember-mid focus-visible:ring-ember/30 min-h-11 w-full cursor-pointer rounded-[22px] px-4 py-2 text-sm font-bold text-white shadow-[0_10px_24px_rgba(196,85,22,0.22)] transition-[background-color,box-shadow,transform] duration-200 ease-out hover:-translate-y-px hover:shadow-[0_14px_28px_rgba(196,85,22,0.28)] focus-visible:ring-4 focus-visible:outline-none active:scale-[0.98]"
+      className="bg-ember hover:bg-ember-mid focus-visible:ring-ember/30 min-h-11 w-full cursor-pointer rounded-[22px] px-4 py-2 text-sm font-bold text-white shadow-[0_10px_24px_rgba(196,85,22,0.22)] transition-[background-color,box-shadow] duration-200 ease-out hover:shadow-[0_14px_28px_rgba(196,85,22,0.28)] focus-visible:ring-4 focus-visible:outline-none active:scale-[0.98]"
     >
       Start a new chat
     </button>

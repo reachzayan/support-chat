@@ -133,7 +133,7 @@ const WidgetTopbar = ({
         className="mx-auto max-w-[240px] min-w-0 rounded-[22px] bg-white/80 px-4 py-2 shadow-[0_10px_28px_rgba(13,31,58,0.13)] backdrop-blur-xl"
       >
         <div className="min-w-0 text-center">
-          <h1 className="truncate text-sm font-extrabold tracking-[-0.03em]">{name}</h1>
+          <h1 className="heading truncate text-sm">{name}</h1>
           <p className="text-mute mt-0.5 text-[11px] font-medium whitespace-nowrap">
             Secure, assisted support
           </p>

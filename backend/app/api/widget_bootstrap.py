@@ -6,6 +6,7 @@ from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, ValidationError
 
+from app.chat.connection_manager import message_frame
 from app.db import SessionDep
 from app.security.client_ip import resolve_client_ip
 from app.security.widget_tokens import create_widget_token
@@ -182,6 +183,11 @@ async def widget_bootstrap(request: Request, session: SessionDep) -> JSONRespons
             "human_enabled": result.human_enabled,
         },
         "bootstrap_token": token,
+        "conversation": {
+            "state": result.conversation_state,
+            "assigned_agent": result.assigned_agent,
+            "messages": [message_frame(message) for message in result.messages],
+        },
     }
     if result.resume_token is not None:
         body["resume_token"] = result.resume_token

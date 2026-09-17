@@ -16,6 +16,12 @@ export type PublicWidgetConfig = {
   human_enabled: boolean
 }
 
+export type ConversationSnapshot = {
+  state: "prechat" | "bot" | "queued" | "human" | "closed"
+  assigned_agent: { id: string; display_name: string } | null
+  messages: Record<string, unknown>[]
+}
+
 export type HostToWidget =
   | {
       type: "host.bootstrap"
@@ -24,11 +30,13 @@ export type HostToWidget =
       page_url: string
       page_title: string
       referrer: string
+      conversation?: ConversationSnapshot
     }
   | { type: "host.context"; page_url: string; page_title: string; referrer: string }
 
 export type WidgetToHost =
   | { type: "widget.ready" }
+  | { type: "widget.painted" }
   | { type: "widget.rebootstrap" }
   | { type: "widget.activated" }
   | { type: "widget.close" }
@@ -66,6 +74,37 @@ const parseWidgetConfig = (value: unknown): PublicWidgetConfig | null => {
   }
 }
 
+const SNAPSHOT_STATES = new Set(["prechat", "bot", "queued", "human", "closed"])
+
+const parseAssignedAgent = (value: unknown): ConversationSnapshot["assigned_agent"] | undefined => {
+  if (value === null) {
+    return null
+  }
+  if (!isRecord(value) || typeof value.id !== "string" || typeof value.display_name !== "string") {
+    return undefined
+  }
+  return { id: value.id, display_name: value.display_name }
+}
+
+export const parseConversationSnapshot = (value: unknown): ConversationSnapshot | undefined => {
+  if (!isRecord(value) || typeof value.state !== "string" || !SNAPSHOT_STATES.has(value.state)) {
+    return undefined
+  }
+  if (!Array.isArray(value.messages)) {
+    return undefined
+  }
+  const assigned =
+    value.assigned_agent === undefined ? null : parseAssignedAgent(value.assigned_agent)
+  if (assigned === undefined) {
+    return undefined
+  }
+  return {
+    state: value.state as ConversationSnapshot["state"],
+    assigned_agent: assigned,
+    messages: value.messages.filter(isRecord),
+  }
+}
+
 const parseBootstrap = (value: Record<string, unknown>): HostToWidget | null => {
   const widget = parseWidgetConfig(value.widget)
   if (typeof value.bootstrap_token !== "string" || widget === null) {
@@ -78,6 +117,7 @@ const parseBootstrap = (value: Record<string, unknown>): HostToWidget | null => 
   ) {
     return null
   }
+  const conversation = parseConversationSnapshot(value.conversation)
   return {
     type: "host.bootstrap",
     bootstrap_token: value.bootstrap_token,
@@ -85,6 +125,7 @@ const parseBootstrap = (value: Record<string, unknown>): HostToWidget | null => 
     page_url: value.page_url,
     page_title: value.page_title,
     referrer: value.referrer,
+    ...(conversation === undefined ? {} : { conversation }),
   }
 }
 
@@ -138,6 +179,7 @@ const parseResize = (value: Record<string, unknown>): WidgetToHost | null => {
 
 const SIMPLE_WIDGET_TYPES = new Set([
   "widget.ready",
+  "widget.painted",
   "widget.rebootstrap",
   "widget.activated",
   "widget.close",
@@ -149,6 +191,7 @@ type SimpleWidgetType = Extract<
   {
     type:
       | "widget.ready"
+      | "widget.painted"
       | "widget.rebootstrap"
       | "widget.activated"
       | "widget.close"

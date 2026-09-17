@@ -3,6 +3,7 @@
 import { useCallback, useState, type FocusEvent, type FormEvent } from "react"
 
 import { Button } from "@/components/ui/button"
+import { FieldError } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 import { emailError, phoneError, requiredError } from "@/lib/validation"
@@ -134,14 +135,10 @@ const PrechatFields = ({
   <>
     <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-5 py-4">
       <div>
-        <p className="text-steel text-[10px] font-extrabold tracking-[0.14em] uppercase">
+        <p className="text-steel text-[10px] font-semibold tracking-[0.2em] uppercase">
           Start a conversation
         </p>
-        {displayName ? (
-          <h2 className="text-navy mt-1.5 text-lg font-extrabold tracking-[-0.035em]">
-            {displayName}
-          </h2>
-        ) : null}
+        {displayName ? <h2 className="text-navy heading mt-1.5 text-lg">{displayName}</h2> : null}
         <p className="text-mute mt-1 text-xs leading-5">Tell us how we can help.</p>
       </div>
       <Field
@@ -234,14 +231,10 @@ const Field = ({
         spellCheck={spellCheck}
         className={FIELD}
         aria-invalid={error ? "true" : undefined}
-        aria-describedby={error ? errorId : undefined}
+        aria-describedby={errorId}
         onBlur={onBlur}
       />
-      {error ? (
-        <span id={errorId} className="text-ember text-xs font-normal" role="alert">
-          {error}
-        </span>
-      ) : null}
+      <FieldError id={errorId}>{error}</FieldError>
     </div>
   )
 }
