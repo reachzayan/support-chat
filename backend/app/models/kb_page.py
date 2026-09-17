@@ -39,6 +39,7 @@ class KbPage(Base):
     source_id: Mapped[UUID] = mapped_column(ForeignKey("kb_sources.id", ondelete="CASCADE"))
     site_id: Mapped[UUID] = mapped_column(ForeignKey("sites.id"))
     url: Mapped[str] = mapped_column(String)
+    citation_url: Mapped[str | None] = mapped_column(String, nullable=True)
     display_locator: Mapped[str | None] = mapped_column(String, nullable=True)
     title: Mapped[str] = mapped_column(String)
     content_text: Mapped[str] = mapped_column(Text)
@@ -55,3 +56,9 @@ class KbPage(Base):
     )
     last_success_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     failure_reason: Mapped[str | None] = mapped_column(String, nullable=True)
+
+    @property
+    def public_url(self) -> str:
+        if self.citation_url is not None:
+            return self.citation_url
+        return "" if self.url.startswith("kb-text://") else self.url

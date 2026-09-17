@@ -79,6 +79,8 @@ export type KbSourceRecord = {
   site_id: string
   start_url: string
   mode: string
+  source_kind?: string
+  display_name?: string | null
   status: string
   stage?: string
   error_code: string | null
@@ -132,17 +134,21 @@ export type KbPageRecord = {
   url: string
   title: string
   enabled: boolean
+  chunk_count: number
   processing_status?: string
   failure_reason?: string | null
   last_success_at?: string | null
+  tab?: "general" | "page"
 }
 
 export type KbChunkRecord = {
   id: string
   ordinal: number
+  kind: string
   heading: string
   body: string
   enabled: boolean
+  origin_urls?: string[]
 }
 
 export type KbPageDetail = KbPageRecord & {
@@ -159,6 +165,7 @@ export type KbProgressEvent = {
   duration_ms: number | null
   error_code: string | null
   error_message: string | null
+  message?: string | null
   renderer: string | null
   http_status: number | null
 }
@@ -172,5 +179,6 @@ export type KbProgressRecord = {
     attempt: number
     started_at: string | null
     renderer: string | null
+    message?: string | null
   }>
 }

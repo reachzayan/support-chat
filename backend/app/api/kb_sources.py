@@ -1,8 +1,8 @@
-from typing import Annotated
+from typing import Annotated, Literal
 from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, Query, status
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.db import SessionDep
 from app.models.kb_chunk import KbChunk
@@ -10,7 +10,7 @@ from app.models.kb_page import KbPage
 from app.models.kb_page_job import KbPageJob
 from app.models.kb_source import KbSource
 from app.security.deps import CurrentAdmin, CurrentUser
-from app.services.kb_source_admin import KbSourceService
+from app.services.kb_source_admin import KbSourceService, general_tab_id
 from app.services.site_admin import AdminError
 
 router = APIRouter()
@@ -19,15 +19,41 @@ router = APIRouter()
 class SourceIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    mode: str
-    start_url: str
-    seed_urls: list[str] = []
+    kind: Literal["website", "text"] = "website"
+    mode: str | None = None
+    start_url: str | None = None
+    seed_urls: list[str] = Field(default_factory=list)
+    title: str | None = Field(default=None, max_length=300)
+    body: str | None = Field(default=None, max_length=40_000)
+
+    @model_validator(mode="after")
+    def validate_source_shape(self) -> "SourceIn":
+        if self.kind == "website":
+            if (
+                self.mode is None
+                or self.start_url is None
+                or self.title is not None
+                or self.body is not None
+            ):
+                raise ValueError("A website source requires mode and start_url")
+        elif self.kind == "text":
+            if (
+                not (self.title or "").strip()
+                or not (self.body or "").strip()
+                or self.mode is not None
+                or self.start_url is not None
+                or self.seed_urls
+            ):
+                raise ValueError("A text source requires title and body")
+        return self
 
 
 class SourcePatchIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     enabled: bool | None = None
+    title: str | None = Field(default=None, max_length=300)
+    body: str | None = Field(default=None, max_length=40_000)
 
 
 class PagePatchIn(BaseModel):
@@ -47,6 +73,8 @@ class SourceOut(BaseModel):
     site_id: UUID
     start_url: str
     mode: str
+    source_kind: str
+    display_name: str | None = None
     status: str
     stage: str = "idle"
     error_code: str | None
@@ -108,17 +136,21 @@ class PageOut(BaseModel):
     url: str
     title: str
     enabled: bool
+    chunk_count: int
     processing_status: str = "pending"
     failure_reason: str | None = None
     last_success_at: str | None = None
+    tab: str = "page"
 
 
 class ChunkOut(BaseModel):
     id: UUID
     ordinal: int
+    kind: str
     heading: str
     body: str
     enabled: bool
+    origin_urls: list[str] = Field(default_factory=list)
 
 
 class PageDetailOut(BaseModel):
@@ -127,12 +159,14 @@ class PageDetailOut(BaseModel):
     url: str
     title: str
     enabled: bool
+    chunk_count: int
     skip_reason: str | None
     content_text: str
     chunks: list[ChunkOut]
     processing_status: str = "pending"
     failure_reason: str | None = None
     last_success_at: str | None = None
+    tab: str = "page"
 
 
 class ProgressEventOut(BaseModel):
@@ -143,6 +177,7 @@ class ProgressEventOut(BaseModel):
     duration_ms: int | None = None
     error_code: str | None = None
     error_message: str | None = None
+    message: str
     renderer: str | None = None
     http_status: int | None = None
 
@@ -153,6 +188,7 @@ class ProgressJobOut(BaseModel):
     attempt: int
     started_at: str | None
     renderer: str | None = None
+    message: str
 
 
 class ProgressOut(BaseModel):
@@ -198,8 +234,10 @@ async def _source_out(session, source: KbSource) -> SourceOut:
     return SourceOut(
         id=source.id,
         site_id=source.site_id,
-        start_url=source.start_url,
+        start_url="" if source.source_kind == "text" else source.start_url,
         mode=source.mode,
+        source_kind=source.source_kind,
+        display_name=source.display_name,
         status=source.status,
         stage=source.stage or "idle",
         error_code=source.error_code,
@@ -225,16 +263,34 @@ async def _source_out(session, source: KbSource) -> SourceOut:
     )
 
 
-def _page_out(page: KbPage) -> PageOut:
+def _page_tab(page: KbPage) -> str:
+    return "general" if page.id == general_tab_id(page.source_id) else "page"
+
+
+def _chunk_out(chunk: KbChunk) -> ChunkOut:
+    return ChunkOut(
+        id=chunk.id,
+        ordinal=chunk.ordinal,
+        kind=chunk.kind,
+        heading=chunk.heading,
+        body=chunk.body,
+        enabled=chunk.enabled,
+        origin_urls=list(chunk.origin_urls or []),
+    )
+
+
+def _page_out(page: KbPage, chunk_count: int) -> PageOut:
     return PageOut(
         id=page.id,
         source_id=page.source_id,
-        url=page.url,
+        url=page.public_url,
         title=page.title,
         enabled=page.enabled,
+        chunk_count=chunk_count,
         processing_status=page.processing_status,
         failure_reason=page.failure_reason,
         last_success_at=_iso(page.last_success_at),
+        tab=_page_tab(page),
     )
 
 
@@ -242,24 +298,17 @@ def _page_detail_out(page: KbPage, chunks: list[KbChunk]) -> PageDetailOut:
     return PageDetailOut(
         id=page.id,
         source_id=page.source_id,
-        url=page.url,
+        url=page.public_url,
         title=page.title,
         enabled=page.enabled,
+        chunk_count=len(chunks),
         skip_reason=page.skip_reason,
         content_text=page.content_text,
-        chunks=[
-            ChunkOut(
-                id=chunk.id,
-                ordinal=chunk.ordinal,
-                heading=chunk.heading,
-                body=chunk.body,
-                enabled=chunk.enabled,
-            )
-            for chunk in chunks
-        ],
+        chunks=[_chunk_out(chunk) for chunk in chunks],
         processing_status=page.processing_status,
         failure_reason=page.failure_reason,
         last_success_at=_iso(page.last_success_at),
+        tab=_page_tab(page),
     )
 
 
@@ -282,13 +331,22 @@ async def create_source(
     site_id: UUID, payload: SourceIn, session: SessionDep, admin: CurrentAdmin
 ) -> SourceOut:
     try:
-        source = await KbSourceService(session).create_source(
-            site_id,
-            admin,
-            mode=payload.mode,
-            start_url=payload.start_url,
-            seed_urls=payload.seed_urls,
-        )
+        service = KbSourceService(session)
+        if payload.kind == "text":
+            source = await service.create_text_source(
+                site_id,
+                admin,
+                title=payload.title or "",
+                body=payload.body or "",
+            )
+        else:
+            source = await service.create_source(
+                site_id,
+                admin,
+                mode=payload.mode or "",
+                start_url=payload.start_url or "",
+                seed_urls=payload.seed_urls,
+            )
     except AdminError as exc:
         raise _http_error(exc) from exc
     return await _source_out(session, source)
@@ -299,7 +357,12 @@ async def patch_source(
     source_id: UUID, payload: SourcePatchIn, session: SessionDep, admin: CurrentAdmin
 ) -> SourceOut:
     try:
-        source = await KbSourceService(session).patch_source(source_id, enabled=payload.enabled)
+        source = await KbSourceService(session).patch_source(
+            source_id,
+            enabled=payload.enabled,
+            title=payload.title,
+            body=payload.body,
+        )
     except AdminError as exc:
         raise _http_error(exc) from exc
     return await _source_out(session, source)
@@ -318,13 +381,7 @@ async def patch_chunk(
                 detail="This retrieved answer was replaced during sync.",
             ) from exc
         raise _http_error(exc) from exc
-    return ChunkOut(
-        id=chunk.id,
-        ordinal=chunk.ordinal,
-        heading=chunk.heading,
-        body=chunk.body,
-        enabled=chunk.enabled,
-    )
+    return _chunk_out(chunk)
 
 
 @router.post("/api/kb-sources/{source_id}/sync", response_model=SourceOut)
@@ -359,7 +416,7 @@ async def list_pages(source_id: UUID, session: SessionDep, _staff: CurrentUser) 
         rows = await KbSourceService(session).list_pages(source_id)
     except AdminError as exc:
         raise _http_error(exc) from exc
-    return PageListOut(items=[_page_out(row) for row in rows])
+    return PageListOut(items=[_page_out(page, chunk_count) for page, chunk_count in rows])
 
 
 @router.get("/api/kb-sources/{source_id}/progress", response_model=ProgressOut)
@@ -368,6 +425,8 @@ async def source_progress(source_id: UUID, session: SessionDep, _staff: CurrentU
     if source is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
     from sqlalchemy import select
+
+    from app.services.kb_progress import describe_progress_event
 
     result = await session.execute(
         select(KbPageJob, KbPage)
@@ -379,25 +438,31 @@ async def source_progress(source_id: UUID, session: SessionDep, _staff: CurrentU
     recent: list[ProgressEventOut] = []
     current: list[ProgressJobOut] = []
     for job, page in rows:
+        page_locator = page.public_url or page.title
         duration = None
         if job.started_at is not None and job.finished_at is not None:
             duration = round((job.finished_at - job.started_at).total_seconds() * 1000)
         for event in reversed(job.events or []):
             if len(recent) >= 20:
                 break
+            stage = str(event.get("stage") or job.stage)
+            state = str(event.get("state") or job.state)
+            error_code = event.get("error_code")
             recent.append(
                 ProgressEventOut(
                     timestamp=event.get("timestamp"),
-                    stage=str(event.get("stage") or job.stage),
-                    state=str(event.get("state") or job.state),
-                    page_url=page.url,
+                    stage=stage,
+                    state=state,
+                    page_url=page_locator,
                     duration_ms=(
-                        duration
-                        if event.get("state") in {"done", "dead_letter", "unchanged"}
-                        else None
+                        duration if state in {"done", "dead_letter", "unchanged"} else None
                     ),
-                    error_code=event.get("error_code"),
-                    error_message=(job.last_error_message if event.get("error_code") else None),
+                    error_code=error_code,
+                    error_message=(job.last_error_message if error_code else None),
+                    message=str(
+                        event.get("message")
+                        or describe_progress_event(stage=stage, state=state, error_code=error_code)
+                    ),
                     renderer=event.get("renderer") or job.renderer,
                     http_status=event.get("http_status") or job.http_status,
                 )
@@ -408,10 +473,13 @@ async def source_progress(source_id: UUID, session: SessionDep, _staff: CurrentU
                     timestamp=_iso(job.finished_at),
                     stage=job.stage,
                     state=job.state,
-                    page_url=page.url,
+                    page_url=page_locator,
                     duration_ms=duration,
                     error_code=job.last_error_code,
                     error_message=job.last_error_message,
+                    message=describe_progress_event(
+                        stage=job.stage, state=job.state, error_code=job.last_error_code
+                    ),
                     renderer=job.renderer,
                     http_status=job.http_status,
                 )
@@ -419,11 +487,14 @@ async def source_progress(source_id: UUID, session: SessionDep, _staff: CurrentU
         if job.state == "running":
             current.append(
                 ProgressJobOut(
-                    page_url=page.url,
+                    page_url=page_locator,
                     stage=job.stage,
                     attempt=job.attempts,
                     started_at=_iso(job.started_at),
                     renderer=job.renderer,
+                    message=describe_progress_event(
+                        stage=job.stage, state=job.state, error_code=job.last_error_code
+                    ),
                 )
             )
     return ProgressOut(
@@ -523,8 +594,10 @@ async def get_page(page_id: UUID, session: SessionDep, _staff: CurrentUser) -> P
 async def patch_page(
     page_id: UUID, payload: PagePatchIn, session: SessionDep, admin: CurrentAdmin
 ) -> PageOut:
+    service = KbSourceService(session)
     try:
-        page = await KbSourceService(session).patch_page(page_id, enabled=payload.enabled)
+        page = await service.patch_page(page_id, enabled=payload.enabled)
+        _, chunks = await service.get_page(page_id)
     except AdminError as exc:
         raise _http_error(exc) from exc
-    return _page_out(page)
+    return _page_out(page, len(chunks))
