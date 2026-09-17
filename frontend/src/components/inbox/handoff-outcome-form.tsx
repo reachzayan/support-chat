@@ -4,6 +4,7 @@ import { useCallback, useState, type ChangeEvent } from "react"
 
 import { staffWrite } from "@/components/admin/staff-api"
 import { Button } from "@/components/ui/button"
+import { FieldError } from "@/components/ui/field"
 import { Textarea } from "@/components/ui/textarea"
 import { ToggleGroup } from "@/components/ui/toggle-group"
 
@@ -62,7 +63,7 @@ export const HandoffOutcomeForm = ({ handoffId, onResolved }: HandoffOutcomeForm
         options={OUTCOMES}
       />
       <label
-        className="text-mute text-[10px] font-bold tracking-[0.12em] uppercase"
+        className="text-mute text-[10px] font-semibold tracking-[0.12em] uppercase"
         htmlFor={`handoff-note-${handoffId}`}
       >
         Note (optional)
@@ -76,11 +77,7 @@ export const HandoffOutcomeForm = ({ handoffId, onResolved }: HandoffOutcomeForm
         placeholder="Short note for operations"
         className="min-h-16"
       />
-      {error ? (
-        <p className="text-ember text-xs" role="alert">
-          {error}
-        </p>
-      ) : null}
+      <FieldError>{error ?? undefined}</FieldError>
       <Button
         type="button"
         disabled={saving}

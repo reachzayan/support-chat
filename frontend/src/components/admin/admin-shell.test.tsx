@@ -31,15 +31,17 @@ const sidebarCookie = () => {
   return match ? decodeURIComponent(match[1]) : null
 }
 
-describe("admin shell", () => {
-  beforeEach(() => {
-    document.cookie = "sidebar_state=; path=/; max-age=0"
-    document.cookie = "supportchat_theme=; path=/; max-age=0"
-    Object.defineProperty(window, "matchMedia", {
-      configurable: true,
-      value: () => ({ matches: false, addEventListener: vi.fn(), removeEventListener: vi.fn() }),
-    })
+const stubMedia = () => {
+  document.cookie = "sidebar_state=; path=/; max-age=0"
+  document.cookie = "supportchat_theme=; path=/; max-age=0"
+  Object.defineProperty(window, "matchMedia", {
+    configurable: true,
+    value: () => ({ matches: false, addEventListener: vi.fn(), removeEventListener: vi.fn() }),
   })
+}
+
+describe("admin shell", () => {
+  beforeEach(stubMedia)
 
   test("keeps canonical admin navigation in a persistent shell", async () => {
     renderWithProviders(
@@ -100,5 +102,50 @@ describe("admin shell", () => {
       "data-state",
       "collapsed",
     )
+  })
+})
+
+describe("admin shell hover peek", () => {
+  beforeEach(stubMedia)
+
+  test("expands a collapsed sidebar while hovered, then restores it without saving", async () => {
+    renderWithProviders(
+      <AdminShell>
+        <div id="main-content">Inbox view</div>
+      </AdminShell>,
+      { initialSidebarOpen: false },
+    )
+    await waitFor(() => expect(screen.getByText("Inbox view")).toBeInTheDocument())
+    const knowledge = screen.getByRole("link", { name: "Knowledge base" })
+    expect(knowledge).not.toHaveTextContent("Knowledge base")
+
+    const user = userEvent.setup()
+    const sidebar = screen.getByTestId("admin-sidebar")
+    await user.hover(sidebar)
+    expect(knowledge).toHaveTextContent("Knowledge base")
+    expect(sidebarCookie()).toBeNull()
+
+    await user.unhover(sidebar)
+    expect(knowledge).not.toHaveTextContent("Knowledge base")
+    expect(sidebarCookie()).toBeNull()
+    expect(sidebar.parentElement).toHaveAttribute("data-state", "collapsed")
+  })
+
+  test("keeps a pinned-open sidebar expanded after the pointer leaves", async () => {
+    renderWithProviders(
+      <AdminShell>
+        <div id="main-content">Inbox view</div>
+      </AdminShell>,
+    )
+    await waitFor(() => expect(screen.getByText("Inbox view")).toBeInTheDocument())
+    const knowledge = screen.getByRole("link", { name: "Knowledge base" })
+    expect(knowledge).toHaveTextContent("Knowledge base")
+
+    const user = userEvent.setup()
+    const sidebar = screen.getByTestId("admin-sidebar")
+    await user.hover(sidebar)
+    await user.unhover(sidebar)
+    expect(knowledge).toHaveTextContent("Knowledge base")
+    expect(sidebar.parentElement).toHaveAttribute("data-state", "expanded")
   })
 })

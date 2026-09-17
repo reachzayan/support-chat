@@ -16,6 +16,8 @@ import {
 
 type CollapsibleProps = {
   defaultOpen?: boolean
+  open?: boolean
+  onOpenChange?: (open: boolean) => void
   children: ReactNode
   className?: string
 }
@@ -27,9 +29,26 @@ type CollapsibleContextValue = {
 
 const CollapsibleContext = createContext<CollapsibleContextValue | null>(null)
 
-const Collapsible = ({ defaultOpen = false, children, className }: CollapsibleProps) => {
-  const [open, setOpen] = useState(defaultOpen)
-  const contextValue = useMemo(() => ({ open, setOpen }), [open])
+const Collapsible = ({
+  defaultOpen = false,
+  open: openProp,
+  onOpenChange,
+  children,
+  className,
+}: CollapsibleProps) => {
+  const [uncontrolledOpen, setUncontrolledOpen] = useState(defaultOpen)
+  const isControlled = openProp !== undefined
+  const open = isControlled ? openProp : uncontrolledOpen
+  const setOpen = useCallback(
+    (next: boolean) => {
+      if (!isControlled) {
+        setUncontrolledOpen(next)
+      }
+      onOpenChange?.(next)
+    },
+    [isControlled, onOpenChange],
+  )
+  const contextValue = useMemo(() => ({ open, setOpen }), [open, setOpen])
   return (
     <CollapsibleContext.Provider value={contextValue}>
       <div data-slot="collapsible" className={className}>

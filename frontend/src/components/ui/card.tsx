@@ -22,11 +22,7 @@ const CardHeader = ({ className, ...props }: React.ComponentProps<"div">) => {
 
 const CardTitle = ({ className, children, ...props }: React.ComponentProps<"h3">) => {
   return (
-    <h3
-      data-slot="card-title"
-      className={cn("text-navy text-sm font-extrabold", className)}
-      {...props}
-    >
+    <h3 data-slot="card-title" className={cn("text-navy heading text-sm", className)} {...props}>
       {children}
     </h3>
   )

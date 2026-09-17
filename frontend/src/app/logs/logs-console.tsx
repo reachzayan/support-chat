@@ -69,7 +69,7 @@ const LogsTable = ({ items }: { items: AppLogRow[] }) => (
             (label) => (
               <th
                 key={label}
-                className="text-mute px-3 py-2.5 text-[10px] font-bold tracking-[0.12em] uppercase"
+                className="text-mute px-3 py-2.5 text-[10px] font-semibold tracking-[0.12em] uppercase"
               >
                 {label}
               </th>

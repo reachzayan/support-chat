@@ -78,9 +78,7 @@ export const SubmissionDetailSheet = ({
         className="bg-paper border-line w-full gap-0 p-0 data-[side=right]:sm:max-w-xl"
       >
         <SheetHeader className="border-line border-b px-5 py-4">
-          <SheetTitle className="text-navy text-base font-extrabold">
-            {blank(row.visitor.name)}
-          </SheetTitle>
+          <SheetTitle className="text-navy">{blank(row.visitor.name)}</SheetTitle>
           <SheetDescription className="text-mute text-xs">
             {`${STATE_LABEL[row.state] ?? row.state} · ${row.site_name}`}
           </SheetDescription>

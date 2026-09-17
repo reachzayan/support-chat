@@ -61,7 +61,7 @@ const DataColumnHeader = ({
   return (
     <TableHead
       scope="col"
-      className="text-ink bg-ice-2 sticky top-0 z-10 px-4 py-3 text-[10px] font-bold tracking-[0.12em] uppercase"
+      className="text-ink bg-ice-2 sticky top-0 z-10 px-4 py-3 text-[10px] font-semibold tracking-[0.12em] uppercase"
     >
       <span className="pr-2">{label}</span>
       <button
@@ -174,7 +174,7 @@ export const SubmissionsTable = ({
       className="border-line bg-paper flex min-h-0 flex-1 flex-col overflow-hidden rounded-[8px] border"
     >
       <div className="border-line flex shrink-0 items-baseline justify-between border-b px-5 py-4">
-        <h2 className="text-navy text-sm font-extrabold">Submissions</h2>
+        <h2 className="text-navy heading text-sm">Submissions</h2>
         <p className="text-mute text-xs">{rows.length} total submissions</p>
       </div>
       <div className="min-h-0 flex-1 overflow-x-auto overflow-y-auto">
