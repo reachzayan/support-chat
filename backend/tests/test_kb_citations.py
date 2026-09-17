@@ -78,3 +78,29 @@ def test_document_index_citation_maps_to_retrieved_chunk() -> None:
         hits,
     )
     assert raw == f"{EASY_BODY}\nSOURCES: {TIMING_ID}"
+
+
+def test_native_citation_survives_response_whitespace_trimming() -> None:
+    from app.llm.bot_responder import extract_native_citations
+
+    body, citations = extract_native_citations(
+        [
+            SimpleNamespace(
+                type="text",
+                text=f"\n{EASY_BODY}\n",
+                citations=[
+                    SimpleNamespace(
+                        document_index=0,
+                        start_char_index=0,
+                        end_char_index=len(EASY_BODY),
+                        cited_text=EASY_BODY,
+                    )
+                ],
+            )
+        ],
+        [_hit(TIMING_ID)],
+    )
+    assert body == "Most negative results are reported within 24-48 hours."
+    assert len(citations) == 1
+    assert citations[0].response_start == 0
+    assert citations[0].response_end == len(body)

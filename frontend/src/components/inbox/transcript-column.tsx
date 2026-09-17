@@ -55,9 +55,7 @@ const TranscriptHeader = ({
     </span>
     <div className="min-w-0">
       <div className="flex min-w-0 items-center gap-2">
-        <h1 className="text-navy truncate text-sm font-extrabold tracking-[-0.02em]">
-          {visitorName}
-        </h1>
+        <h1 className="text-navy heading truncate text-sm">{visitorName}</h1>
         {closed ? <span className={`${META_PILL} tracking-[0.08em] uppercase`}>Closed</span> : null}
       </div>
       <p className="text-mute mt-0.5 flex items-center gap-1.5 truncate text-xs">

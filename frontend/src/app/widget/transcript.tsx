@@ -179,8 +179,6 @@ const citationFromLine = (line: TranscriptLine): SourceCitation => ({
 const citationsFromLine = (line: TranscriptLine): SourceCitation[] =>
   line.citations?.length ? line.citations : [citationFromLine(line)]
 
-const sourceLabel = (_line: TranscriptLine) => "Source"
-
 const TranscriptRow = ({
   line,
   selfRole,
@@ -193,21 +191,26 @@ const TranscriptRow = ({
   return (
     <div className={`${bubbleClass(line, selfRole)} widget-bubble break-words whitespace-pre-wrap`}>
       {label ? (
-        <span className="mb-1.5 block text-[10px] font-bold tracking-[0.08em] uppercase opacity-70">
+        <span className="mb-1.5 block text-[10px] font-semibold tracking-[0.08em] uppercase opacity-70">
           {label}
         </span>
       ) : null}
       <p id={messageId}>{line.body}</p>
       {hasSource(line) ? (
         <span className="mt-2 flex flex-wrap gap-2">
-          {citationsFromLine(line).map((citation, index) => (
-            <SourceHoverCard
-              key={`${citation.source_urls?.[0] ?? citation.source_title ?? "source"}-${citation.cited_text ?? ""}`}
-              citation={citation}
-              describedBy={messageId}
-              label={`${sourceLabel(line)} ${index + 1}`}
-            />
-          ))}
+          {citationsFromLine(line).map((citation, index) => {
+            const href = citation.source_urls?.[0]?.trim() || ""
+            const title = citation.source_title?.trim() || ""
+            const cited = citation.cited_text?.trim().slice(0, 48) || ""
+            return (
+              <SourceHoverCard
+                key={`${href}|${title}|${cited}`}
+                citation={citation}
+                describedBy={messageId}
+                label={title || `Source ${index + 1}`}
+              />
+            )
+          })}
         </span>
       ) : null}
     </div>

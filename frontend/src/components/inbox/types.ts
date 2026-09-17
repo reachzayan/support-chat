@@ -32,6 +32,10 @@ export type InboxMessage = {
   source_title?: string | null
   system_reason?: string | null
   created_at: string
+  citations?: Array<{
+    source_urls?: string[] | null
+    source_title?: string | null
+  }>
 }
 
 export type ConversationDetail = {

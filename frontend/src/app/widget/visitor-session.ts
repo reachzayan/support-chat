@@ -19,6 +19,25 @@ export const emptyChat = (): ChatView => ({
   typing: false,
 })
 
+export const applyConversationSnapshot = (
+  view: ChatView,
+  snapshot: {
+    state: ConversationState
+    assigned_agent: { id: string; display_name: string } | null
+    messages: unknown[]
+  },
+): ChatView => {
+  let next = view
+  for (const message of snapshot.messages) {
+    next = applyVisitorFrame(next, message)
+  }
+  return applyVisitorFrame(next, {
+    type: "state",
+    state: snapshot.state,
+    assigned_agent: snapshot.assigned_agent,
+  })
+}
+
 const isRecord = (value: unknown): value is Record<string, unknown> => {
   return typeof value === "object" && value !== null
 }
@@ -35,7 +54,6 @@ const citationFromRecord = (item: unknown): SourceCitation | null => {
   return {
     source_urls: sourceUrl ? [sourceUrl] : null,
     source_title: sourceTitle,
-    cited_text: typeof item.cited_text === "string" ? item.cited_text : null,
   }
 }
 
