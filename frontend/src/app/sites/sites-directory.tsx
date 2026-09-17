@@ -24,7 +24,7 @@ export const SitesDirectory = ({
     <div className="border-line flex flex-wrap items-center justify-between gap-3 border-b px-4 py-3 sm:px-5">
       <div>
         <p className={LABEL}>Directory</p>
-        <p className="text-navy mt-0.5 text-sm font-extrabold">
+        <p className="text-navy heading mt-0.5 text-sm">
           {sites.length === 1 ? "1 website" : `${sites.length} websites`}
         </p>
       </div>
@@ -37,7 +37,7 @@ export const SitesDirectory = ({
 
     {sites.length === 0 ? (
       <div className="px-6 py-16 text-center">
-        <p className="text-navy text-sm font-extrabold">No sites configured</p>
+        <p className="text-navy heading text-sm">No sites configured</p>
         <p className="text-mute mt-2 text-sm">Add a site before installing the widget.</p>
       </div>
     ) : (

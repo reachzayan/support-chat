@@ -10,6 +10,7 @@ from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.chat.connection_manager import connection_manager
+from app.http_urls import canonicalize_http_url, canonicalize_https_url
 from app.models.article import KbArticle
 from app.models.canned_reply import CannedReply
 from app.models.conversation import Conversation
@@ -66,25 +67,17 @@ def _plain(value: str, limit: int, empty_ok: bool = False) -> str:
 
 
 def _privacy_url(raw: str) -> str:
-    text = raw.strip()
-    if not text.startswith("http://") and not text.startswith("https://"):
+    clean = canonicalize_http_url(raw)
+    if clean is None:
         raise AdminError("invalid")
-    from urllib.parse import urlparse
-
-    parsed = urlparse(text)
-    if parsed.scheme not in ("http", "https") or not parsed.netloc or parsed.username:
-        raise AdminError("invalid")
-    return text
+    return clean
 
 
 def _website_url(raw: str) -> str:
-    from urllib.parse import urlparse
-
-    text = raw.strip()
-    parsed = urlparse(text)
-    if parsed.scheme != "https" or not parsed.netloc or parsed.username:
+    clean = canonicalize_https_url(raw)
+    if clean is None:
         raise AdminError("invalid")
-    return text
+    return clean
 
 
 def _install_hosts(website_url: str) -> set[str]:

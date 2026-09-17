@@ -3,7 +3,12 @@
 import { useCallback, useState, type ChangeEvent } from "react"
 
 import { staffWrite, type SiteRecord } from "@/components/admin/staff-api"
-import { originFromWebsiteUrl } from "@/lib/validation"
+import {
+  canonicalizeHttpUrl,
+  canonicalizeHttpsUrl,
+  canonicalizeOriginLines,
+  originFromWebsiteUrl,
+} from "@/lib/validation"
 
 import { copyManageSnippet } from "./manage-site-save"
 import { useLeaveGuard } from "./sites-form"
@@ -17,7 +22,7 @@ const linesFromText = (text: string) =>
 
 const mergedOrigins = (websiteUrl: string, originsText: string) => {
   const locked = originFromWebsiteUrl(websiteUrl)
-  const extra = linesFromText(originsText)
+  const extra = canonicalizeOriginLines(originsText)
   if (locked === null) {
     return extra
   }
@@ -64,6 +69,20 @@ export const useAddSiteForm = (
   const handlePrivacy = useCallback((event: ChangeEvent<HTMLInputElement>) => {
     setPrivacyUrl(event.target.value)
   }, [])
+  const handlePrivacyFieldBlur = useCallback(() => {
+    const canonical = canonicalizeHttpUrl(privacyUrl)
+    if (canonical) setPrivacyUrl(canonical)
+    handlePrivacyBlur()
+  }, [handlePrivacyBlur, privacyUrl])
+  const handleWebsiteUrlFieldBlur = useCallback(() => {
+    const canonical = canonicalizeHttpsUrl(websiteUrl)
+    if (canonical) setWebsiteUrl(canonical)
+    handleWebsiteUrlBlur()
+  }, [handleWebsiteUrlBlur, websiteUrl])
+  const handleOriginsFieldBlur = useCallback(() => {
+    setOriginsText(canonicalizeOriginLines(originsText).join("\n"))
+    handleOriginsBlur()
+  }, [handleOriginsBlur, originsText])
   const handleWebsiteUrl = useCallback((event: ChangeEvent<HTMLInputElement>) => {
     setWebsiteUrl(event.target.value)
   }, [])
@@ -103,9 +122,9 @@ export const useAddSiteForm = (
     const response = await staffWrite("/api/sites", "POST", {
       name,
       greeting,
-      privacy_url: privacyUrl,
+      privacy_url: canonicalizeHttpUrl(privacyUrl) ?? privacyUrl,
       origins: mergedOrigins(websiteUrl, originsText),
-      website_url: websiteUrl,
+      website_url: canonicalizeHttpsUrl(websiteUrl) ?? websiteUrl,
       contact_info: linesFromText(contactInfoText),
     })
     if (!response.ok) {
@@ -177,9 +196,9 @@ export const useAddSiteForm = (
     handleOrigins,
     handleContactInfo,
     handleNameBlur,
-    handlePrivacyBlur,
-    handleWebsiteUrlBlur,
-    handleOriginsBlur,
+    handlePrivacyBlur: handlePrivacyFieldBlur,
+    handleWebsiteUrlBlur: handleWebsiteUrlFieldBlur,
+    handleOriginsBlur: handleOriginsFieldBlur,
     handleOpenChange,
     handleSubmit,
     handleCheckInstall,

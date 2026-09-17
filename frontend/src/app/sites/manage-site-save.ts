@@ -1,4 +1,9 @@
 import { staffWrite, type SiteRecord } from "@/components/admin/staff-api"
+import {
+  canonicalizeHttpUrl,
+  canonicalizeHttpsUrl,
+  canonicalizeOriginLines,
+} from "@/lib/validation"
 
 const linesFromText = (text: string) =>
   text
@@ -23,9 +28,9 @@ export const saveManageSite = async (
   const response = await staffWrite(`/api/sites/${siteId}`, "PATCH", {
     name: payload.name,
     greeting: payload.greeting,
-    privacy_url: payload.privacyUrl,
-    origins: linesFromText(payload.originsText),
-    website_url: payload.websiteUrl,
+    privacy_url: canonicalizeHttpUrl(payload.privacyUrl) ?? payload.privacyUrl,
+    origins: canonicalizeOriginLines(payload.originsText),
+    website_url: canonicalizeHttpsUrl(payload.websiteUrl) ?? payload.websiteUrl,
     contact_info: linesFromText(payload.contactInfoText),
     callback_window_hours: payload.windowHours,
   })

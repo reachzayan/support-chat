@@ -211,7 +211,7 @@ const ApprovedOriginsField = ({
 
   return (
     <Field>
-      <p className="text-mute text-[10px] font-bold tracking-[0.12em] uppercase">
+      <p className="text-mute text-[10px] font-semibold tracking-[0.12em] uppercase">
         Approved origins
       </p>
       <AnimatePresence initial={false}>
@@ -226,7 +226,7 @@ const ApprovedOriginsField = ({
           >
             <Lock className="text-mute size-3.5 shrink-0" aria-hidden="true" />
             <span className="text-navy min-w-0 truncate font-mono text-xs">{lockedOrigin}</span>
-            <span className="text-mute ml-auto shrink-0 text-[10px] font-bold tracking-[0.12em] uppercase">
+            <span className="text-mute ml-auto shrink-0 text-[10px] font-semibold tracking-[0.12em] uppercase">
               From website
             </span>
           </motion.div>

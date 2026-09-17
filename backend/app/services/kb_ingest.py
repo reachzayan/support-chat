@@ -6,6 +6,7 @@ from uuid import UUID
 import structlog
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.http_urls import canonicalize_https_url
 from app.models.kb_source import KbSource
 from app.models.site import Site
 from app.redis import get_redis
@@ -23,17 +24,12 @@ class CanonicalError(ValueError):
 
 
 def canonical_fetch_url(raw: str) -> str:
-    parsed = urlparse(raw.strip())
-    scheme = parsed.scheme.lower()
-    if scheme != "https":
+    clean = canonicalize_https_url(raw)
+    if clean is None:
         raise CanonicalError("scheme_not_https")
-    host = parsed.hostname.lower() if parsed.hostname else ""
-    if not host:
-        raise CanonicalError("scheme_not_https")
-    default_ports = {"https": 443}
-    port = "" if parsed.port in (None, default_ports.get(scheme)) else f":{parsed.port}"
+    parsed = urlparse(clean)
     path = parsed.path or "/"
-    return urlunparse((scheme, f"{host}{port}", path, "", parsed.query, ""))
+    return urlunparse(("https", parsed.netloc, path, "", parsed.query, ""))
 
 
 def display_locator(raw: str) -> str | None:

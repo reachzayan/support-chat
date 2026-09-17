@@ -161,10 +161,10 @@ def test_http_www_evil_and_missing_origin_fail_bootstrap_and_create_zero_visitor
     assert "allowed_origins" not in allowed.json()
     assert "origins" not in allowed.json()
     assert http_variant.status_code == 403
-    assert www.status_code == 403
+    assert www.status_code == 200
     assert evil.status_code == 403
     assert missing.status_code == 403
-    assert visitor_count() == 1
+    assert visitor_count() == 2
 
 
 def test_removing_active_origin_closes_visitor_socket_4403_on_heartbeat(

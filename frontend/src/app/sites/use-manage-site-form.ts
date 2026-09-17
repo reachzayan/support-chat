@@ -3,6 +3,11 @@
 import { useCallback, useState, type ChangeEvent } from "react"
 
 import type { SiteRecord } from "@/components/admin/staff-api"
+import {
+  canonicalizeHttpUrl,
+  canonicalizeHttpsUrl,
+  canonicalizeOriginLines,
+} from "@/lib/validation"
 
 import { copyManageSnippet, saveManageSite } from "./manage-site-save"
 import { useLeaveGuard } from "./sites-form"
@@ -59,6 +64,20 @@ export const useManageSiteForm = (
   const { handleNameBlur, handlePrivacyBlur, handleOriginsBlur, handleWebsiteUrlBlur, validate } =
     useSiteValidation(name, privacyUrl, originsText, websiteUrl, false, setErrors)
 
+  const handlePrivacyFieldBlur = useCallback(() => {
+    const canonical = canonicalizeHttpUrl(privacyUrl)
+    if (canonical) setPrivacyUrl(canonical)
+    handlePrivacyBlur()
+  }, [handlePrivacyBlur, privacyUrl])
+  const handleWebsiteUrlFieldBlur = useCallback(() => {
+    const canonical = canonicalizeHttpsUrl(websiteUrl)
+    if (canonical) setWebsiteUrl(canonical)
+    handleWebsiteUrlBlur()
+  }, [handleWebsiteUrlBlur, websiteUrl])
+  const handleOriginsFieldBlur = useCallback(() => {
+    setOriginsText(canonicalizeOriginLines(originsText).join("\n"))
+    handleOriginsBlur()
+  }, [handleOriginsBlur, originsText])
   const handleName = useCallback((event: ChangeEvent<HTMLInputElement>) => {
     setName(event.target.value)
   }, [])
@@ -146,9 +165,9 @@ export const useManageSiteForm = (
     handleContactInfo,
     handleWindow,
     handleNameBlur,
-    handlePrivacyBlur,
-    handleWebsiteUrlBlur,
-    handleOriginsBlur,
+    handlePrivacyBlur: handlePrivacyFieldBlur,
+    handleWebsiteUrlBlur: handleWebsiteUrlFieldBlur,
+    handleOriginsBlur: handleOriginsFieldBlur,
     handleOpenChange,
     handleSave,
     handleCopy,
