@@ -65,6 +65,79 @@ async def test_overview_question_uses_that_sites_indexed_copy(migrated_db) -> No
         assert all(hit.site_id == bg.id for hit in bg_hits)
 
 
+async def test_overview_keeps_eight_distinct_homepage_headings(migrated_db) -> None:
+    import hashlib
+
+    from app.models.kb_chunk import KbChunk
+    from app.models.kb_page import KbPage
+    from app.models.kb_snapshot import KbSnapshot
+    from app.models.kb_source import KbSource
+    from app.services.kb_embedder import configured_embedder_id
+    from tests.bot_fixtures import insert_site
+
+    headings = [f"Product {index}" for index in range(10)]
+    async with session_maker()() as session:
+        site = await insert_site(session, "sampledata", "Sample Data Services")
+        url = "https://sample-data.example.com/"
+        source = KbSource(
+            site_id=site.id,
+            start_url=url,
+            mode="list",
+            seed_urls=[url],
+            status="ready",
+            page_count=1,
+            embedder_id=configured_embedder_id(),
+            enabled=True,
+        )
+        session.add(source)
+        await session.flush()
+        page = KbPage(
+            source_id=source.id,
+            site_id=site.id,
+            url=url,
+            title="Home",
+            content_text=" ".join(headings),
+            content_sha256=hashlib.sha256(b"home").hexdigest(),
+            http_status=200,
+            enabled=True,
+        )
+        session.add(page)
+        await session.flush()
+        snapshot = KbSnapshot(
+            site_id=site.id,
+            source_id=source.id,
+            state="live",
+            content_hash=hashlib.sha256(b"home").hexdigest(),
+            token_estimate=0,
+        )
+        session.add(snapshot)
+        await session.flush()
+        bodies = [f"{heading} describes a distinct platform capability." for heading in headings]
+        vectors = await FakeEmbedder().embed_documents(bodies)
+        for index, heading in enumerate(headings):
+            session.add(
+                KbChunk(
+                    page_id=page.id,
+                    site_id=site.id,
+                    snapshot_id=snapshot.id,
+                    ordinal=index,
+                    kind="section",
+                    heading=heading,
+                    canonical_question=f"What is {heading}?",
+                    answer_verbatim=bodies[index],
+                    aliases=[],
+                    body=bodies[index],
+                    embedding=vectors[index],
+                    enabled=True,
+                )
+            )
+        await session.commit()
+        hits = await KbSearch(session).search(
+            site.id, "what services do you offer?", query_vector=None
+        )
+    assert [hit.heading for hit in hits] == headings[:8]
+
+
 async def test_services_query_keeps_catalog_unit_without_requiring_provide(
     migrated_db,
 ) -> None:
@@ -228,3 +301,36 @@ async def test_exact_canonical_match_skips_embedder(migrated_db) -> None:
             "zzzz not a real FAQ about quantum banana shipping",
         )
         assert spy_miss.embed_query_calls == 1
+
+
+async def test_broad_services_query_returns_at_least_three_hits(migrated_db) -> None:
+    from app.services.kb_hybrid import HybridKbSearch
+
+    async with session_maker()() as session:
+        easy, _bg, _timing, _fcra = await seed_brand_articles(session)
+        await insert_chunk(
+            session,
+            easy,
+            "Skip tracing",
+            "Skip tracing covers nationwide addresses, scored phones, and right-party contact.",
+            slug="skip-trace",
+        )
+        await insert_chunk(
+            session,
+            easy,
+            "VPOE",
+            "VPOE confirms employment dates from the payroll source.",
+            slug="vpoe",
+        )
+        await insert_chunk(
+            session,
+            easy,
+            "SampleMail",
+            "SampleMail verifies account ownership before a payment is submitted.",
+            slug="samplemail",
+        )
+        await session.commit()
+        hits = await HybridKbSearch(session).search(
+            easy.id, "what services do you offer", query_vector=None
+        )
+    assert len(hits) >= 3
