@@ -1,6 +1,6 @@
 import { describe, expect, test, vi } from "vitest"
 
-import { createAgentSocket } from "./agent-ws"
+import { agentSocketUrl, createAgentSocket } from "./agent-ws"
 
 class FakeSocket {
   static instances: FakeSocket[] = []
@@ -41,6 +41,11 @@ const CONVO = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
 const CLIENT = "20000000-0000-4000-8000-000000000001"
 
 describe("agent socket client", () => {
+  test("agentSocketUrl treats a blank origin as the local default", () => {
+    expect(agentSocketUrl("")).toBe("ws://127.0.0.1:8000/ws/agent")
+    expect(agentSocketUrl("   ")).toBe("ws://127.0.0.1:8000/ws/agent")
+  })
+
   test("auths, subscribes from last id, and retries one unacked agent line", async () => {
     FakeSocket.instances = []
     vi.stubGlobal("WebSocket", FakeSocket)

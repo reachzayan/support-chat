@@ -11,14 +11,14 @@ type AgentSocketOptions = {
   onClose: (code: number) => void
 }
 
+import { resolvePublicApiOrigin } from "./api-origin"
+
 type Outgoing = Record<string, unknown>
 
 const AUTH_OPEN = 1
 
-export const agentSocketUrl = (
-  apiOrigin = process.env.NEXT_PUBLIC_API_ORIGIN ?? "http://127.0.0.1:8000",
-) => {
-  const url = new URL(apiOrigin)
+export const agentSocketUrl = (apiOrigin?: string) => {
+  const url = new URL(resolvePublicApiOrigin(apiOrigin))
   url.protocol = url.protocol === "https:" ? "wss:" : "ws:"
   url.pathname = "/ws/agent"
   url.search = ""

@@ -92,5 +92,9 @@ export const proxy = async (request: NextRequest) => {
   if ((host === widgetHost() || host === marketingHost()) && isStaffPath(pathname)) {
     return new NextResponse(null, { status: 404 })
   }
-  return applyWidgetCsp(request, NextResponse.next())
+  const requestHeaders = new Headers(request.headers)
+  if (pathname === "/widget") {
+    requestHeaders.set("x-supportchat-surface", "widget")
+  }
+  return applyWidgetCsp(request, NextResponse.next({ request: { headers: requestHeaders } }))
 }

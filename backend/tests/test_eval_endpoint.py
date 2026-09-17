@@ -1,16 +1,15 @@
-from tests.ws_helpers import EASY_PUBLIC_KEY, EASY_SITE_KEY, insert_site
-
-CLARIFY_SCOPE = "What would you like to know about screening or compliance?"
+import pytest
 
 
-def test_eval_turn_endpoint_returns_neutral_clarification_without_widget_bootstrap(client) -> None:
-    insert_site(EASY_SITE_KEY, "SampleSite", EASY_PUBLIC_KEY)
-    response = client.post(
+@pytest.mark.parametrize(
+    "path",
+    [
         "/api/internal/eval/turn",
-        json={"site_key": EASY_SITE_KEY, "messages": ["I am sad"]},
-    )
-    assert response.status_code == 200
-    payload = response.json()
-    assert payload["state"] == "bot"
-    assert payload["body"] == CLARIFY_SCOPE
-    assert payload["system_reason"] == "clarify"
+        "/api/internal/eval/run",
+        "/api/internal/playground/turn",
+    ],
+)
+def test_temporary_internal_chat_routes_are_not_found(client, path: str) -> None:
+    response = client.post(path, json={"site_key": "samplesite", "message": "hello"})
+    assert response.status_code == 404
+    assert response.json() == {"detail": "Not Found"}
