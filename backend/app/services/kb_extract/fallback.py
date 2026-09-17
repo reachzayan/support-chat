@@ -16,7 +16,6 @@ DROP_TAGS = (
     "svg",
     "form",
 )
-MIN_CHARS = 40
 
 
 def _html_without_chrome(html: str) -> str:
@@ -28,36 +27,38 @@ def _html_without_chrome(html: str) -> str:
     return lxml_html.tostring(tree, encoding="unicode")
 
 
-def parse_fallback(html: str, url: str) -> list[EvidenceUnit]:
-    cleaned = _html_without_chrome(html)
+def parse_fallback(html: str, url: str, markdown: str = "") -> list[EvidenceUnit]:
+    cleaned_html = _html_without_chrome(html)
+    title = _title(cleaned_html)
+    if markdown.strip() and not any(
+        line.lstrip().startswith("#") for line in markdown.splitlines()
+    ):
+        return _blocks_from_text(tidy_text(markdown), title or "Untitled", url)
     text = trafilatura.extract(
-        cleaned, include_comments=False, include_tables=True, favor_recall=True
+        cleaned_html, include_comments=False, include_tables=True, favor_recall=True
     )
-    title = _title(cleaned)
     if text is None:
-        text, title = _fallback_dom(cleaned)
+        text, title = _fallback_dom(cleaned_html)
     if text is None:
         return []
-    cleaned = tidy_text(text)
-    blocks = [part.strip() for part in cleaned.split("\n\n") if part.strip()]
-    if not blocks and cleaned:
-        blocks = [cleaned]
-    heading = title or "Untitled"
-    units: list[EvidenceUnit] = []
-    for block in blocks:
-        if len(block) < MIN_CHARS:
-            continue
-        units.append(
-            EvidenceUnit(
-                kind="prose",
-                heading=heading,
-                canonical_question=None,
-                answer_verbatim=block,
-                body_for_search=f"{heading}\n{block}",
-                display_locator=locator_for(url),
-            )
+    return _blocks_from_text(tidy_text(text), title or "Untitled", url)
+
+
+def _blocks_from_text(text: str, heading: str, url: str) -> list[EvidenceUnit]:
+    blocks = [part.strip() for part in text.split("\n\n") if part.strip()]
+    if not blocks and text:
+        blocks = [text]
+    return [
+        EvidenceUnit(
+            kind="prose",
+            heading=heading,
+            canonical_question=None,
+            answer_verbatim=block,
+            body_for_search=f"{heading}\n{block}",
+            display_locator=locator_for(url),
         )
-    return units
+        for block in blocks
+    ]
 
 
 def _title(html: str) -> str:

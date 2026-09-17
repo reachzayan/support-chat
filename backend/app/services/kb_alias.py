@@ -20,7 +20,7 @@ URL_RE = re.compile(r"https?://", re.IGNORECASE)
 
 
 async def generate_aliases(unit: EvidenceUnit) -> tuple[str, ...]:
-    if unit.kind not in {"faq", "section"}:
+    if unit.kind != "faq" or not unit.canonical_question:
         return unit.aliases
     settings = get_settings()
     if not settings.anthropic_api_key:
@@ -50,7 +50,7 @@ async def generate_aliases(unit: EvidenceUnit) -> tuple[str, ...]:
     for block in response.content:
         if getattr(block, "type", None) == "text":
             text += getattr(block, "text", "")
-    return _parse_aliases(text)
+    return tuple(dict.fromkeys((*unit.aliases, *_parse_aliases(text))))
 
 
 def _load_alias_payload(raw: str):

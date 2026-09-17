@@ -3,7 +3,6 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
-from dataclasses import replace
 from datetime import UTC, datetime
 from urllib.parse import urlparse
 from uuid import UUID
@@ -21,7 +20,6 @@ from app.models.kb_source import KbSource
 from app.models.site import Site
 from app.repositories.kb_page_job_repo import KbPageJobRepository
 from app.repositories.kb_page_repo import KbPageRepository
-from app.services.kb_alias import generate_aliases
 from app.services.kb_backoff import classify_error, next_run_at, should_dead_letter
 from app.services.kb_chunk import TextChunk, pack_chunks, split_chunks_for_embed
 from app.services.kb_crawl import (
@@ -33,18 +31,19 @@ from app.services.kb_embedder import Embedder, FakeEmbedder, OversizeChunkError,
 from app.services.kb_extract import extract_html
 from app.services.kb_extract.text import visible_copy
 from app.services.kb_extract.types import EvidenceUnit
-from app.services.kb_fetcher import FetchResult, fetch_page
+from app.services.kb_fetcher import FetchResult, LazyPageCrawler, fetch_page
 from app.services.kb_host_limiter import HostLimiter
-from app.services.kb_llm_extract import (
-    PROMPT_VERSION_DEFAULT,
-    evidence_from_extraction,
-    needs_llm_extraction,
-)
+from app.services.kb_llm_extract import apply_cleaner
 from app.services.kb_snapshot import begin_snapshot, fail, mark_unchanged, validate_snapshot
-from app.services.kb_validate import PageEvidence
+from app.services.kb_validate import PageEvidence, ValidationResult
 from app.settings import get_settings
 
 log = structlog.get_logger("kb_pipeline")
+CONTENT_FINGERPRINT_VERSION = "haiku-page-v5"
+
+
+def _content_fingerprint(raw_digest: str) -> str:
+    return f"{CONTENT_FINGERPRINT_VERSION}:{get_settings().haiku_model}:{raw_digest}"
 
 
 def _sync_status(source: KbSource) -> None:
@@ -63,9 +62,6 @@ async def run_ingest(
     fetch=None,
     llm_client=None,
 ) -> None:
-    from app.services.kb_crawl import fetch_html as http_fetch
-    from app.services.kb_ingest import allowed_hosts_for
-
     source = await session.get(KbSource, source_id)
     if source is None:
         return
@@ -89,6 +85,27 @@ async def run_ingest(
     await session.commit()
     snapshot_id = await begin_snapshot(session, source.id)
     worker = embedder or FakeEmbedder()
+    if source.source_kind == "text":
+        await _run_text_ingest(session, source, snapshot_id, worker, llm_client)
+        return
+    await _run_website_ingest(
+        session, source, site, snapshot_id, worker, fetch, llm_client, retry_urls
+    )
+
+
+async def _run_website_ingest(
+    session: AsyncSession,
+    source: KbSource,
+    site: Site,
+    snapshot_id: UUID,
+    worker: Embedder,
+    fetch,
+    llm_client,
+    retry_urls: list[str],
+) -> None:
+    from app.services.kb_crawl import fetch_html as http_fetch
+    from app.services.kb_ingest import allowed_hosts_for
+
     hosts = allowed_hosts_for(site, source.start_url)
     robots: dict[str, str | None] = {}
     seen: set[str] = set()
@@ -109,6 +126,8 @@ async def run_ingest(
     source.stage = "processing"
     _sync_status(source)
     await session.commit()
+    crawler_session = LazyPageCrawler(hosts) if fetch is None else None
+    crawler = crawler_session.fetch if crawler_session is not None else None
 
     async def handle(url: str) -> None:
         async with page_sem:
@@ -130,6 +149,7 @@ async def run_ingest(
                     limiter,
                     db_lock,
                     robots_lock,
+                    crawler,
                 )
             except Exception as exc:
                 log.info(
@@ -163,15 +183,114 @@ async def run_ingest(
             if item:
                 pending.append(item)
 
-    frontier = planned
-    while frontier and len(seen) < source.max_pages:
-        await _run_page_group(handle, frontier[: source.max_pages - len(seen)])
-        if source.mode != "prefix":
-            break
-        remaining = source.max_pages - len(seen)
-        frontier = [url for url in extra_urls if url not in seen][:remaining]
+    try:
+        frontier = planned
+        while frontier and len(seen) < source.max_pages:
+            await _run_page_group(handle, frontier[: source.max_pages - len(seen)])
+            if source.mode != "prefix":
+                break
+            remaining = source.max_pages - len(seen)
+            frontier = [url for url in extra_urls if url not in seen][:remaining]
+    finally:
+        if crawler_session is not None:
+            await crawler_session.aclose()
     source.pages_discovered = len(seen)
-    await _finish_ingest(session, source, snapshot_id, pending, partial_run=bool(retry_urls))
+    await _finish_ingest(
+        session,
+        source,
+        snapshot_id,
+        pending,
+        partial_run=bool(retry_urls),
+    )
+
+
+async def _run_text_ingest(
+    session: AsyncSession,
+    source: KbSource,
+    snapshot_id: UUID,
+    worker: Embedder,
+    llm_client,
+) -> None:
+    title = (source.display_name or "").strip()
+    body = (source.manual_text or "").strip()
+    if not title or not body:
+        await _fail_empty(session, source, snapshot_id)
+        return
+    source.stage = "processing"
+    source.pages_discovered = 1
+    _sync_status(source)
+    page = await _ensure_page(session, source, source.start_url)
+    if page is None:
+        await _fail_empty(session, source, snapshot_id)
+        return
+    started = datetime.now(UTC)
+    jobs = KbPageJobRepository(session)
+    job = await jobs.upsert(source_id=source.id, page_id=page.id, snapshot_id=snapshot_id)
+    job.state = "running"
+    job.stage = "fetch"
+    job.started_at = started
+    job.attempts = 1
+    page.processing_status = "fetching"
+    _record_job_event(job, "fetch", "running", renderer="manual")
+    await session.commit()
+    digest = hashlib.sha256(f"{title}\0{body}".encode()).hexdigest()
+    result = FetchResult(
+        url=source.start_url,
+        status=200,
+        html="",
+        markdown=body,
+        content_sha256=digest,
+        renderer="manual",
+        title=title,
+    )
+    fingerprint = _content_fingerprint(digest)
+    previous_hash = page.content_sha256
+    job.stage = "extract"
+    _record_job_event(job, "fetch", "done", renderer="manual")
+    await _bump_source(session, source, "pages_fetched")
+    baseline = await session.scalar(
+        select(KbSnapshot)
+        .where(KbSnapshot.source_id == source.id, KbSnapshot.state == "live")
+        .order_by(KbSnapshot.created_at.desc())
+    )
+    if (
+        baseline is not None
+        and previous_hash
+        and previous_hash == fingerprint
+        and not await _has_generated_nonfaq_aliases(session, page.id, baseline.id)
+    ):
+        pending = await _mark_page_unchanged(session, source, page, job, source.start_url, result)
+        await _finish_ingest(session, source, snapshot_id, [pending])
+        return
+    if llm_client is None or not hasattr(llm_client, "structure_text"):
+        await _fail_page(session, source, page, job, "llm_extract")
+        await _finish_ingest(session, source, snapshot_id, [])
+        return
+    page.processing_status = "llm_extracting"
+    job.stage = "llm_extract"
+    _record_job_event(job, "llm_extract", "running")
+    await session.commit()
+    try:
+        structured = await llm_client.structure_text(title, body)
+    except Exception as exc:
+        await _fail_page(session, source, page, job, "llm_extract", str(exc))
+        await _finish_ingest(session, source, snapshot_id, [])
+        return
+    pending = await _persist_extracted(
+        session,
+        source,
+        source.start_url,
+        source.start_url,
+        result,
+        snapshot_id,
+        worker,
+        page,
+        job,
+        structured.units,
+        asyncio.Lock(),
+        started,
+    )
+    await _finish_ingest(session, source, snapshot_id, [pending] if pending else [])
 
 
 async def _fail_empty(session: AsyncSession, source: KbSource, snapshot_id: UUID) -> None:
@@ -228,7 +347,12 @@ async def _finish_ingest(
         if partial_run:
             await _carry_forward_unrequested_pages(session, live.id, pending)
     content_hash = _content_hash(pending)
-    if live is not None and live.content_hash == content_hash and source.pages_failed == 0:
+    if (
+        live is not None
+        and live.content_hash == content_hash
+        and source.pages_failed == 0
+        and all(item.get("copy_from_live") for item in pending)
+    ):
         await _mark_unchanged(session, source, snapshot_id, pending, content_hash)
         return
     if live is not None:
@@ -246,15 +370,52 @@ async def _finish_ingest(
         for item in pending
     }
     result = await validate_snapshot(session, snapshot_id, staged_pages)
+    await _publish_validated_snapshot(session, source, snapshot_id, pending, result)
+
+
+async def _publish_validated_snapshot(
+    session: AsyncSession,
+    source: KbSource,
+    snapshot_id: UUID,
+    pending: list[dict],
+    result: ValidationResult,
+) -> None:
+    # Show precisely the published evidence, including per-chunk validation drops.
+    retained = list(
+        (
+            await session.scalars(
+                select(KbChunk)
+                .where(KbChunk.snapshot_id == snapshot_id)
+                .order_by(KbChunk.page_id, KbChunk.ordinal)
+            )
+        ).all()
+    )
+    for item in pending:
+        if not item.get("copy_from_live"):
+            item["content_text"] = "\n\n".join(
+                chunk.body if item.get("structured") else chunk.answer_verbatim
+                for chunk in retained
+                if chunk.page_id == item["page_id"] and chunk.enabled
+            )
+    dropped_reasons = {item.page_id: item.reason for item in result.dropped}
+    for item in pending:
+        reason = dropped_reasons.get(item["page_id"])
+        if reason:
+            item["dropped"] = True
+            item["drop_reason"] = reason
+    await _record_validation_progress(session, snapshot_id, pending)
     if result.failed_rules:
-        await _mark_pending_validation_failed(session, pending)
+        if not any(item.get("dropped") for item in pending):
+            for item in pending:
+                if not item.get("copy_from_live"):
+                    item["dropped"] = True
+                    item["drop_reason"] = result.failed_rules[0]
+        await _apply_staged_pages(session, pending)
         source.stage = "failed"
         source.status = "failed"
         source.last_run_finished_at = datetime.now(UTC)
         await session.commit()
         return
-    # Site owners explicitly add the source, so a validated snapshot becomes
-    # the live source immediately.  There is no separate human-review gate.
     from app.services.kb_snapshot import promote
 
     await promote(session, snapshot_id)
@@ -265,6 +426,9 @@ async def _finish_ingest(
     source.page_count = len({item["page_id"] for item in pending})
     source.last_run_finished_at = datetime.now(UTC)
     await session.commit()
+    from app.services.full_context import clear_units_cache
+
+    clear_units_cache()
 
 
 async def _fail_all_pages(session: AsyncSession, source: KbSource, snapshot_id: UUID) -> None:
@@ -307,12 +471,22 @@ async def _stage_snapshot(
     snapshot.token_estimate = sum(item.get("token_estimate", 0) for item in pending)
 
 
-async def _mark_pending_validation_failed(session: AsyncSession, pending: list[dict]) -> None:
+async def _record_validation_progress(
+    session: AsyncSession, snapshot_id: UUID, pending: list[dict]
+) -> None:
     for item in pending:
-        page = await session.get(KbPage, item["page_id"])
-        if page is not None and not item.get("copy_from_live"):
-            page.processing_status = "failed"
-            page.failure_reason = "validation"
+        if not item.get("dropped"):
+            continue
+        job = await session.scalar(
+            select(KbPageJob).where(
+                KbPageJob.page_id == item["page_id"],
+                KbPageJob.snapshot_id == snapshot_id,
+            )
+        )
+        if job is None:
+            continue
+        reason = str(item.get("drop_reason") or "validation")
+        _record_job_event(job, "persist", "done", error_code=reason)
 
 
 async def _apply_staged_pages(session: AsyncSession, pending: list[dict]) -> None:
@@ -323,6 +497,20 @@ async def _apply_staged_pages(session: AsyncSession, pending: list[dict]) -> Non
             continue
         if item.get("preserve_failure") or item.get("preserve_page_state"):
             continue
+        if item.get("dropped") and not item.get("copy_from_live"):
+            reason = str(item.get("drop_reason") or "validation")
+            page.markdown = item.get("markdown")
+            if page.last_success_at is None:
+                page.raw_html = item.get("raw_html")
+                page.http_status = item.get("http_status", 200)
+                page.content_sha256 = item["digest"]
+                page.title = item["title"]
+                page.content_text = item["content_text"]
+                page.display_locator = item.get("display_locator")
+            page.processing_status = "failed"
+            page.skip_reason = reason
+            page.failure_reason = reason
+            continue
         page.raw_html = item.get("raw_html")
         page.markdown = item.get("markdown")
         page.http_status = item.get("http_status", 200)
@@ -331,6 +519,12 @@ async def _apply_staged_pages(session: AsyncSession, pending: list[dict]) -> Non
             page.title = item["title"]
             page.content_text = item["content_text"]
             page.display_locator = item.get("display_locator")
+        if item.get("dropped") and not item.get("copy_from_live"):
+            reason = str(item.get("drop_reason") or "validation")
+            page.processing_status = "failed"
+            page.skip_reason = reason
+            page.failure_reason = reason
+            continue
         page.processing_status = "unchanged" if item.get("copy_from_live") else "ready"
         page.skip_reason = None
         page.failure_reason = None
@@ -526,6 +720,7 @@ async def _process_url(
     limiter: HostLimiter,
     lock: asyncio.Lock,
     robots_lock: asyncio.Lock,
+    crawler=None,
 ) -> dict | None:
     from app.services.kb_crawl import fetch_html as http_fetch
     from app.services.kb_ingest import (
@@ -575,7 +770,7 @@ async def _process_url(
         await session.commit()
 
     result = await _fetch_with_retry(
-        session, source, page, job, fetch_url, hosts, fetch, limiter, lock
+        session, source, page, job, fetch_url, hosts, fetch, limiter, lock, crawler
     )
     return await _after_fetch(
         session,
@@ -622,7 +817,8 @@ async def _after_fetch(
         if html is None:
             _log_fetch_failure(source, page, snapshot_id, job, started)
             return None
-        digest = result.content_sha256
+        raw_digest = result.content_sha256
+        digest = _content_fingerprint(raw_digest)
         markdown = result.markdown
         await _bump_source(session, source, "pages_fetched")
         previous_hash = page.content_sha256
@@ -640,22 +836,33 @@ async def _after_fetch(
             )
             .order_by(KbSnapshot.created_at.desc())
         )
-        if baseline is not None and previous_hash and previous_hash == digest:
+        if (
+            baseline is not None
+            and previous_hash
+            and previous_hash == digest
+            and not await _has_generated_nonfaq_aliases(session, page.id, baseline.id)
+        ):
             return await _mark_page_unchanged(session, source, page, job, fetch_url, result)
         page.processing_status = "extracting"
         await session.commit()
-    units = extract_html(html, url=url, markdown=markdown)
-    use_llm = needs_llm_extraction(units)
-    if use_llm:
-        async with lock:
-            page.processing_status = "llm_extracting"
-            job.stage = "llm_extract"
-            _record_job_event(job, "llm_extract", "running")
-            await session.commit()
-    extra: list[EvidenceUnit] = []
-    if use_llm:
-        llm_text = (markdown or "").strip() or visible_copy(html)
-        extra = await _llm_units(session, page, digest, llm_text, llm_client, lock)
+    structured = hasattr(llm_client, "structure_page")
+    units = [] if structured else extract_html(html, url=url, markdown=markdown)
+    async with lock:
+        page.processing_status = "llm_extracting"
+        job.stage = "llm_extract"
+        _record_job_event(job, "llm_extract", "running")
+        await session.commit()
+    cleaned = await _clean_units(
+        session,
+        page,
+        raw_digest,
+        units,
+        llm_client,
+        lock,
+        crawl_text=(markdown or visible_copy(html)) if structured else None,
+        crawl_title=result.title or "Crawled page",
+        crawl_metadata=result.metadata,
+    )
     return await _persist_extracted(
         session,
         source,
@@ -666,10 +873,24 @@ async def _after_fetch(
         worker,
         page,
         job,
-        units + extra,
+        cleaned,
         lock,
         started,
     )
+
+
+async def _has_generated_nonfaq_aliases(
+    session: AsyncSession, page_id: UUID, live_snapshot_id: UUID
+) -> bool:
+    contaminated = await session.scalar(
+        select(KbChunk.id).where(
+            KbChunk.page_id == page_id,
+            KbChunk.snapshot_id == live_snapshot_id,
+            KbChunk.kind != "faq",
+            KbChunk.aliases != [],
+        )
+    )
+    return contaminated is not None
 
 
 def _log_fetch_failure(
@@ -739,7 +960,7 @@ async def _mark_page_unchanged(
     await session.commit()
     return {
         "fetch_url": fetch_url,
-        "digest": result.content_sha256,
+        "digest": _content_fingerprint(result.content_sha256),
         "token_estimate": 0,
         "copy_from_live": True,
         "page_id": page.id,
@@ -766,7 +987,7 @@ async def _persist_extracted(
 ) -> dict | None:
     from app.services.kb_ingest import display_locator
 
-    digest = result.content_sha256
+    digest = _content_fingerprint(result.content_sha256)
 
     async with lock:
         if not units:
@@ -830,8 +1051,11 @@ async def _persist_extracted(
             "digest": digest,
             "token_estimate": token_estimate,
             "page_id": page.id,
-            "title": _pg_safe(units[0].heading or "Untitled"),
-            "content_text": _pg_safe("\n\n".join(unit.answer_verbatim for unit in units)),
+            "title": _pg_safe(result.title or units[0].heading or "Untitled"),
+            "content_text": _pg_safe(
+                "\n\n".join(unit.answer_verbatim for unit in units if unit.enabled)
+            ),
+            "structured": any(unit.structured_text is not None for unit in units),
             "display_locator": display_locator(url) or units[0].display_locator,
             "raw_html": result.html,
             "markdown": (result.markdown or "").strip() or visible_copy(result.html),
@@ -863,6 +1087,7 @@ async def _ensure_page(session: AsyncSession, source: KbSource, url: str) -> KbP
         source_id=source.id,
         site_id=source.site_id,
         url=url,
+        citation_url=None if source.source_kind == "text" else url,
         title="Pending",
         content_text="",
         content_sha256="",
@@ -893,6 +1118,7 @@ async def _fetch_with_retry(
     fetch,
     limiter: HostLimiter,
     lock: asyncio.Lock,
+    crawler=None,
 ) -> FetchResult | None:
     settings = get_settings()
     last_code = "http"
@@ -900,7 +1126,7 @@ async def _fetch_with_retry(
     for attempt in range(1, max_attempts + 1):
         await limiter.wait_url(url)
         try:
-            result = await fetch_page(url, hosts, fetch=fetch)
+            result = await fetch_page(url, hosts, fetch=fetch, crawler=crawler)
             async with lock:
                 job.attempts = attempt
                 job.renderer = result.renderer
@@ -967,6 +1193,8 @@ def _record_job_event(
     error_code: str | None = None,
     renderer: str | None = None,
 ) -> None:
+    from app.services.kb_progress import describe_progress_event
+
     events = list(job.events or [])
     events.append(
         {
@@ -976,6 +1204,7 @@ def _record_job_event(
             "error_code": error_code,
             "renderer": renderer or job.renderer,
             "http_status": job.http_status,
+            "message": describe_progress_event(stage=stage, state=state, error_code=error_code),
         }
     )
     job.events = events[-50:]
@@ -1031,16 +1260,21 @@ async def _copy_live_chunks(
     return copied, token_total
 
 
-async def _llm_units(
+async def _clean_units(
     session: AsyncSession,
     page: KbPage,
     digest: str,
-    text: str,
+    units: list[EvidenceUnit],
     llm_client,
     lock: asyncio.Lock | None = None,
+    *,
+    crawl_text: str | None = None,
+    crawl_title: str = "",
+    crawl_metadata: dict | None = None,
 ) -> list[EvidenceUnit]:
-    settings = get_settings()
-    version = settings.kb_llm_extract_prompt_version or PROMPT_VERSION_DEFAULT
+    if crawl_text is None:
+        return apply_cleaner(units)
+    version = f"{CONTENT_FINGERPRINT_VERSION}:{getattr(llm_client, 'model', 'local')}"
     gate = lock or asyncio.Lock()
     async with gate:
         cached = await session.scalar(
@@ -1051,13 +1285,11 @@ async def _llm_units(
             )
         )
         if cached is not None:
-            return evidence_from_extraction(cached.payload, text)
-        if llm_client is None:
-            return []
-    payloads = await asyncio.gather(
-        *(llm_client.extract(window) for window in _llm_text_windows(text))
-    )
-    payload = _merge_llm_payloads(payloads)
+            restored = _units_from_payload(cached.payload)
+            if restored is not None:
+                return restored
+    structured = await llm_client.structure_page(page.url, crawl_title, crawl_text, crawl_metadata)
+    payload = _units_payload(structured.units)
     async with gate:
         session.add(
             KbPageLlmExtract(
@@ -1065,38 +1297,72 @@ async def _llm_units(
                 content_sha256=digest,
                 prompt_version=version,
                 payload=payload,
-                model=settings.haiku_model,
+                model=getattr(llm_client, "model", "local"),
+                input_tokens=structured.input_tokens,
+                output_tokens=structured.output_tokens,
+                cache_read_tokens=structured.cache_read_tokens,
             )
         )
         await session.flush()
-    return evidence_from_extraction(payload, text)
+    return structured.units
 
 
-def _llm_text_windows(text: str, limit: int = 20_000, overlap: int = 500) -> list[str]:
-    if len(text) <= limit:
-        return [text]
-    windows: list[str] = []
-    start = 0
-    while start < len(text):
-        end = min(start + limit, len(text))
-        windows.append(text[start:end])
-        if end == len(text):
-            break
-        start = end - overlap
-    return windows
+def _units_payload(units: list[EvidenceUnit]) -> dict:
+    return {
+        "units": [
+            {
+                "kind": unit.kind,
+                "heading": unit.heading,
+                "canonical_question": unit.canonical_question,
+                "answer_verbatim": unit.answer_verbatim,
+                "aliases": list(unit.aliases),
+                "topic": unit.topic,
+                "display_locator": unit.display_locator,
+                "structured_text": unit.structured_text,
+                "enabled": unit.enabled,
+                "review_note": unit.review_note,
+            }
+            for unit in units
+        ]
+    }
 
 
-def _merge_llm_payloads(payloads: list[dict]) -> dict:
-    facts: list = []
-    faqs: list = []
-    summaries: list[str] = []
-    for payload in payloads:
-        facts.extend(payload.get("facts") or [])
-        faqs.extend(payload.get("faqs") or [])
-        summary = str(payload.get("page_summary") or "").strip()
-        if summary:
-            summaries.append(summary)
-    return {"facts": facts, "faqs": faqs, "page_summary": "\n".join(summaries)}
+def _units_from_payload(payload: dict) -> list[EvidenceUnit] | None:
+    if not isinstance(payload, dict):
+        return None
+    rows = payload.get("units")
+    if not isinstance(rows, list):
+        return None
+    units: list[EvidenceUnit] = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        answer = str(row.get("answer_verbatim") or "")
+        heading = str(row.get("heading") or "")
+        if not answer:
+            continue
+        kind = str(row.get("kind") or "section")
+        if kind not in {"faq", "section", "table", "definition", "prose", "fact"}:
+            kind = "section"
+        aliases = row.get("aliases") or []
+        units.append(
+            EvidenceUnit(
+                kind=kind,  # type: ignore[arg-type]
+                heading=heading,
+                canonical_question=str(row["canonical_question"])
+                if row.get("canonical_question")
+                else None,
+                answer_verbatim=answer,
+                body_for_search=f"{row.get('canonical_question') or heading}\n{row.get('structured_text') or answer}",
+                display_locator=str(row["display_locator"]) if row.get("display_locator") else None,
+                aliases=tuple(str(item) for item in aliases if isinstance(item, str)),
+                topic=str(row["topic"]) if row.get("topic") else None,
+                structured_text=str(row["structured_text"]) if row.get("structured_text") else None,
+                enabled=bool(row.get("enabled", True)),
+                review_note=str(row["review_note"]) if row.get("review_note") else None,
+            )
+        )
+    return units
 
 
 async def _persist_chunks(
@@ -1137,10 +1403,9 @@ async def _prepare_chunks(
     settings = get_settings()
     pieces: list[TextChunk] = []
     for unit in units:
-        aliases = await generate_aliases(unit)
         pieces.extend(
             pack_chunks(
-                replace(unit, aliases=aliases or unit.aliases),
+                unit,
                 settings.chunk_target_chars,
                 settings.chunk_overlap_chars,
             )
@@ -1190,8 +1455,10 @@ def _add_chunk_row(
             topic=part.topic,
             display_locator=part.display_locator,
             body=body,
+            context_prefix=part.context_prefix,
             embedding=vector,
-            enabled=prior.enabled if prior is not None else True,
+            enabled=prior.enabled if prior is not None else part.enabled,
+            review_note=prior.review_note if prior is not None else part.review_note,
             approved=True,
             review_status="approved",
             topic_label=(prior.topic_label if prior is not None else heading) or heading,

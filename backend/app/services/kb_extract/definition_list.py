@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from lxml.etree import _Element
 
-from app.services.kb_extract.text import locator_for, tidy_text
+from app.services.kb_extract.text import locator_for, tidy_inline, tidy_text
 from app.services.kb_extract.types import EvidenceUnit
 
 
@@ -17,7 +17,7 @@ def parse_definition_lists(tree: _Element, url: str) -> list[EvidenceUnit]:
             if dt.tag != "dt" or dd.tag != "dd":
                 index += 1
                 continue
-            question = tidy_text(dt.text_content())
+            question = tidy_inline(dt.text_content())
             answer = tidy_text(dd.text_content())
             index += 2
             if not question or not answer:
