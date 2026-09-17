@@ -47,6 +47,7 @@ const easyPage = (overrides: Record<string, unknown> = {}) => ({
   url: PAGE_URL,
   title: PAGE_TITLE,
   enabled: true,
+  chunk_count: 1,
   ...overrides,
 })
 
@@ -77,7 +78,16 @@ const pageDetail = () =>
     ...easyPage(),
     skip_reason: null,
     content_text: TIMING_BODY,
-    chunks: [{ id: CHUNK_ID, ordinal: 0, heading: PAGE_TITLE, body: TIMING_BODY, enabled: true }],
+    chunks: [
+      {
+        id: CHUNK_ID,
+        ordinal: 0,
+        kind: "section",
+        heading: PAGE_TITLE,
+        body: TIMING_BODY,
+        enabled: true,
+      },
+    ],
   })
 
 const siteSourcesRoute = (url: string, init?: RequestInit) => {
@@ -144,6 +154,7 @@ const knowledgeRoute = (url: string, init?: RequestInit) => {
     return jsonOk({
       id: CHUNK_ID,
       ordinal: 0,
+      kind: "section",
       heading: PAGE_TITLE,
       body: TIMING_BODY,
       enabled: body.enabled,
@@ -171,6 +182,45 @@ export const resetEasyHold = () => {
 }
 
 export const releaseEasyHold = () => releaseEasy()
+
+export const DEMO_PAGE_TITLE = "Demo"
+
+export const demoKnowledgeFetch = async (input: RequestInfo) => {
+  const url = String(input)
+  if (url === "/api/sites") {
+    return jsonOk({
+      items: [siteRecord(SITE_ID, "demo", "Demo"), siteRecord(BG_SITE, "samplesite", "SampleSite")],
+      widget_origin: "http://widget.localhost:3000",
+    })
+  }
+  if (url === `/api/sites/${SITE_ID}/kb-sources`) {
+    return sourcesList()
+  }
+  if (url === `/api/kb-sources/${SOURCE_ID}/pages`) {
+    return jsonOk({ items: [easyPage({ title: DEMO_PAGE_TITLE })] })
+  }
+  if (url === `/api/kb-pages/${PAGE_ID}`) {
+    return jsonOk({
+      ...easyPage({ title: DEMO_PAGE_TITLE }),
+      skip_reason: null,
+      content_text: TIMING_BODY,
+      chunks: [
+        {
+          id: CHUNK_ID,
+          ordinal: 0,
+          kind: "section",
+          heading: DEMO_PAGE_TITLE,
+          body: TIMING_BODY,
+          enabled: true,
+        },
+      ],
+    })
+  }
+  if (url === `/api/sites/${BG_SITE}/kb-sources`) {
+    return jsonOk({ items: [] })
+  }
+  return { ok: false, status: 404, json: async () => ({}) }
+}
 
 const twoBrandSites = () =>
   jsonOk({
@@ -219,6 +269,7 @@ export const twoBrandFetch = async (input: RequestInfo) => {
           url: "https://sample-services.example.com/fcra",
           title: FCRA_TITLE,
           enabled: true,
+          chunk_count: 0,
         },
       ],
     })
@@ -273,3 +324,122 @@ export const diffRaceFetch = async (input: RequestInfo) => {
 }
 
 export const releaseDiffHold = () => releaseDiff()
+
+export const OTHER_SOURCE_ID = "88888888-8888-4888-8888-888888888888"
+export const OTHER_PAGE_TITLE = "Privacy Rights"
+
+export const twoSourceFetch = async (input: RequestInfo) => {
+  const url = String(input)
+  if (url === "/api/sites") {
+    return sitesList()
+  }
+  if (url === `/api/sites/${SITE_ID}/kb-sources`) {
+    return jsonOk({
+      items: [
+        easySource(),
+        easySource({
+          id: OTHER_SOURCE_ID,
+          start_url: "https://sample-data.example.com/",
+          display_name: "Sample Data Services",
+        }),
+      ],
+    })
+  }
+  if (url === `/api/kb-sources/${SOURCE_ID}/pages`) {
+    return sourcePages()
+  }
+  if (url === `/api/kb-sources/${OTHER_SOURCE_ID}/pages`) {
+    return jsonOk({
+      items: [
+        easyPage({
+          id: "99999999-9999-4999-8999-999999999999",
+          source_id: OTHER_SOURCE_ID,
+          url: "https://sample-data.example.com/privacy",
+          title: OTHER_PAGE_TITLE,
+        }),
+      ],
+    })
+  }
+  if (url === `/api/kb-pages/${PAGE_ID}`) {
+    return pageDetail()
+  }
+  return { ok: false, status: 404, json: async () => ({}) }
+}
+
+export const GENERAL_PAGE_ID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+export const HOME_PAGE_ID = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
+export const MAIL_PAGE_ID = "cccccccc-cccc-4ccc-8ccc-cccccccccccc"
+export const CONTACT_BODY = "Phone: 202-555-0101. Email: inquiries@sample-data.example.com"
+
+export const multiPageFetch = async (input: RequestInfo) => {
+  const url = String(input)
+  if (url === "/api/sites") {
+    return jsonOk({
+      items: [siteRecord(SITE_ID, "sampledata", "Sample Data Services")],
+      widget_origin: "http://widget.localhost:3000",
+    })
+  }
+  if (url === `/api/sites/${SITE_ID}/kb-sources`) {
+    return jsonOk({
+      items: [
+        easySource({
+          start_url: "https://sample-data.example.com/",
+          display_name: "Sample Data Services",
+          page_count: 2,
+        }),
+      ],
+    })
+  }
+  if (url === `/api/kb-sources/${SOURCE_ID}/pages`) {
+    return jsonOk({
+      items: [
+        easyPage({
+          id: GENERAL_PAGE_ID,
+          url: "https://sample-data.example.com/",
+          title: "General",
+          tab: "general",
+          chunk_count: 1,
+        }),
+        easyPage({
+          id: HOME_PAGE_ID,
+          url: "https://sample-data.example.com/",
+          title: "Home",
+          tab: "page",
+          chunk_count: 0,
+        }),
+        easyPage({
+          id: MAIL_PAGE_ID,
+          url: "https://sample-data.example.com/samplemail",
+          title: "SampleMail",
+          tab: "page",
+          chunk_count: 1,
+        }),
+      ],
+    })
+  }
+  if (url === `/api/kb-pages/${GENERAL_PAGE_ID}`) {
+    return jsonOk({
+      id: GENERAL_PAGE_ID,
+      source_id: SOURCE_ID,
+      url: "https://sample-data.example.com/",
+      title: "General",
+      tab: "general",
+      enabled: true,
+      chunk_count: 1,
+      skip_reason: null,
+      content_text: CONTACT_BODY,
+      chunks: [
+        {
+          id: CHUNK_ID,
+          ordinal: 0,
+          kind: "section",
+          heading: "Contact",
+          body: CONTACT_BODY,
+          enabled: true,
+          origin_urls: ["https://sample-data.example.com/", "https://sample-data.example.com/samplemail"],
+        },
+      ],
+    })
+  }
+  return { ok: false, status: 404, json: async () => ({}) }
+}

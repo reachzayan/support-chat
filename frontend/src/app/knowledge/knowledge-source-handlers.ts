@@ -26,6 +26,8 @@ export const useKnowledgeSourceHandlers = (
 ) => {
   const {
     handleAdd,
+    handleAddText,
+    busy: addBusy,
     error: addError,
     clearError,
   } = useKnowledgeAddHandler(isAdmin, siteId, urls, setUrls, setSources, setSourceId)
@@ -39,7 +41,9 @@ export const useKnowledgeSourceHandlers = (
   const handleSelectSource = useCallback(
     (source: KbSourceRecord) => {
       setSourceId(source.id)
-      setPageDetail(null)
+      setPageDetail((current) =>
+        current !== null && current.source_id === source.id ? current : null,
+      )
     },
     [setPageDetail, setSourceId],
   )
@@ -81,6 +85,8 @@ export const useKnowledgeSourceHandlers = (
   return {
     handleUrls,
     handleAdd,
+    handleAddText,
+    addBusy,
     addError,
     handleSelectSource,
     handleSync,

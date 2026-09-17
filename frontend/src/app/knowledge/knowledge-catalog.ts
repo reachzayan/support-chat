@@ -1,34 +1,29 @@
 "use client"
 
-import { useCallback, useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useRef, useState, type Dispatch, type SetStateAction } from "react"
 
 import {
   staffRead,
   type KbPageDetail,
   type KbPageRecord,
-  type KbProgressRecord,
   type KbSourceRecord,
   type SiteRecord,
 } from "@/components/admin/staff-api"
 
 import { useKnowledgePageHandlers } from "./knowledge-page-handlers"
+import { resolveKnowledgeSiteId } from "./knowledge-site"
 import { useKnowledgeSourceHandlers } from "./knowledge-source-handlers"
 
-const KB_SOURCE_POLL_MS = 2_000
-
-const sourceIngestPending = (sources: KbSourceRecord[]) =>
-  sources.some((row) => {
-    if (row.status === "queued" || row.status === "running") {
-      return true
-    }
-    const stage = row.stage
-    return (
-      stage === "discovering" ||
-      stage === "processing" ||
-      stage === "validating" ||
-      stage === "promoting"
-    )
-  })
+const sourceFingerprint = (row: KbSourceRecord) =>
+  [
+    row.id,
+    row.page_count,
+    row.status,
+    row.stage ?? "",
+    row.pages_embedded ?? "",
+    row.last_run_finished_at ?? "",
+    row.snapshot_state ?? "",
+  ].join(":")
 
 const useKnowledgeSites = () => {
   const [sites, setSites] = useState<SiteRecord[]>([])
@@ -56,52 +51,59 @@ const useKnowledgeSites = () => {
   return { sites, siteId, handleSite }
 }
 
+const applySourceList = (
+  items: KbSourceRecord[],
+  setSources: (items: KbSourceRecord[]) => void,
+  setSourceId: Dispatch<SetStateAction<string | null>>,
+) => {
+  setSources(items)
+  setSourceId((current) => {
+    if (current !== null && items.some((row) => row.id === current)) {
+      return current
+    }
+    return items[0]?.id ?? null
+  })
+}
+
 const useKnowledgeSources = (siteId: string) => {
   const [sources, setSources] = useState<KbSourceRecord[]>([])
   const [sourceId, setSourceId] = useState<string | null>(null)
+  const siteIdRef = useRef(siteId)
+
+  const loadSources = useCallback(async () => {
+    const currentSiteId = siteIdRef.current
+    if (!currentSiteId) {
+      return
+    }
+    const response = await staffRead(`/api/sites/${currentSiteId}/kb-sources`)
+    if (!response.ok || siteIdRef.current !== currentSiteId) {
+      return
+    }
+    const payload = (await response.json()) as { items: KbSourceRecord[] }
+    if (siteIdRef.current !== currentSiteId) {
+      return
+    }
+    applySourceList(payload.items, setSources, setSourceId)
+  }, [])
 
   useEffect(() => {
+    siteIdRef.current = siteId
     if (!siteId) {
       return
     }
-    let ignore = false
-    const load = async () => {
-      const response = await staffRead(`/api/sites/${siteId}/kb-sources`)
-      if (ignore || !response.ok) {
-        return
-      }
-      const payload = (await response.json()) as { items: KbSourceRecord[] }
-      setSources(payload.items)
-      if (payload.items[0]) {
-        setSourceId(payload.items[0].id)
-      }
-    }
-    void load()
-    return () => {
-      ignore = true
-    }
-  }, [siteId])
+    void loadSources()
+  }, [loadSources, siteId])
 
-  const ingestPending = sourceIngestPending(sources)
   useEffect(() => {
-    if (!siteId || !ingestPending) {
-      return
-    }
-    let ignore = false
-    const load = async () => {
-      const response = await staffRead(`/api/sites/${siteId}/kb-sources`)
-      if (ignore || !response.ok) {
+    const onVisible = () => {
+      if (document.visibilityState !== "visible") {
         return
       }
-      const payload = (await response.json()) as { items: KbSourceRecord[] }
-      setSources(payload.items)
+      void loadSources()
     }
-    const timer = window.setInterval(() => void load(), KB_SOURCE_POLL_MS)
-    return () => {
-      ignore = true
-      window.clearInterval(timer)
-    }
-  }, [ingestPending, siteId])
+    document.addEventListener("visibilitychange", onVisible)
+    return () => document.removeEventListener("visibilitychange", onVisible)
+  }, [loadSources])
 
   const resetForSite = useCallback(() => {
     setSources([])
@@ -111,15 +113,12 @@ const useKnowledgeSources = (siteId: string) => {
   return { sources, sourceId, setSources, setSourceId, resetForSite }
 }
 
-const useKnowledgePages = (sources: KbSourceRecord[], sourceId: string | null) => {
+const useKnowledgePages = (sources: KbSourceRecord[]) => {
   const [pages, setPages] = useState<KbPageRecord[]>([])
   const [pageDetail, setPageDetail] = useState<KbPageDetail | null>(null)
   const selectedPageIdRef = useRef<string | null>(null)
   const sourcesRef = useRef(sources)
-  const sourceIdRef = useRef(sourceId)
-  const pageRefreshKey = `${sourceId ?? ""}|${sources
-    .map((row) => `${row.id}:${row.page_count}:${row.status}`)
-    .join("|")}`
+  const pageRefreshKey = sources.map(sourceFingerprint).join("|")
 
   useEffect(() => {
     selectedPageIdRef.current = pageDetail?.id ?? null
@@ -127,18 +126,13 @@ const useKnowledgePages = (sources: KbSourceRecord[], sourceId: string | null) =
 
   useEffect(() => {
     sourcesRef.current = sources
-    sourceIdRef.current = sourceId
-  }, [sourceId, sources])
+  }, [sources])
 
   useEffect(() => {
-    const selectedSourceId = sourceIdRef.current
     const allSources = sourcesRef.current
-    const scopedSources = selectedSourceId
-      ? allSources.filter((row) => row.id === selectedSourceId)
-      : allSources
     let ignore = false
     const load = async () => {
-      if (pageRefreshKey === "|" || scopedSources.length === 0) {
+      if (pageRefreshKey === "" || allSources.length === 0) {
         if (!ignore) {
           setPages([])
           setPageDetail(null)
@@ -146,7 +140,7 @@ const useKnowledgePages = (sources: KbSourceRecord[], sourceId: string | null) =
         return
       }
       const lists = await Promise.all(
-        scopedSources.map(async (source) => {
+        allSources.map(async (source) => {
           const response = await staffRead(`/api/kb-sources/${source.id}/pages`)
           if (!response.ok) {
             return [] as KbPageRecord[]
@@ -186,56 +180,20 @@ const useKnowledgePages = (sources: KbSourceRecord[], sourceId: string | null) =
   return { pages, pageDetail, setPages, setPageDetail, resetPages }
 }
 
-const useKnowledgeProgress = (sourceId: string | null, sources: KbSourceRecord[]) => {
-  const [progress, setProgress] = useState<KbProgressRecord | null>(null)
-  const source = sources.find((row) => row.id === sourceId)
-  const selectedSourceId = source?.id
-  const status = source?.status
-
-  useEffect(() => {
-    if (!selectedSourceId) {
-      return
-    }
-    let ignore = false
-    const load = async () => {
-      const response = await staffRead(`/api/kb-sources/${selectedSourceId}/progress`)
-      if (!ignore && response.ok) {
-        setProgress((await response.json()) as KbProgressRecord)
-      }
-    }
-    void load()
-    const timer =
-      status === "queued" || status === "running"
-        ? window.setInterval(() => void load(), KB_SOURCE_POLL_MS)
-        : null
-    return () => {
-      ignore = true
-      if (timer !== null) {
-        window.clearInterval(timer)
-      }
-    }
-  }, [selectedSourceId, status])
-
-  return selectedSourceId ? progress : null
-}
-
 export const useKnowledgeCatalog = (isAdmin: boolean) => {
   const [urls, setUrls] = useState("")
   const { sites, siteId, handleSite: selectSite } = useKnowledgeSites()
-  const { sources, sourceId, setSources, setSourceId, resetForSite } = useKnowledgeSources(siteId)
-  const { pages, pageDetail, setPages, setPageDetail, resetPages } = useKnowledgePages(
-    sources,
-    sourceId,
-  )
-  const progress = useKnowledgeProgress(sourceId, sources)
-
+  const { sources, sourceId, setSources, setSourceId } = useKnowledgeSources(siteId)
+  const { pages, pageDetail, setPages, setPageDetail } = useKnowledgePages(sources)
   const handleSite = useCallback(
     (nextSiteId: string) => {
-      selectSite(nextSiteId)
-      resetForSite()
-      resetPages()
+      const resolved = resolveKnowledgeSiteId(sites, nextSiteId, siteId)
+      if (resolved === null) {
+        return
+      }
+      selectSite(resolved)
     },
-    [resetForSite, resetPages, selectSite],
+    [selectSite, siteId, sites],
   )
 
   const sourceHandlers = useKnowledgeSourceHandlers(
@@ -256,7 +214,6 @@ export const useKnowledgeCatalog = (isAdmin: boolean) => {
     sourceId,
     pages,
     pageDetail,
-    progress,
     urls,
     setSources,
     handleSite,
