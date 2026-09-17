@@ -4,11 +4,12 @@ from concurrent.futures import ThreadPoolExecutor
 import pytest
 from fastapi.testclient import TestClient
 
-from app.chat.outcome_copy import KEEP_HELPING_LINE
+from app.chat.outcome_copy import keep_helping_line
 from tests.ws_helpers import (
     AGENT_HELP,
     AGENT_MESSAGE_ID,
     ALEX_NAME,
+    DEMO_NAME,
     DEMO_PUBLIC_KEY,
     DEMO_SITE_KEY,
     DOT_QUESTION,
@@ -335,16 +336,17 @@ def test_visitor_escalate_frame_stays_with_the_bot(
         )
 
         visitor.send_json({"v": 1, "type": "escalate"})
+        keep_helping = keep_helping_line(DEMO_NAME)
         offered = collect_until(
             visitor,
             lambda frames: any(
-                frame.get("type") == "message" and frame.get("body") == KEEP_HELPING_LINE
+                frame.get("type") == "message" and frame.get("body") == keep_helping
                 for frame in frames
             ),
         )
 
     assert conversation_state(conversation_id) == "bot"
-    assert message_count(conversation_id, role="system", body=KEEP_HELPING_LINE) == 1
+    assert message_count(conversation_id, role="system", body=keep_helping) == 1
     assert all(frame.get("state") != "queued" for frame in frames_of_type(offered, "state"))
 
 

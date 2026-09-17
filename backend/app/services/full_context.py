@@ -97,7 +97,7 @@ async def load_live_units(session: AsyncSession, snapshot_ids: list[UUID]) -> li
                 heading=chunk.heading,
                 canonical_question=chunk.canonical_question,
                 answer_verbatim=chunk.answer_verbatim,
-                url=page.url,
+                url=page.public_url,
                 title=page.title,
                 display_locator=chunk.display_locator or page.display_locator,
                 legal_sensitive=bool(chunk.legal_sensitive),

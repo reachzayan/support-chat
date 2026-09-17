@@ -16,10 +16,12 @@ from tests.ws_helpers import (
     DEMO_PRIVACY,
     DEMO_PUBLIC_KEY,
     DEMO_SITE_KEY,
+    DOT_QUESTION,
     EASY_PUBLIC_KEY,
     EASY_SITE_KEY,
     EVIL_ORIGIN,
     HOST_ORIGIN,
+    PRECHAT_SUBMISSION_ID,
     STAFF_ORIGIN,
     WIDGET_ORIGIN,
     auth_agent,
@@ -63,6 +65,57 @@ def test_allowed_host_bootstrap_returns_widget_config_and_scoped_token(
     assert "origin" in response.headers["vary"].lower()
     assert response.headers["cache-control"] == "no-store"
     assert visitor_count() == 1
+
+
+def test_new_bootstrap_snapshot_is_empty_prechat(client: TestClient) -> None:
+    seed_demo_world()
+
+    body = post_bootstrap(client).json()
+
+    assert body["conversation"] == {
+        "state": "prechat",
+        "assigned_agent": None,
+        "messages": [],
+    }
+
+
+def test_resume_bootstrap_snapshot_includes_the_visitor_line(client: TestClient) -> None:
+    seed_demo_world()
+    first = post_bootstrap(client)
+    resume = first.json()["resume_token"]
+    token = first.json()["bootstrap_token"]
+
+    with client.websocket_connect("/ws/visitor", headers={"Origin": WIDGET_ORIGIN}) as visitor:
+        auth_visitor(visitor, token)
+        collect_until(visitor, lambda frames: any(frame.get("type") == "state" for frame in frames))
+        visitor.send_json(
+            {
+                "v": 1,
+                "type": "prechat",
+                "submission_id": PRECHAT_SUBMISSION_ID,
+                "name": "Ada Lopez",
+                "email": "ada@example.com",
+                "phone": "",
+                "inquiry_type": "results",
+                "message": DOT_QUESTION,
+            }
+        )
+        collect_until(
+            visitor,
+            lambda frames: any(frame.get("type") == "prechat_accepted" for frame in frames),
+        )
+
+    body = post_bootstrap(client, bootstrap_payload(resume_token=resume)).json()
+    conversation = body["conversation"]
+    bodies = [
+        frame["body"]
+        for frame in conversation["messages"]
+        if frame.get("type") == "message" and frame.get("role") == "visitor"
+    ]
+
+    assert conversation["state"] == "bot"
+    assert conversation["assigned_agent"] is None
+    assert bodies == [DOT_QUESTION]
 
 
 def test_evil_missing_and_null_origin_create_zero_visitors(client: TestClient) -> None:

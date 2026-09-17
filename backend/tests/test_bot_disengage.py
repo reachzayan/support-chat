@@ -13,7 +13,10 @@ from tests.ws_helpers import HOST_ORIGIN, conversation_state, message_count
 BOUNDARY_INJECTION = (
     "I can help with screening and compliance questions. What would you like to know?"
 )
-BOUNDARY_ABUSE = "I’m here to help with screening and compliance questions. We can continue when the conversation stays respectful."  # noqa: RUF001
+BOUNDARY_ABUSE = (
+    "I'm here to help with screening and compliance questions. "
+    "We can continue when the conversation stays respectful."
+)
 
 
 async def _visitor_turn(session, site, body: str):

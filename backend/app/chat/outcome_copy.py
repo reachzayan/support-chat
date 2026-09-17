@@ -16,6 +16,13 @@ CLARIFY_SCOPE_LINE = "What would you like to know about screening or compliance?
 GREET_LINE = "Hi. I can help with screening and compliance questions. What do you need?"
 THANKS_LINE = "You're welcome. Anything else on screening or compliance?"
 BYE_LINE = "Take care. Come back if you have screening or compliance questions."
+PRODUCTS_CLARIFY_LINE = "What would you like to know about our products or services?"
+PRODUCTS_GREET_LINE = "Hi. How can we help you today?"
+PRODUCTS_THANKS_LINE = "You're welcome. Anything else I can help with?"
+PRODUCTS_BYE_LINE = "Take care. Come back if you have more questions."
+PRODUCTS_KEEP_HELPING_LINE = (
+    "I can help with questions about our products and services. What do you need?"
+)
 DISENGAGE_LINE = "Sorry, I can't engage in this. If you don't have anymore questions I am going to close this chat now"
 OFF_TOPIC_LINE = "I can't help with that here."
 
@@ -59,6 +66,50 @@ _THANKS_TOKENS = frozenset({"thanks", "thank", "cheers", "np"})
 _BYE_TOKENS = frozenset({"bye", "goodbye", "cya", "later", "goodnight"})
 
 
+def uses_screening_scope(site_name: str) -> bool:
+    text = (site_name or "").casefold()
+    return "samplesite" in text or "screening" in text or "background check" in text
+
+
+def clarify_scope_line(site_name: str = "") -> str:
+    if uses_screening_scope(site_name):
+        return CLARIFY_SCOPE_LINE
+    return PRODUCTS_CLARIFY_LINE
+
+
+def greet_line(site_name: str = "") -> str:
+    if uses_screening_scope(site_name):
+        return GREET_LINE
+    return PRODUCTS_GREET_LINE
+
+
+def thanks_line(site_name: str = "") -> str:
+    if uses_screening_scope(site_name):
+        return THANKS_LINE
+    return PRODUCTS_THANKS_LINE
+
+
+def keep_helping_line(site_name: str = "") -> str:
+    if uses_screening_scope(site_name):
+        return KEEP_HELPING_LINE
+    return PRODUCTS_KEEP_HELPING_LINE
+
+
+def injection_boundary_line(site_name: str = "") -> str:
+    if uses_screening_scope(site_name):
+        return "I can help with screening and compliance questions. What would you like to know?"
+    return "I can help with questions about our products and services. What would you like to know?"
+
+
+def abuse_boundary_line(site_name: str = "") -> str:
+    if uses_screening_scope(site_name):
+        return (
+            "I'm here to help with screening and compliance questions. "
+            "We can continue when the conversation stays respectful."
+        )
+    return "I'm here to help. We can continue when the conversation stays respectful."
+
+
 def contact_line(contact_info: list[str]) -> str:
     items = [item for item in contact_info if item]
     if len(items) <= 1:
@@ -68,25 +119,28 @@ def contact_line(contact_info: list[str]) -> str:
     return f"You can also reach us at {joined}."
 
 
-def bye_line(contact_info: list[str] | None = None) -> str:
+def bye_line(contact_info: list[str] | None = None, *, site_name: str = "") -> str:
+    base = BYE_LINE if uses_screening_scope(site_name) else PRODUCTS_BYE_LINE
     items = [item for item in (contact_info or []) if item]
     if not items:
-        return BYE_LINE
-    return f"{BYE_LINE} {contact_line(items)}"
+        return base
+    return f"{base} {contact_line(items)}"
 
 
-def chitchat_reply(text: str, contact_info: list[str] | None = None) -> str | None:
+def chitchat_reply(
+    text: str, contact_info: list[str] | None = None, *, site_name: str = ""
+) -> str | None:
     from app.services.kb_tokens import tokenize
 
     tokens = set(tokenize(text))
     if not tokens:
         return None
     if tokens <= _GREET_TOKENS:
-        return GREET_LINE
+        return greet_line(site_name)
     if tokens <= _THANKS_TOKENS:
-        return THANKS_LINE
+        return thanks_line(site_name)
     if tokens <= _BYE_TOKENS:
-        return bye_line(contact_info)
+        return bye_line(contact_info, site_name=site_name)
     return None
 
 

@@ -32,6 +32,27 @@ async def _send_bot_turn(session, site, body: str, responder=None):
     return conversation.id, service
 
 
+async def test_greeting_on_sampledata_does_not_ask_about_screening(migrated_db) -> None:
+    from tests.bot_fixtures import insert_site
+
+    responder = RecordingResponder()
+    async with session_maker()() as session:
+        site = await insert_site(session, "sampledata", "Sample Data Services")
+        conversation_id, _service = await _send_bot_turn(session, site, "hi", responder)
+
+    assert conversation_state(conversation_id) == "bot"
+    assert message_count(conversation_id, role="system", body=GREET) == 0
+    assert (
+        message_count(
+            conversation_id,
+            role="system",
+            body="Hi. How can we help you today?",
+        )
+        == 1
+    )
+    assert responder.calls == []
+
+
 async def test_greeting_replies_instead_of_going_silent_or_claiming_no_knowledge(
     migrated_db,
 ) -> None:
