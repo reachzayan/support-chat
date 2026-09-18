@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from app.services.kb_extract.text import locator_for, tidy_text
+from app.services.kb_extract.text import locator_for, tidy_inline, tidy_text
 from app.services.kb_extract.types import EvidenceUnit
 
 
@@ -24,7 +24,7 @@ def parse_markdown(markdown: str, url: str) -> list[EvidenceUnit]:
 
 def _flush(units: list[EvidenceUnit], heading: str, parts: list[str], url: str) -> None:
     body = tidy_text("\n".join(parts))
-    title = tidy_text(heading) or "Untitled"
+    title = tidy_inline(heading) or "Untitled"
     if not body:
         return
     units.append(

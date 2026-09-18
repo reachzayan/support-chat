@@ -1,3 +1,4 @@
+import type { ConversationSnapshot } from "../src/lib/postmessage"
 import { requestBootstrap, type PublicWidgetConfig } from "./bootstrap"
 import { acceptWidgetFrame, createPanel, sendBootstrap, sendContext } from "./iframe"
 import { hideHostError, mountLauncher, showHostError } from "./launcher"
@@ -17,7 +18,10 @@ type Runtime = {
   pendingResume: string | null
   bootstrapToken: string | null
   widget: PublicWidgetConfig | null
+  conversation: ConversationSnapshot | undefined
   opening: boolean
+  panelPainted: boolean
+  visitorActivated: boolean
   bootstrapAcked: boolean
   retryTimer: ReturnType<typeof setTimeout> | null
   hideTimer: ReturnType<typeof setTimeout> | null
@@ -53,6 +57,10 @@ const clearHideTimer = (runtime: Runtime) => {
   }
 }
 
+const setLauncherBusy = (runtime: Runtime, busy: boolean) => {
+  runtime.launcher.setAttribute("aria-busy", busy ? "true" : "false")
+}
+
 const bootstrapFrame = (runtime: Runtime) => {
   if (runtime.bootstrapToken === null || runtime.widget === null) {
     return null
@@ -64,6 +72,7 @@ const bootstrapFrame = (runtime: Runtime) => {
     page_url: "",
     page_title: "",
     referrer: "",
+    ...(runtime.conversation === undefined ? {} : { conversation: runtime.conversation }),
   }
 }
 
@@ -109,9 +118,11 @@ const sendBootstrapWithRetry = (runtime: Runtime) => {
 
 const hidePanel = (runtime: Runtime) => {
   clearHideTimer(runtime)
+  setLauncherBusy(runtime, false)
   if (runtime.iframe !== null) {
     runtime.iframe.style.opacity = "0"
     runtime.iframe.style.transform = "translateY(16px) scale(0.96)"
+    runtime.iframe.style.pointerEvents = "none"
     const delay = reducedMotionDelay(runtime.win)
     runtime.hideTimer = setTimeout(() => {
       runtime.hideTimer = null
@@ -126,8 +137,10 @@ const hidePanel = (runtime: Runtime) => {
 
 const showPanel = (runtime: Runtime) => {
   clearHideTimer(runtime)
+  setLauncherBusy(runtime, false)
   if (runtime.iframe !== null) {
     runtime.iframe.hidden = false
+    runtime.iframe.style.pointerEvents = "auto"
     runtime.win.requestAnimationFrame(() => {
       if (runtime.iframe === null) {
         return
@@ -146,7 +159,11 @@ const resetPanel = (runtime: Runtime) => {
   runtime.pendingResume = null
   runtime.bootstrapToken = null
   runtime.widget = null
+  runtime.conversation = undefined
   runtime.bootstrapAcked = false
+  runtime.panelPainted = false
+  runtime.visitorActivated = false
+  setLauncherBusy(runtime, false)
   if (runtime.iframe !== null) {
     runtime.iframe.remove()
     runtime.iframe = null
@@ -155,42 +172,59 @@ const resetPanel = (runtime: Runtime) => {
   runtime.launcher.focus()
 }
 
+const persistResumeIfReady = (runtime: Runtime) => {
+  if (!runtime.visitorActivated || runtime.pendingResume === null) {
+    return
+  }
+  writeResumeToken(runtime.config.siteKey, runtime.pendingResume)
+}
+
 const persistActivated = (runtime: Runtime) => {
+  runtime.visitorActivated = true
   runtime.bootstrapAcked = true
   clearRetryTimer(runtime)
-  if (runtime.pendingResume !== null) {
-    writeResumeToken(runtime.config.siteKey, runtime.pendingResume)
+  persistResumeIfReady(runtime)
+}
+
+const warmPanel = (runtime: Runtime) => {
+  if (runtime.iframe !== null) {
+    return
   }
+  runtime.iframe = createPanel(
+    runtime.doc,
+    runtime.widgetOrigin,
+    runtime.config.siteKey,
+    runtime.config.publicKey,
+    originFromHref(runtime.win.location.href),
+  )
 }
 
 const applyBootstrap = (
   runtime: Runtime,
   token: string,
   widget: PublicWidgetConfig,
-  resume?: string,
+  resume: string | undefined,
+  conversation: ConversationSnapshot | undefined,
 ) => {
   runtime.bootstrapToken = token
   runtime.widget = widget
+  runtime.conversation = conversation
   runtime.bootstrapAcked = false
   if (resume !== undefined) {
     runtime.pendingResume = resume
   }
-  if (runtime.iframe === null) {
-    runtime.iframe = createPanel(
-      runtime.doc,
-      runtime.widgetOrigin,
-      runtime.config.siteKey,
-      runtime.config.publicKey,
-      originFromHref(runtime.win.location.href),
-    )
-  }
-  showPanel(runtime)
+  warmPanel(runtime)
   hideHostError(runtime.doc)
+  persistResumeIfReady(runtime)
 }
 
 const handleHostMessage = (runtime: Runtime, event: MessageEvent) => {
   acceptWidgetFrame(panelState(runtime), event, {
     onReady: () => sendBootstrapWithRetry(runtime),
+    onPainted: () => {
+      runtime.panelPainted = true
+      showPanel(runtime)
+    },
     onActivated: () => persistActivated(runtime),
     onRebootstrap: () => {
       void runBootstrap(runtime)
@@ -216,22 +250,41 @@ const runBootstrap = async (runtime: Runtime) => {
   )
   runtime.opening = false
   if (result === null) {
+    setLauncherBusy(runtime, false)
     showHostError(runtime.doc, () => {
       void runBootstrap(runtime)
     })
     return
   }
-  applyBootstrap(runtime, result.bootstrap_token, result.widget, result.resume_token)
+  applyBootstrap(
+    runtime,
+    result.bootstrap_token,
+    result.widget,
+    result.resume_token,
+    result.conversation,
+  )
   sendBootstrapWithRetry(runtime)
 }
 
 const handleOpen = (runtime: Runtime) => {
   hideHostError(runtime.doc)
-  if (runtime.iframe !== null) {
+  if (runtime.iframe !== null && runtime.panelPainted) {
     showPanel(runtime)
     return
   }
+  setLauncherBusy(runtime, true)
+  warmPanel(runtime)
   void runBootstrap(runtime)
+}
+
+const preconnectWidget = (doc: Document, widgetOrigin: string) => {
+  if (doc.querySelector(`link[rel="preconnect"][href="${widgetOrigin}"]`) !== null) {
+    return
+  }
+  const link = doc.createElement("link")
+  link.rel = "preconnect"
+  link.setAttribute("href", widgetOrigin)
+  doc.head.appendChild(link)
 }
 
 export const installSupportChat = (win: Window, doc: Document, script: HTMLScriptElement | null) => {
@@ -250,6 +303,7 @@ export const installSupportChat = (win: Window, doc: Document, script: HTMLScrip
     return
   }
   win.__supportchatInstalled = true
+  preconnectWidget(doc, widgetOrigin)
   const runtime: Runtime = {
     win,
     doc,
@@ -260,12 +314,17 @@ export const installSupportChat = (win: Window, doc: Document, script: HTMLScrip
     pendingResume: null,
     bootstrapToken: null,
     widget: null,
+    conversation: undefined,
     opening: false,
+    panelPainted: false,
+    visitorActivated: false,
     bootstrapAcked: false,
     retryTimer: null,
     hideTimer: null,
   }
   runtime.launcher = mountLauncher(doc, () => handleOpen(runtime))
+  runtime.launcher.addEventListener("pointerenter", () => warmPanel(runtime))
+  runtime.launcher.addEventListener("focus", () => warmPanel(runtime))
   win.addEventListener("message", (event: MessageEvent) => handleHostMessage(runtime, event))
   watchNavigation(win, () => {
     sendContext(panelState(runtime), win, doc)

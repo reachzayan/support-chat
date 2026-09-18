@@ -140,3 +140,40 @@ describe("transcript idle close warning", () => {
     expect(screen.queryByText(IDLE_WARNING)).not.toBeInTheDocument()
   })
 })
+
+const CITATION_LINES = [
+  {
+    id: 4,
+    role: "bot" as const,
+    body: "SampleMail verifies every address before mailing.",
+    source_urls: ["https://sample-data.example.com/samplemail"],
+    citations: [
+      {
+        source_urls: ["https://sample-data.example.com/samplemail"],
+        source_title: "SampleMail",
+        cited_text: "SampleMail verifies every address before the piece enters the mailstream.",
+      },
+    ],
+  },
+]
+
+describe("transcript citations", () => {
+  beforeEach(() => {
+    Object.defineProperty(HTMLElement.prototype, "scrollIntoView", {
+      configurable: true,
+      value: vi.fn(),
+    })
+  })
+
+  test("labels a page citation with the page title and does not quote the passage", () => {
+    renderWithProviders(<Transcript lines={CITATION_LINES} />)
+
+    expect(screen.getByRole("button", { name: "SampleMail: SampleMail" })).toBeInTheDocument()
+    expect(screen.queryByText("Source 1")).not.toBeInTheDocument()
+    expect(
+      screen.queryByText(
+        "“SampleMail verifies every address before the piece enters the mailstream.”",
+      ),
+    ).not.toBeInTheDocument()
+  })
+})

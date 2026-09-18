@@ -7,6 +7,7 @@ import structlog
 from fastapi import WebSocket
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.chat.display_citations import visitor_citation_payloads
 from app.db import session_maker
 from app.models.conversation import Conversation
 from app.models.message import Message
@@ -293,6 +294,13 @@ def message_frame(message: Message) -> dict[str, Any]:
     elif message.source_article_ids is not None:
         source_ids = [str(item) for item in message.source_article_ids]
     created = message.created_at.isoformat() if message.created_at is not None else ""
+    chips = visitor_citation_payloads(
+        citations=list(message.citations or []),
+        source_urls=list(message.source_urls) if message.source_urls is not None else None,
+        source_title=message.source_title,
+    )
+    source_urls = [str(chip["source_url"]) for chip in chips if chip["source_url"]]
+    source_title = chips[0]["source_title"] if chips else message.source_title
     return {
         "v": 1,
         "type": "message",
@@ -306,28 +314,13 @@ def message_frame(message: Message) -> dict[str, Any]:
             if message.source_chunk_ids is not None
             else None
         ),
-        "source_urls": list(message.source_urls) if message.source_urls is not None else None,
-        "display_locator": message.display_locator,
-        "source_title": message.source_title,
+        "source_urls": source_urls or None,
+        "display_locator": None,
+        "source_title": source_title,
         "system_reason": message.system_reason,
         "response_outcome": message.response_outcome,
         "reason_code": message.response_reason_code,
-        "citations": [
-            {
-                "chunk_id": str(citation.chunk_id) if citation.chunk_id is not None else None,
-                "snapshot_id": (
-                    str(citation.snapshot_id) if citation.snapshot_id is not None else None
-                ),
-                "response_start": citation.response_start,
-                "response_end": citation.response_end,
-                "source_start": citation.source_start,
-                "source_end": citation.source_end,
-                "cited_text": citation.cited_text,
-                "source_title": citation.source_title,
-                "source_url": citation.source_url,
-            }
-            for citation in message.citations
-        ],
+        "citations": chips,
         "created_at": created,
     }
 

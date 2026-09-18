@@ -1,3 +1,5 @@
+import { parseConversationSnapshot, type ConversationSnapshot } from "../src/lib/postmessage"
+
 export type PublicWidgetConfig = {
   name: string
   greeting: string
@@ -11,6 +13,7 @@ export type BootstrapResult = {
   widget: PublicWidgetConfig
   bootstrap_token: string
   resume_token?: string
+  conversation?: ConversationSnapshot
 }
 
 const isRecord = (value: unknown): value is Record<string, unknown> => {
@@ -52,7 +55,13 @@ export const parseBootstrapResult = (value: unknown): BootstrapResult | null => 
     return null
   }
   const resume = typeof value.resume_token === "string" ? { resume_token: value.resume_token } : {}
-  return { widget, bootstrap_token: value.bootstrap_token, ...resume }
+  const conversation = parseConversationSnapshot(value.conversation)
+  return {
+    widget,
+    bootstrap_token: value.bootstrap_token,
+    ...resume,
+    ...(conversation === undefined ? {} : { conversation }),
+  }
 }
 
 export const requestBootstrap = async (

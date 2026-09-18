@@ -33,7 +33,7 @@ async def test_routing_evals_do_not_queue_off_topic_or_skip_specialist(migrated_
             if not verdict.passed:
                 failed.append(f"{case.id}: {', '.join(verdict.failures)}")
         assert failed == []
-        assert len(responder.calls) == 10
+        assert responder.calls == []
 
 
 async def test_model_redirects_unrelated_question_without_specialist_offer(migrated_db) -> None:
@@ -65,4 +65,4 @@ async def test_model_redirects_unrelated_question_without_specialist_offer(migra
     assert observed.body != WAITING_LINE
     assert observed.system_reason == "clarify"
     assert verdict.passed is True
-    assert len(responder.calls) == 1
+    assert responder.calls == []

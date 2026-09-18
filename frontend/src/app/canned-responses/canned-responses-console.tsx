@@ -35,6 +35,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
+import { FieldError } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import {
   Select,
@@ -411,9 +412,7 @@ export const CannedResponsesConsole = () => {
         />
         <main id="main-content" className="flex flex-1 items-center justify-center p-6">
           <div className="border-line bg-paper w-full max-w-md rounded-xl border p-6 text-center">
-            <p className="text-navy text-base font-extrabold">
-              Canned responses could not be loaded
-            </p>
+            <p className="text-navy heading text-base">Canned responses could not be loaded</p>
             <p className="text-mute mt-2 text-sm">Check your connection and try again.</p>
             <Button className="bg-ember hover:bg-ember/90 mt-5" onClick={() => void load()}>
               Retry
@@ -453,7 +452,7 @@ export const CannedResponsesConsole = () => {
       >
         <section className="border-line bg-paper rounded-xl border p-4 sm:p-5">
           <div className="grid gap-3 lg:grid-cols-[minmax(15rem,0.8fr)_minmax(18rem,1.2fr)_10rem]">
-            <div className="text-ink flex flex-col gap-1.5 text-xs font-bold">
+            <div className="text-ink flex flex-col gap-1.5 text-xs font-medium">
               <span>Scope</span>
               <Select
                 value={scope}
@@ -481,7 +480,7 @@ export const CannedResponsesConsole = () => {
                 </SelectContent>
               </Select>
             </div>
-            <div className="text-ink flex flex-col gap-1.5 text-xs font-bold">
+            <div className="text-ink flex flex-col gap-1.5 text-xs font-medium">
               <span>Search</span>
               <span className="border-line bg-ice flex h-10 items-center gap-2 rounded-[8px] border px-3">
                 <Search aria-hidden="true" className="text-mute size-4" />
@@ -494,7 +493,7 @@ export const CannedResponsesConsole = () => {
                 />
               </span>
             </div>
-            <div className="text-ink flex flex-col gap-1.5 text-xs font-bold">
+            <div className="text-ink flex flex-col gap-1.5 text-xs font-medium">
               <span>Status</span>
               <Select
                 value={status}
@@ -540,11 +539,11 @@ export const CannedResponsesConsole = () => {
               <table className="w-full min-w-[760px] border-collapse text-left text-sm">
                 <thead className="bg-ice-2 text-ink text-xs">
                   <tr>
-                    <th className="px-5 py-3 font-bold">Shortcut</th>
-                    <th className="px-5 py-3 font-bold">Message</th>
-                    <th className="px-5 py-3 font-bold">Status</th>
-                    <th className="px-5 py-3 font-bold">Updated</th>
-                    <th className="px-5 py-3 font-bold">
+                    <th className="px-5 py-3 font-semibold">Shortcut</th>
+                    <th className="px-5 py-3 font-semibold">Message</th>
+                    <th className="px-5 py-3 font-semibold">Status</th>
+                    <th className="px-5 py-3 font-semibold">Updated</th>
+                    <th className="px-5 py-3 font-semibold">
                       <span className="sr-only">Actions</span>
                     </th>
                   </tr>
@@ -772,7 +771,7 @@ const EmptyState = ({
   onAdd: () => void
 }) => (
   <section className="border-line bg-paper rounded-xl border p-8 text-center">
-    <p className="text-navy text-base font-extrabold">
+    <p className="text-navy heading text-base">
       {scope === "general" ? "No General responses yet" : "No website responses yet"}
     </p>
     <p className="text-mute mx-auto mt-2 max-w-md text-sm">
@@ -856,7 +855,7 @@ const ResponseForm = ({
         {form ? (
           <form onSubmit={onSubmit} className="flex min-h-0 flex-1 flex-col overflow-y-auto">
             <div className="flex flex-col gap-4 px-5 py-5">
-              <label className="text-ink flex flex-col gap-1.5 text-sm font-bold">
+              <label className="text-ink flex flex-col gap-1.5 text-sm font-medium">
                 Scope
                 <Select
                   value={form.siteId ?? "general"}
@@ -883,7 +882,7 @@ const ResponseForm = ({
                   </SelectContent>
                 </Select>
               </label>
-              <label className="text-ink flex flex-col gap-1.5 text-sm font-bold">
+              <label className="text-ink flex flex-col gap-1.5 text-sm font-medium">
                 Shortcut
                 <span className="border-line bg-ice flex h-10 items-center rounded-[8px] border px-3">
                   <span className="text-mute font-mono">#</span>
@@ -898,7 +897,7 @@ const ResponseForm = ({
                 </span>
                 <span className="text-mute text-xs">{form.shortcut.length}/40 characters</span>
               </label>
-              <label className="text-ink flex flex-col gap-1.5 text-sm font-bold">
+              <label className="text-ink flex flex-col gap-1.5 text-sm font-medium">
                 Message
                 <Textarea
                   value={form.body}
@@ -911,7 +910,7 @@ const ResponseForm = ({
                   {form.body.length}/4,000 characters · Ctrl/⌘+Enter to save
                 </span>
               </label>
-              <label className="border-line bg-ice text-ink flex items-center justify-between gap-3 rounded-[8px] border px-3 py-2.5 text-sm font-bold">
+              <label className="border-line bg-ice text-ink flex items-center justify-between gap-3 rounded-[8px] border px-3 py-2.5 text-sm font-medium">
                 <span>
                   <span className="block">Enabled</span>
                   <span className="text-mute block text-xs font-normal">
@@ -924,11 +923,7 @@ const ResponseForm = ({
                   aria-label="Enabled"
                 />
               </label>
-              {formError ? (
-                <p className="text-ember text-sm" role="alert">
-                  {formError}
-                </p>
-              ) : null}
+              <FieldError>{formError || undefined}</FieldError>
             </div>
             <DialogFooter className="flex-row justify-end">
               <Button type="button" variant="outline" onClick={onRequestClose}>

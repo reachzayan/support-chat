@@ -1,7 +1,10 @@
 """Auto-detecting the widget install and auto-building the KB from a site's website URL."""
 
+from uuid import UUID
+
 from fastapi.testclient import TestClient
 
+from app.models.kb_source import KbSource
 from app.models.user import User
 from app.security.passwords import hash_password
 from tests.ws_helpers import (
@@ -97,10 +100,43 @@ def test_create_site_with_website_url_auto_creates_a_queued_kb_source(
     assert items[0]["status"] == "queued"
 
 
-def test_create_site_rejects_an_http_website_url(client: TestClient) -> None:
+def test_explicit_list_source_replaces_auto_created_prefix_mode(
+    client: TestClient, monkeypatch
+) -> None:
+    token = _login_admin(client)
+    _stub_fetch_html(monkeypatch, "<html><body>nothing here</body></html>")
+    created = _create_site(client, token, website_url=WEBSITE_URL)
+    site_id = created.json()["id"]
+
+    replaced = client.post(
+        f"/api/sites/{site_id}/kb-sources",
+        headers=_auth(token),
+        json={
+            "mode": "list",
+            "start_url": WEBSITE_URL,
+            "seed_urls": [
+                WEBSITE_URL,
+                f"{WEBSITE_URL}/services",
+            ],
+        },
+    )
+
+    assert replaced.status_code == 201
+    assert replaced.json()["mode"] == "list"
+    session = next(sync_session())
+    try:
+        source = session.get(KbSource, UUID(replaced.json()["id"]))
+        assert source is not None
+        assert source.seed_urls == [f"{WEBSITE_URL}/", f"{WEBSITE_URL}/services"]
+    finally:
+        session.close()
+
+
+def test_create_site_upgrades_an_http_website_url(client: TestClient) -> None:
     token = _login_admin(client)
     created = _create_site(client, token, website_url="http://sample-site.example.com")
-    assert created.status_code == 422
+    assert created.status_code == 201
+    assert created.json()["website_url"] == "https://sample-site.example.com"
 
 
 def test_create_site_runs_an_initial_install_check(client: TestClient, monkeypatch) -> None:

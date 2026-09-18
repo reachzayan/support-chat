@@ -9,12 +9,41 @@ from lxml import html as lxml_html
 
 from app.llm.safety_markers import strip_invisible
 
+_DECORATIVE_RE = re.compile(
+    "[\u2190-\u21ff\u27f0-\u27ff\u2900-\u297f\u2b00-\u2bff\u25b2-\u25c7\u2713-\u2718\u00ab\u00bb]"
+)
 
-def tidy_text(value: str) -> str:
+
+def _normalize_chars(value: str) -> str:
     normalized = unicodedata.normalize("NFKC", value or "")
     normalized = strip_invisible(normalized)
-    lines = [re.sub(r" {2,}", " ", line).rstrip() for line in normalized.split("\n")]
-    return "\n".join(lines).strip()
+    normalized = normalized.replace("\u00a0", " ")
+    normalized = normalized.replace("\u201c", '"').replace("\u201d", '"')
+    normalized = normalized.replace("\u2018", "'").replace("\u2019", "'")
+    normalized = normalized.replace("\u2013", "-")
+    normalized = normalized.replace("\u2014", " - ")
+    normalized = _DECORATIVE_RE.sub(" ", normalized)
+    return re.sub(r"([.!?])([A-Z][a-z]+\b)", r"\1 \2", normalized)
+
+
+def tidy_inline(value: str) -> str:
+    return " ".join(_normalize_chars(value).split())
+
+
+def tidy_text(value: str) -> str:
+    lines = [" ".join(line.split()) for line in _normalize_chars(value).splitlines()]
+    paragraphs: list[str] = []
+    buffer: list[str] = []
+    for line in lines:
+        if line:
+            buffer.append(line)
+            continue
+        if buffer:
+            paragraphs.append("\n".join(buffer))
+            buffer = []
+    if buffer:
+        paragraphs.append("\n".join(buffer))
+    return "\n\n".join(paragraphs)
 
 
 def strip_html_text(value: str) -> str:
@@ -45,6 +74,13 @@ def slug(value: str) -> str:
 def answer_hash(value: str) -> str:
     normalized = " ".join(value.split()).casefold()
     return hashlib.sha256(normalized.encode()).hexdigest()
+
+
+ANSWER_TOKEN_RE = re.compile(r"[a-z0-9]+(?:[.@+-][a-z0-9]+)*")
+
+
+def answer_digest(value: str) -> str:
+    return " ".join(ANSWER_TOKEN_RE.findall((value or "").casefold()))
 
 
 def locator_for(url: str, name: str | None = None) -> str | None:

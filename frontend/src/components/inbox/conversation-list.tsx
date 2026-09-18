@@ -2,11 +2,13 @@
 
 /* oxlint-disable react-perf/jsx-no-jsx-as-prop, react-perf/jsx-no-new-object-as-prop -- Row and filter items are short, per-item motion props that a shared component would not simplify. */
 
+import { cn } from "cn"
 import { Inbox as InboxIcon, Search } from "lucide-react"
 import { motion } from "motion/react"
 import { useCallback, useMemo, useState, type ChangeEvent } from "react"
 
 import { Input } from "@/components/ui/input"
+import { linkUnderlineClass } from "@/components/ui/link-button"
 
 import { INBOX_FILTERS, type InboxCounts, type InboxFilter, type InboxListItem } from "./types"
 
@@ -52,7 +54,7 @@ const stateDotClass = (state: string) => {
 
 const stateChipClass = (state: string) => {
   const base =
-    "mt-1.5 flex w-fit items-center gap-1.5 rounded-full px-2 py-0.5 text-[10px] font-bold tracking-wide uppercase"
+    "mt-1.5 flex w-fit items-center gap-1.5 rounded-full px-2 py-0.5 text-[10px] font-semibold tracking-wide uppercase"
   if (state === "queued") {
     return `${base} bg-ember/10 text-ember`
   }
@@ -184,7 +186,7 @@ export const ConversationList = ({
   return (
     <section className="border-line bg-paper flex min-h-0 w-full flex-col border-r lg:w-[420px] lg:shrink-0">
       <div className="border-line flex h-16 items-center justify-between border-b px-5">
-        <h2 className="text-navy text-sm font-extrabold tracking-[-0.02em]">Conversations</h2>
+        <h2 className="text-navy heading text-sm">Conversations</h2>
         <span
           className="bg-ice-2 text-mute inline-flex shrink-0 items-center rounded-full px-2 py-1 font-mono text-[10px] font-bold"
           aria-label={`${items.length} conversations`}
@@ -308,7 +310,7 @@ const ConversationRows = ({
             className="text-mute/50 mx-auto mb-2 size-6"
             strokeWidth={1.5}
           />
-          <p className="text-ink text-sm font-bold">{query ? "No chats found" : "Inbox clear"}</p>
+          <p className="text-ink heading text-sm">{query ? "No chats found" : "Inbox clear"}</p>
           <p className="text-mute mt-1 text-xs leading-5">
             {query
               ? "Try a visitor name, site, or phrase."
@@ -329,7 +331,10 @@ const ConversationRows = ({
           <button
             type="button"
             onClick={onLoadMore}
-            className="text-steel hover:text-navy w-full rounded-[6px] px-2 py-2 text-sm font-semibold transition-[color,transform] duration-150 ease-out hover:-translate-y-px"
+            className={cn(
+              linkUnderlineClass,
+              "text-steel hover:text-navy inline-flex text-sm font-semibold transition-colors duration-150 ease-out",
+            )}
           >
             Load more
           </button>

@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
-from collections.abc import Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable
+from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
@@ -42,6 +43,8 @@ class FetchResult:
     fetched_at: datetime = field(default_factory=lambda: datetime.now(UTC))
     links: tuple[str, ...] = ()
     renderer: str = "crawl4ai"
+    title: str | None = None
+    metadata: dict[str, str] = field(default_factory=dict)
 
 
 FetchFn = Callable[..., str | Awaitable[str]]
@@ -104,6 +107,60 @@ def _browser_error_code(exc: BaseException) -> str:
     return "browser_crash"
 
 
+def crawler_run_config() -> Any:
+    from crawl4ai import CacheMode, CrawlerRunConfig, DefaultMarkdownGenerator
+
+    return CrawlerRunConfig(
+        cache_mode=CacheMode.BYPASS,
+        check_robots_txt=False,
+        verbose=False,
+        word_count_threshold=1,
+        page_timeout=30_000,
+        wait_until="load",
+        scan_full_page=True,
+        scroll_delay=0.2,
+        max_scroll_steps=20,
+        delay_before_return_html=1.5,
+        exclude_external_links=True,
+        exclude_social_media_links=True,
+        remove_overlay_elements=True,
+        remove_consent_popups=True,
+        flatten_shadow_dom=True,
+        exclude_all_images=True,
+        adjust_viewport_to_content=True,
+        excluded_tags=[
+            "script",
+            "style",
+            "noscript",
+            "iframe",
+            "nav",
+            "button",
+        ],
+        markdown_generator=DefaultMarkdownGenerator(
+            content_source="raw_html",
+            options={
+                "ignore_links": False,
+                "ignore_mailto_links": False,
+                "body_width": 0,
+                "escape_html": False,
+            },
+        ),
+    )
+
+
+def _markdown_from_result(result: Any) -> str:
+    markdown_obj = getattr(result, "markdown", "") or ""
+    if hasattr(markdown_obj, "raw_markdown"):
+        raw = str(markdown_obj.raw_markdown or "").strip()
+        if raw:
+            return raw
+    if hasattr(markdown_obj, "fit_markdown"):
+        fit = str(markdown_obj.fit_markdown or "").strip()
+        if fit:
+            return fit
+    return str(markdown_obj)
+
+
 def _from_crawler_result(requested: str, allowed_hosts: set[str], result: Any) -> FetchResult:
     final_url = str(
         getattr(result, "redirected_url", None) or getattr(result, "url", None) or requested
@@ -118,11 +175,7 @@ def _from_crawler_result(requested: str, allowed_hosts: set[str], result: Any) -
         error = RuntimeError(message)
         raise FetchError(_browser_error_code(error) if _is_browser_error(error) else "http")
     html = str(getattr(result, "html", None) or getattr(result, "cleaned_html", "") or "")
-    markdown_obj = getattr(result, "markdown", "") or ""
-    if hasattr(markdown_obj, "raw_markdown"):
-        markdown = str(markdown_obj.raw_markdown or "")
-    else:
-        markdown = str(markdown_obj)
+    markdown = _markdown_from_result(result)
     html = html.replace("\x00", "")
     if len(html.encode("utf-8")) > MAX_BYTES:
         raise FetchError("too_large")
@@ -142,6 +195,7 @@ def _from_crawler_result(requested: str, allowed_hosts: set[str], result: Any) -
         and "application/xhtml+xml" not in content_type
     ):
         raise FetchError("non_html")
+    title, metadata = _crawler_title_and_meta(result)
     return FetchResult(
         url=final_url,
         status=status,
@@ -151,7 +205,22 @@ def _from_crawler_result(requested: str, allowed_hosts: set[str], result: Any) -
         headers={str(key): str(value) for key, value in headers.items()},
         links=_internal_links(result, final_url),
         renderer="crawl4ai",
+        title=title,
+        metadata=metadata,
     )
+
+
+def _crawler_title_and_meta(result: Any) -> tuple[str | None, dict[str, str]]:
+    raw = getattr(result, "metadata", None) or {}
+    if not isinstance(raw, dict):
+        return None, {}
+    metadata = {
+        str(key): str(value)
+        for key, value in raw.items()
+        if key in {"title", "description"} and value
+    }
+    title = metadata.get("title")
+    return title, metadata
 
 
 def _internal_links(result: Any, page_url: str) -> tuple[str, ...]:
@@ -176,34 +245,22 @@ def _allow_browser_request(url: str, is_navigation: bool, allowed_hosts: set[str
         public_fetch_url(url)
 
 
-async def _crawl4ai(url: str, allowed_hosts: set[str]) -> Any:
+@asynccontextmanager
+async def page_crawler(allowed_hosts: set[str]) -> AsyncIterator[CrawlerFn]:
     try:
-        from crawl4ai import (
-            AsyncWebCrawler,
-            BrowserConfig,
-            CacheMode,
-            CrawlerRunConfig,
-            DefaultMarkdownGenerator,
-        )
-    except ImportError as exc:
-        raise FetchError("browser") from exc
+        from crawl4ai import AsyncWebCrawler, BrowserConfig
+    except ImportError:
+
+        async def missing(_url: str) -> Any:
+            raise FetchError("browser")
+
+        yield missing
+        return
     browser = BrowserConfig(browser_type="chromium", headless=True, user_agent=USER_AGENT)
-    run = CrawlerRunConfig(
-        cache_mode=CacheMode.BYPASS,
-        check_robots_txt=False,
-        verbose=False,
-        word_count_threshold=1,
-        page_timeout=30_000,
-        wait_until="domcontentloaded",
-        scan_full_page=True,
-        scroll_delay=0.2,
-        delay_before_return_html=0.3,
-        exclude_external_links=True,
-        excluded_tags=["script", "style"],
-        markdown_generator=DefaultMarkdownGenerator(),
-    )
     blocked_navigation = False
-    async with AsyncWebCrawler(config=browser) as crawler:
+    crawler = AsyncWebCrawler(config=browser)
+    await crawler.__aenter__()
+    try:
 
         async def guard_page(page, **_kwargs):
             async def guard_route(route, request):
@@ -225,11 +282,44 @@ async def _crawl4ai(url: str, allowed_hosts: set[str]) -> Any:
             return page
 
         crawler.crawler_strategy.set_hook("on_page_context_created", guard_page)
-        result = await crawler.arun(url=url, config=run)
-        if blocked_navigation:
-            raise FetchError("ssrf")
-        return result
+
+        async def crawl(url: str) -> Any:
+            nonlocal blocked_navigation
+            blocked_navigation = False
+            result = await crawler.arun(url=url, config=crawler_run_config())
+            if blocked_navigation:
+                raise FetchError("ssrf")
+            return result
+
+        yield crawl
+    finally:
+        await crawler.__aexit__(None, None, None)
+
+
+async def _crawl4ai(url: str, allowed_hosts: set[str]) -> Any:
+    async with page_crawler(allowed_hosts) as crawl:
+        return await crawl(url)
 
 
 async def fetch_html_async(url: str, allowed_hosts: set[str]) -> str:
     return await asyncio.to_thread(fetch_html, url, allowed_hosts)
+
+
+class LazyPageCrawler:
+    def __init__(self, allowed_hosts: set[str]) -> None:
+        self._hosts = allowed_hosts
+        self._cm = None
+        self._crawl: CrawlerFn | None = None
+
+    async def fetch(self, url: str) -> Any:
+        if self._crawl is None:
+            self._cm = page_crawler(self._hosts)
+            self._crawl = await self._cm.__aenter__()
+        return await self._crawl(url)
+
+    async def aclose(self) -> None:
+        if self._cm is None:
+            return
+        await self._cm.__aexit__(None, None, None)
+        self._cm = None
+        self._crawl = None

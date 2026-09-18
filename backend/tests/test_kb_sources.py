@@ -132,6 +132,42 @@ def test_admin_create_source_is_queued(client: TestClient) -> None:
     assert deleted.status_code == 204
 
 
+def test_admin_create_text_source_is_queued_without_a_public_url(client: TestClient) -> None:
+    _insert_admin()
+    admin = login_staff(client, ADMIN_EMAIL, ADMIN_PASSWORD)
+    site_id = _create_easy_site(client, admin)
+
+    created = client.post(
+        f"/api/sites/{site_id}/kb-sources",
+        headers=_auth(admin),
+        json={
+            "kind": "text",
+            "title": "Collections policy",
+            "body": "Payment plans are reviewed by the collections team.",
+        },
+    )
+
+    assert created.status_code == 201
+    assert created.json()["source_kind"] == "text"
+    assert created.json()["display_name"] == "Collections policy"
+    assert created.json()["status"] == "queued"
+    assert "kb-text://" not in created.text
+
+
+def test_text_source_rejects_blank_content(client: TestClient) -> None:
+    _insert_admin()
+    admin = login_staff(client, ADMIN_EMAIL, ADMIN_PASSWORD)
+    site_id = _create_easy_site(client, admin)
+
+    rejected = client.post(
+        f"/api/sites/{site_id}/kb-sources",
+        headers=_auth(admin),
+        json={"kind": "text", "title": "Policy", "body": "   "},
+    )
+
+    assert rejected.status_code == 422
+
+
 def test_admin_create_source_stays_queued_when_wakeup_fails(
     client: TestClient, monkeypatch
 ) -> None:
@@ -205,6 +241,7 @@ def test_get_page_returns_indexed_copy_and_chunks(client: TestClient) -> None:
             site_id=site.id,
             snapshot_id=snapshot.id,
             ordinal=0,
+            kind="section",
             heading=TIMING_TITLE,
             body=TIMING_BODY,
             answer_verbatim=TIMING_BODY,
@@ -216,21 +253,130 @@ def test_get_page_returns_indexed_copy_and_chunks(client: TestClient) -> None:
         chunk_id = str(chunk.id)
     finally:
         session.close()
+    pages = client.get(
+        f"/api/kb-sources/{source.id}/pages",
+        headers=_auth(alex),
+    )
+    assert pages.json()["items"][0]["chunk_count"] == 1
     detail = client.get(f"/api/kb-pages/{page_id}", headers=_auth(alex))
     payload = detail.json()
     assert payload["url"] == FAQ_URL
     assert payload["title"] == TIMING_TITLE
     assert payload["content_text"] == TIMING_BODY
     assert payload["skip_reason"] is None
+    assert payload["chunk_count"] == 1
     assert payload["chunks"] == [
         {
             "id": chunk_id,
             "ordinal": 0,
+            "kind": "section",
             "heading": TIMING_TITLE,
             "body": TIMING_BODY,
             "enabled": True,
+            "origin_urls": [],
         }
     ]
+
+
+def test_shared_answers_are_listed_on_a_general_tab(client: TestClient) -> None:
+    insert_staff(ALEX_EMAIL, ALEX_NAME, ALEX_PASSWORD)
+    alex = login_staff(client)
+    _insert_admin()
+    admin = login_staff(client, ADMIN_EMAIL, ADMIN_PASSWORD)
+    site_id = UUID(_create_easy_site(client, admin))
+    home_url = "https://sample-data.example.com/"
+    mail_url = "https://sample-data.example.com/samplemail"
+    contact = "Phone: 202-555-0101. Email: inquiries@sample-data.example.com"
+    mail_fact = "SampleMail verifies every address before the piece enters the mailstream."
+    session = next(sync_session())
+    try:
+        site = session.get(Site, site_id)
+        assert site is not None
+        source = KbSource(
+            site_id=site.id,
+            start_url=home_url,
+            mode="list",
+            seed_urls=[home_url, mail_url],
+            status="ready",
+            page_count=2,
+            embedder_id=configured_embedder_id(),
+            enabled=True,
+        )
+        session.add(source)
+        session.flush()
+        home = KbPage(
+            source_id=source.id,
+            site_id=site.id,
+            url=home_url,
+            title="Home",
+            content_text=contact,
+            content_sha256=hashlib.sha256(b"home").hexdigest(),
+            http_status=200,
+            enabled=True,
+        )
+        mail = KbPage(
+            source_id=source.id,
+            site_id=site.id,
+            url=mail_url,
+            title="SampleMail",
+            content_text=mail_fact,
+            content_sha256=hashlib.sha256(b"mail").hexdigest(),
+            http_status=200,
+            enabled=True,
+        )
+        session.add_all([home, mail])
+        session.flush()
+        snapshot = KbSnapshot(
+            site_id=site.id,
+            source_id=source.id,
+            state="live",
+            content_hash=hashlib.sha256(b"live").hexdigest(),
+            token_estimate=0,
+        )
+        session.add(snapshot)
+        session.flush()
+        session.add(
+            KbChunk(
+                page_id=home.id,
+                site_id=site.id,
+                snapshot_id=snapshot.id,
+                ordinal=0,
+                kind="section",
+                heading="Contact",
+                body=contact,
+                answer_verbatim=contact,
+                origin_urls=[home_url, mail_url],
+                enabled=True,
+            )
+        )
+        session.add(
+            KbChunk(
+                page_id=mail.id,
+                site_id=site.id,
+                snapshot_id=snapshot.id,
+                ordinal=0,
+                kind="section",
+                heading="SampleMail",
+                body=mail_fact,
+                answer_verbatim=mail_fact,
+                origin_urls=[],
+                enabled=True,
+            )
+        )
+        session.commit()
+        source_id = str(source.id)
+        mail_id = str(mail.id)
+    finally:
+        session.close()
+    listed = client.get(f"/api/kb-sources/{source_id}/pages", headers=_auth(alex)).json()["items"]
+    assert [item["title"] for item in listed] == ["General", "Home", "SampleMail"]
+    assert listed[0]["tab"] == "general"
+    general = client.get(f"/api/kb-pages/{listed[0]['id']}", headers=_auth(alex)).json()
+    assert general["title"] == "General"
+    assert [chunk["heading"] for chunk in general["chunks"]] == ["Contact"]
+    assert general["chunks"][0]["origin_urls"] == [home_url, mail_url]
+    mail_detail = client.get(f"/api/kb-pages/{mail_id}", headers=_auth(alex)).json()
+    assert [chunk["heading"] for chunk in mail_detail["chunks"]] == ["SampleMail"]
 
 
 async def test_list_ingest_stores_two_pages_then_delete_empties_search(migrated_db) -> None:
@@ -315,6 +461,35 @@ def test_fragment_and_root_url_collapse_to_one_source(client: TestClient) -> Non
     assert items[0]["pages_discovered"] == 0
 
 
+def test_updating_a_queued_source_does_not_enqueue_a_duplicate_wakeup(
+    client: TestClient, monkeypatch
+) -> None:
+    wakeups: list[UUID] = []
+
+    async def record_wakeup(source_id: UUID) -> None:
+        wakeups.append(source_id)
+
+    monkeypatch.setattr("app.services.kb_source_admin.enqueue_wakeup", record_wakeup)
+    _insert_admin()
+    admin = login_staff(client, ADMIN_EMAIL, ADMIN_PASSWORD)
+    site_id = _create_easy_site(client, admin)
+    first = client.post(
+        f"/api/sites/{site_id}/kb-sources",
+        headers=_auth(admin),
+        json={"mode": "prefix", "start_url": FAQ_URL, "seed_urls": []},
+    )
+    updated = client.post(
+        f"/api/sites/{site_id}/kb-sources",
+        headers=_auth(admin),
+        json={"mode": "list", "start_url": FAQ_URL, "seed_urls": [FAQ_URL]},
+    )
+
+    assert first.status_code == 201
+    assert updated.status_code == 201
+    assert updated.json()["mode"] == "list"
+    assert wakeups == [UUID(first.json()["id"])]
+
+
 def test_admin_create_respects_explicit_list_mode(client: TestClient) -> None:
     _insert_admin()
     admin = login_staff(client, ADMIN_EMAIL, ADMIN_PASSWORD)
@@ -330,6 +505,35 @@ def test_admin_create_respects_explicit_list_mode(client: TestClient) -> None:
     )
     assert created.status_code == 201
     assert created.json()["mode"] == "list"
+
+
+def test_admin_cannot_requeue_a_source_while_it_is_running(client: TestClient) -> None:
+    _insert_admin()
+    admin = login_staff(client, ADMIN_EMAIL, ADMIN_PASSWORD)
+    site_id = _create_easy_site(client, admin)
+    created = client.post(
+        f"/api/sites/{site_id}/kb-sources",
+        headers=_auth(admin),
+        json={"mode": "list", "start_url": FAQ_URL, "seed_urls": [FAQ_URL]},
+    )
+    source_id = UUID(created.json()["id"])
+    session = next(sync_session())
+    try:
+        source = session.get(KbSource, source_id)
+        assert source is not None
+        source.status = "running"
+        session.commit()
+    finally:
+        session.close()
+
+    duplicate = client.post(
+        f"/api/sites/{site_id}/kb-sources",
+        headers=_auth(admin),
+        json={"mode": "list", "start_url": FAQ_URL, "seed_urls": [FAQ_URL]},
+    )
+
+    assert duplicate.status_code == 409
+    assert duplicate.json()["detail"] == "This source is already syncing."
 
 
 def test_admin_create_rejects_a_url_owned_by_another_source(client: TestClient) -> None:

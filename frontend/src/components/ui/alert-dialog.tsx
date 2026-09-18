@@ -7,8 +7,13 @@ import * as React from "react"
 const AlertDialog = AlertDialogPrimitive.Root
 const AlertDialogTrigger = AlertDialogPrimitive.Trigger
 const AlertDialogClose = AlertDialogPrimitive.Close
-const AlertDialogTitle = AlertDialogPrimitive.Title
+const AlertDialogTitle = ({ className, ...props }: AlertDialogPrimitive.Title.Props) => (
+  <AlertDialogPrimitive.Title className={cn("text-navy heading text-base", className)} {...props} />
+)
 const AlertDialogDescription = AlertDialogPrimitive.Description
+
+const ALERT_FRAME =
+  "border-line bg-paper text-ink pointer-events-auto isolate z-50 flex w-[calc(100%-2rem)] max-w-md flex-col overflow-hidden rounded-2xl border shadow-[0_16px_48px_rgba(13,31,58,0.22)] transition-[opacity,scale] duration-200 data-ending-style:scale-[0.97] data-ending-style:opacity-0 data-starting-style:scale-[0.97] data-starting-style:opacity-0"
 
 const AlertDialogContent = ({
   className,
@@ -17,15 +22,11 @@ const AlertDialogContent = ({
 }: AlertDialogPrimitive.Popup.Props) => (
   <AlertDialogPrimitive.Portal>
     <AlertDialogPrimitive.Backdrop className="bg-navy/40 fixed inset-0 z-50 transition-opacity duration-200 data-ending-style:opacity-0 data-starting-style:opacity-0" />
-    <AlertDialogPrimitive.Popup
-      className={cn(
-        "border-line bg-paper text-ink fixed top-1/2 left-1/2 z-50 flex w-[calc(100%-2rem)] max-w-md -translate-x-1/2 -translate-y-1/2 flex-col rounded-xl border shadow-[0_16px_48px_rgba(13,31,58,0.22)] transition-[opacity,scale] duration-200 data-ending-style:scale-[0.97] data-ending-style:opacity-0 data-starting-style:scale-[0.97] data-starting-style:opacity-0",
-        className,
-      )}
-      {...props}
-    >
-      {children}
-    </AlertDialogPrimitive.Popup>
+    <AlertDialogPrimitive.Viewport className="pointer-events-none fixed inset-0 z-50 flex items-center justify-center p-4">
+      <AlertDialogPrimitive.Popup className={cn(ALERT_FRAME, className)} {...props}>
+        {children}
+      </AlertDialogPrimitive.Popup>
+    </AlertDialogPrimitive.Viewport>
   </AlertDialogPrimitive.Portal>
 )
 

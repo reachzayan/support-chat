@@ -37,12 +37,17 @@ def _format_origin(parsed, host: str) -> str:
 def canonicalize_origin(raw: str) -> str:
     if "*" in raw:
         raise InvalidOrigin("wildcard origins are not allowed")
-    parsed = urlparse(raw)
+    text = raw.strip()
+    if "://" not in text:
+        text = f"https://{text}"
+    parsed = urlparse(text)
     _reject_origin_parts(parsed)
     try:
         host = parsed.hostname.encode("idna").decode("ascii").lower()
     except UnicodeError as exc:
         raise InvalidOrigin("invalid host") from exc
+    if host.startswith("www."):
+        host = host.removeprefix("www.")
     return _format_origin(parsed, host)
 
 

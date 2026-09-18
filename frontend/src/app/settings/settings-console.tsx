@@ -41,10 +41,10 @@ const ProfileCard = ({
   <section className="border-line bg-paper rounded-[8px] border p-5 lg:p-6">
     <div className="mb-5 flex items-start justify-between gap-4">
       <div>
-        <p className="text-mute text-[10px] font-bold tracking-[0.14em] uppercase">
+        <p className="text-mute text-[11px] font-semibold tracking-[0.2em] uppercase">
           Specialist profile
         </p>
-        <h2 className="text-navy mt-1 text-base font-extrabold">Your account</h2>
+        <h2 className="text-navy heading mt-1 text-base">Your account</h2>
       </div>
       <span className="bg-ice-2 text-steel rounded-full px-3 py-1 text-[10px] font-bold uppercase">
         {isAdmin ? "Admin" : "Specialist"}
@@ -59,7 +59,7 @@ const ProfileCard = ({
 )
 
 const ProfileField = ({ id, label, value }: { id: string; label: string; value: string }) => (
-  <label className="text-ink flex flex-col gap-1 text-xs font-bold" htmlFor={id}>
+  <label className="text-ink flex flex-col gap-1 text-xs font-medium" htmlFor={id}>
     {label}
     <Input
       id={id}
@@ -72,12 +72,12 @@ const ProfileField = ({ id, label, value }: { id: string; label: string; value: 
 
 const WorkspaceCard = () => (
   <section className="border-line bg-navy dark:text-navy-deep rounded-[8px] border border-transparent p-5 text-white lg:p-6">
-    <p className="dark:text-navy-deep/55 text-[10px] font-bold tracking-[0.14em] text-white/55 uppercase">
+    <p className="dark:text-navy-deep/55 text-[11px] font-semibold tracking-[0.2em] text-white/55 uppercase">
       Workspace
     </p>
     <div className="mt-2 flex flex-col justify-between gap-4 sm:flex-row sm:items-end">
       <div>
-        <h2 className="text-lg font-extrabold tracking-[-0.03em]">SampleSite operations</h2>
+        <h2 className="heading text-lg">SampleSite operations</h2>
         <p className="dark:text-navy-deep/65 mt-1 max-w-md text-xs leading-5 text-white/65">
           Your inbox, ingested knowledge, and site configuration live in this workspace.
         </p>

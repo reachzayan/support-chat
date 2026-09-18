@@ -90,7 +90,9 @@ describe("site-keyed resume storage", () => {
         data: { type: "widget.activated" },
       }),
     )
-    expect(window.localStorage.getItem(`supportchat.visitor.${DEMO_KEY}`)).toBe("resume-1")
+    await vi.waitFor(() =>
+      expect(window.localStorage.getItem(`supportchat.visitor.${DEMO_KEY}`)).toBe("resume-1"),
+    )
     expect(JSON.stringify(window.localStorage)).not.toContain("Ada Lopez")
   })
 })

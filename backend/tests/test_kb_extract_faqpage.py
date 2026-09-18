@@ -74,3 +74,32 @@ def test_timing_fixture_keeps_turnaround_and_drops_nav() -> None:
     assert "24-48 hours" in answers
     assert "Careers" not in answers
     assert "Careers" not in headings
+
+
+def test_visible_details_question_wins_when_jsonld_shortens_the_same_answer() -> None:
+    html = """
+    <html><body><main>
+      <script type="application/ld+json">
+        {"@type":"FAQPage","mainEntity":[{
+          "@type":"Question",
+          "name":"Is bank account verification compliant for debt collection?",
+          "acceptedAnswer":{"@type":"Answer","text":"Yes. Verification follows applicable requirements."}
+        }]}
+      </script>
+      <details>
+        <summary>Is bank account verification compliant for debt collection and garnishment?</summary>
+        <p>Yes. Verification follows applicable requirements.</p>
+      </details>
+    </main></body></html>
+    """
+
+    faqs = [
+        unit
+        for unit in extract_html(html, "https://sample-data.example.com/collections")
+        if unit.kind == "faq"
+    ]
+
+    assert [unit.canonical_question for unit in faqs] == [
+        "Is bank account verification compliant for debt collection and garnishment?"
+    ]
+    assert faqs[0].aliases == ("Is bank account verification compliant for debt collection?",)

@@ -14,3 +14,6 @@ class EvidenceUnit:
     display_locator: str | None
     aliases: tuple[str, ...] = ()
     topic: str | None = None
+    structured_text: str | None = None
+    enabled: bool = True
+    review_note: str | None = None

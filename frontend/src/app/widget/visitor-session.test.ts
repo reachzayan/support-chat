@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest"
 
-import { applyVisitorFrame, emptyChat } from "./visitor-session"
+import { applyConversationSnapshot, applyVisitorFrame, emptyChat } from "./visitor-session"
 
 const VISITOR_LINE = "How fast are results?"
 
@@ -79,5 +79,53 @@ describe("visitor session view", () => {
 
     expect(view.conversation).toBe("prechat")
     expect(view.typing).toBe(false)
+  })
+})
+
+describe("conversation snapshot", () => {
+  test("a prechat snapshot is an empty form, not connecting", () => {
+    const view = applyConversationSnapshot(emptyChat(), {
+      state: "prechat",
+      assigned_agent: null,
+      messages: [],
+    })
+
+    expect(view.conversation).toBe("prechat")
+    expect(view.lines).toEqual([])
+    expect(view.assignedName).toBeNull()
+  })
+
+  test("a resume snapshot shows the visitor line without waiting for the socket", () => {
+    const view = applyConversationSnapshot(emptyChat(), {
+      state: "bot",
+      assigned_agent: null,
+      messages: [
+        {
+          type: "message",
+          id: 11,
+          role: "visitor",
+          body: VISITOR_LINE,
+        },
+      ],
+    })
+
+    expect(view.conversation).toBe("bot")
+    expect(view.lines).toEqual([
+      {
+        id: 11,
+        role: "visitor",
+        body: VISITOR_LINE,
+        created_at: null,
+        source_chunk_ids: null,
+        source_urls: null,
+        display_locator: null,
+        source_title: null,
+        system_reason: null,
+        response_outcome: null,
+        reason_code: null,
+        citations: [],
+      },
+    ])
+    expect(view.lastEventId).toBe(11)
   })
 })

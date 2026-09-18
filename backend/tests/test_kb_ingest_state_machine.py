@@ -1,3 +1,4 @@
+import hashlib
 from uuid import uuid4
 
 from sqlalchemy import func, select
@@ -198,6 +199,40 @@ async def test_unchanged_recrawl_skips_embed_and_counts_skip(migrated_db) -> Non
         assert len(jobs) == 2
         assert all(job.renderer == "injected" for job in jobs)
         assert all(job.events for job in jobs)
+
+
+async def test_legacy_content_hash_is_reprocessed_once(migrated_db) -> None:
+    embedder = FakeEmbedder()
+    calls = {"n": 0}
+    original = embedder.embed_documents
+
+    async def counted(texts: list[str]) -> list[list[float]]:
+        calls["n"] += 1
+        return await original(texts)
+
+    embedder.embed_documents = counted  # type: ignore[method-assign]
+    raw_digest = hashlib.sha256(FAQ_HTML.encode()).hexdigest()
+    async with session_maker()() as session:
+        source = await _source(session, [FAQ_URL])
+        source_id = source.id
+        await ingest_source(session, source_id, embedder=embedder, fetch=_fetch(PAGES))
+        first = calls["n"]
+        page = await session.scalar(select(KbPage).where(KbPage.source_id == source_id))
+        assert page is not None
+        page.content_sha256 = raw_digest
+        source.status = "queued"
+        await session.commit()
+        await ingest_source(session, source_id, embedder=embedder, fetch=_fetch(PAGES))
+
+    async with session_maker()() as session:
+        source = await session.get(KbSource, source_id)
+        page = await session.scalar(select(KbPage).where(KbPage.source_id == source_id))
+        assert source is not None
+        assert page is not None
+        assert source.pages_embedded == 1
+        assert source.pages_skipped_unchanged == 0
+        assert calls["n"] == first + 1
+        assert page.content_sha256 != raw_digest
 
 
 async def test_failed_page_on_resync_keeps_its_previous_live_chunks(migrated_db) -> None:

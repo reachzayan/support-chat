@@ -112,7 +112,6 @@ const AdminSidebarLink = ({
         <MotionLink
           href={href}
           aria-label={label}
-          whileHover={collapsed ? undefined : { x: 2 }}
           whileTap={{ scale: 0.96 }}
           className="cursor-pointer no-underline"
         />
@@ -219,7 +218,7 @@ const AdminSidebarAccount = ({
       >
         <AvatarMark initials={initials} />
         <span className="grid min-w-0 flex-1 text-left text-xs">
-          <span className="truncate font-bold text-white">{displayName}</span>
+          <span className="heading truncate text-sm text-white">{displayName}</span>
           <span className="truncate text-[10px] text-white/50">Accepting chats</span>
         </span>
         <ChevronDown aria-hidden="true" className="ml-auto size-4 shrink-0 text-white/40" />
@@ -252,13 +251,11 @@ const AdminSidebarBrand = ({ collapsed }: { collapsed: boolean }) => (
         collapsed ? "size-8 justify-center gap-0" : "w-full",
       )}
     >
-      <span className="bg-ember flex size-7 shrink-0 items-center justify-center rounded-[8px] text-[10px] font-extrabold tracking-[-0.08em] text-white shadow-[0_4px_14px_rgba(196,85,22,0.32)]">
+      <span className="bg-ember flex size-7 shrink-0 items-center justify-center rounded-[8px] text-[10px] font-semibold tracking-[-0.08em] text-white shadow-[0_4px_14px_rgba(196,85,22,0.32)]">
         Support
       </span>
       {!collapsed ? (
-        <span className="min-w-0 truncate text-sm font-extrabold tracking-[-0.02em] text-white">
-          SupportChat
-        </span>
+        <span className="heading min-w-0 truncate text-sm text-white">SupportChat</span>
       ) : null}
     </Link>
   </SidebarHeader>

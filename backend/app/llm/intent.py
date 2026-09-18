@@ -58,6 +58,8 @@ ABUSE_TOKENS = frozenset(
 
 ESCALATE_PHRASES = (
     "talk to a person",
+    "speak to a person",
+    "speak with a person",
     "real person",
 )
 ESCALATE_WORDS = ("human", "agent", "specialist")
@@ -95,6 +97,7 @@ INTENT_TERMS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("portal", ("portal",)),
 )
 SSN_RE = re.compile(r"\b\d{3}-\d{2}-\d{4}\b|\b\d{9}\b")
+_SSN_LEX = re.compile(r"\bssn\b|social\s+security")
 DL_RE = re.compile(r"\b[A-Z]\d{7,9}\b")
 ISO_DOB_RE = re.compile(r"\b(?:19|20)\d{2}-\d{2}-\d{2}\b")
 WORD_RE = re.compile(r"[a-z0-9]+")
@@ -112,6 +115,9 @@ _INDIVIDUAL_LEX = re.compile(
     r"|\bcase\s+(?:number|id)\b"
 )
 _MEDICAL_LEX = re.compile(r"medication|prescription|diagnosis|condition")
+_MEDICAL_ADVICE_LEX = re.compile(
+    r"chest\s+pain|\ber\b|emergency\s+room|\bdiagnos(?:e|is)\b|\bsymptoms?\b"
+)
 _SHOW_UP_LEX = re.compile(r"show\s+up|test\s+positive|on\s+(?:my|the)\s+(?:panel|screen|test)")
 _LEGAL_CASE_LEX = re.compile(
     r"can\s+i\s+sue|is\s+this\s+legal|adverse\s+action|dispute\s+my\s+report|legal\s+advice"
@@ -185,7 +191,7 @@ def classify_sensitive(text: str) -> SensitiveCategory:  # noqa: C901
     lowered = normalize_text(raw)
     if not lowered:
         return SensitiveCategory.NONE
-    if SSN_RE.search(raw) or SSN_RE.search(lowered):
+    if SSN_RE.search(raw) or SSN_RE.search(lowered) or _SSN_LEX.search(lowered):
         return SensitiveCategory.SSN
     if DL_RE.search(raw) or _DL_LEX.search(lowered):
         return SensitiveCategory.DL
@@ -193,13 +199,17 @@ def classify_sensitive(text: str) -> SensitiveCategory:  # noqa: C901
         return SensitiveCategory.PLATE
     if ISO_DOB_RE.search(raw) or (_DOB_LEX.search(lowered) and DIGITS_NEARBY_RE.search(lowered)):
         return SensitiveCategory.DOB
-    if _MRN_LEX.search(lowered) and MRN_DIGITS_RE.search(lowered):
-        return SensitiveCategory.MRN
+    if _MRN_LEX.search(lowered):
+        if MRN_DIGITS_RE.search(lowered):
+            return SensitiveCategory.MRN
+        return SensitiveCategory.MEDICAL_DETAIL
     if _SPECIMEN_LEX.search(lowered):
         return SensitiveCategory.SPECIMEN
     if _INDIVIDUAL_LEX.search(lowered):
         return SensitiveCategory.INDIVIDUAL_RESULT
     if _FIRST_PERSON.search(lowered) and _SHOW_UP_LEX.search(lowered):
+        return SensitiveCategory.MEDICAL_DETAIL
+    if _MEDICAL_ADVICE_LEX.search(lowered):
         return SensitiveCategory.MEDICAL_DETAIL
     if _MEDICAL_LEX.search(lowered) and _FIRST_PERSON.search(lowered):
         return SensitiveCategory.MEDICAL_DETAIL

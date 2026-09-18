@@ -52,8 +52,8 @@ OUTPUT_PII_PATTERNS = (
     re.compile(r"\b\d{9}\b"),  # SSN no dashes
     re.compile(r"\b[A-Z]\d{7,9}\b"),  # US driver's license shape
     re.compile(r"\b(?:19|20)\d{2}-\d{2}-\d{2}\b"),  # ISO DOB
-    # Plate: require at least one letter so "24-48" / dates are not false positives.
-    re.compile(r"\b(?=[A-Z0-9-]*[A-Z])[A-Z0-9]{2,3}-?[A-Z0-9]{2,4}\b"),
+    # Mixed letters and digits only: all-letter shapes are commonly business acronyms.
+    re.compile(r"\b(?=[A-Z0-9-]*[A-Z])(?=[A-Z0-9-]*\d)[A-Z0-9]{2,3}-?[A-Z0-9]{2,4}\b"),
     re.compile(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b"),  # email
     re.compile(
         r"(?<!\d)(?:"

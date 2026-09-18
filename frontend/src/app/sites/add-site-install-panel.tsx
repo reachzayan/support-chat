@@ -84,7 +84,9 @@ export const AddSiteInstallPanel = ({
       </Field>
 
       <Field>
-        <p className="text-mute text-[10px] font-bold tracking-[0.12em] uppercase">Install check</p>
+        <p className="text-mute text-[10px] font-semibold tracking-[0.12em] uppercase">
+          Install check
+        </p>
         <div
           className="border-line bg-ice flex items-center justify-between gap-3 rounded-lg border px-3 py-2.5"
           aria-label="Widget install status"

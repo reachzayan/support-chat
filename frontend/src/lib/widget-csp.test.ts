@@ -1,6 +1,10 @@
-import { describe, expect, test, vi } from "vitest"
+import { beforeEach, describe, expect, test, vi } from "vitest"
 
-import { fetchWidgetAncestors, widgetFrameAncestorsCsp } from "./widget-csp"
+import {
+  clearWidgetAncestorCache,
+  fetchWidgetAncestors,
+  widgetFrameAncestorsCsp,
+} from "./widget-csp"
 
 const LOVABLE = "https://sample-preview.example.com"
 const SITE_KEY = "lovable-demo"
@@ -27,6 +31,10 @@ describe("widget frame-ancestors CSP", () => {
 })
 
 describe("site-scoped widget ancestor fetch", () => {
+  beforeEach(() => {
+    clearWidgetAncestorCache()
+  })
+
   test("posts the exact public site identity and parent origin to the internal API", async () => {
     const fetcher = vi.fn().mockResolvedValue({
       ok: true,
@@ -73,19 +81,71 @@ describe("site-scoped widget ancestor fetch", () => {
     ).resolves.toEqual([])
     expect(fetcher).not.toHaveBeenCalled()
   })
+})
+
+const lookup = (
+  fetcher: Parameters<typeof fetchWidgetAncestors>[0],
+  now?: number,
+  siteKey = SITE_KEY,
+) =>
+  fetchWidgetAncestors(
+    fetcher,
+    "http://127.0.0.1:8000",
+    SERVICE_SECRET,
+    siteKey,
+    PUBLIC_KEY,
+    LOVABLE,
+    "",
+    now,
+  )
+
+const allowFetcher = () =>
+  vi.fn().mockResolvedValue({
+    ok: true,
+    json: async () => ({ ancestors: [LOVABLE] }),
+  })
+
+describe("widget ancestor cache hits", () => {
+  beforeEach(() => {
+    clearWidgetAncestorCache()
+  })
+
+  test("reuses a fresh allow result for the same site and parent", async () => {
+    const fetcher = allowFetcher()
+    await expect(lookup(fetcher, 0)).resolves.toEqual([LOVABLE])
+    await expect(lookup(fetcher, 59_000)).resolves.toEqual([LOVABLE])
+    expect(fetcher).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe("widget ancestor cache misses", () => {
+  beforeEach(() => {
+    clearWidgetAncestorCache()
+  })
+
+  test("does not reuse an allow result after a minute or for another site", async () => {
+    const fetcher = allowFetcher()
+    await lookup(fetcher, 0)
+    await lookup(fetcher, 60_001)
+    await lookup(fetcher, 60_001, "other-site")
+    expect(fetcher).toHaveBeenCalledTimes(3)
+  })
+
+  test("does not cache a failed lookup", async () => {
+    const fetcher = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("offline"))
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ ancestors: [LOVABLE] }),
+      })
+    await expect(lookup(fetcher, 0)).resolves.toEqual([])
+    await expect(lookup(fetcher, 1_000)).resolves.toEqual([LOVABLE])
+    expect(fetcher).toHaveBeenCalledTimes(2)
+  })
 
   test("has no static fallback when the internal API fails", async () => {
     const fetcher = vi.fn().mockRejectedValue(new Error("offline"))
-
-    await expect(
-      fetchWidgetAncestors(
-        fetcher,
-        "http://127.0.0.1:8000",
-        SERVICE_SECRET,
-        SITE_KEY,
-        PUBLIC_KEY,
-        LOVABLE,
-      ),
-    ).resolves.toEqual([])
+    await expect(lookup(fetcher)).resolves.toEqual([])
   })
 })

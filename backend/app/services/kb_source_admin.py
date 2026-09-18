@@ -1,6 +1,6 @@
-from uuid import UUID
+from uuid import NAMESPACE_URL, UUID, uuid4, uuid5
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.kb_chunk import KbChunk
@@ -20,6 +20,15 @@ from app.services.kb_ingest import CanonicalError, canonical_fetch_url, enqueue_
 from app.services.site_admin import AdminError
 
 SAMPLESITE_SMOKE = ["24-48", "MRO", "rapid"]
+GENERAL_TAB_KEY = "supportchat.kb.general."
+
+
+def general_tab_id(source_id: UUID) -> UUID:
+    return uuid5(NAMESPACE_URL, f"{GENERAL_TAB_KEY}{source_id}")
+
+
+def _origin_count():
+    return func.coalesce(func.jsonb_array_length(KbChunk.origin_urls), 0)
 
 
 class KbSourceService:
@@ -60,19 +69,19 @@ class KbSourceService:
         resolved_mode = mode
         existing = await KbSourceRepository(self._session).get_by_site_start_url(site_id, start_url)
         if existing is not None:
-            if existing.mode == "prefix" or resolved_mode == "prefix":
-                existing.mode = "prefix"
-                existing.seed_urls = [existing.start_url]
-            else:
-                existing.mode = "list"
-                existing.seed_urls = urls
+            if existing.status == "running":
+                raise AdminError("busy")
+            already_queued = existing.status == "queued"
+            existing.mode = resolved_mode
+            existing.seed_urls = urls
             existing.status = "queued"
             existing.stage = "idle"
             existing.error_code = None
             existing.enabled = True
             await self._ensure_samplesite_smoke(existing)
             await self._session.commit()
-            await enqueue_wakeup(existing.id)
+            if not already_queued:
+                await enqueue_wakeup(existing.id)
             return existing
         overlap = await self._session.scalar(
             select(KbPage.id).where(KbPage.site_id == site_id, KbPage.url == start_url)
@@ -96,6 +105,49 @@ class KbSourceService:
         await enqueue_wakeup(source.id)
         return source
 
+    async def create_text_source(
+        self,
+        site_id: UUID,
+        admin: User,
+        *,
+        title: str,
+        body: str,
+    ) -> KbSource:
+        site = await self._session.get(Site, site_id)
+        if site is None:
+            raise AdminError("not_found")
+        title, body = self._clean_manual_text(title, body)
+        source_id = uuid4()
+        source = KbSource(
+            id=source_id,
+            site_id=site_id,
+            start_url=f"kb-text://{source_id}",
+            mode="list",
+            seed_urls=[],
+            max_pages=1,
+            status="queued",
+            embedder_id=configured_embedder_id(),
+            source_kind="text",
+            display_name=title,
+            manual_text=body,
+            created_by=admin.id,
+            enabled=True,
+        )
+        self._session.add(source)
+        await self._session.commit()
+        await enqueue_wakeup(source.id)
+        return source
+
+    @staticmethod
+    def _clean_manual_text(title: str, body: str) -> tuple[str, str]:
+        clean_title = title.replace("\x00", "").strip()
+        clean_body = body.replace("\x00", "").strip()
+        if not clean_title or not clean_body:
+            raise AdminError("invalid")
+        if len(clean_title) > 300 or len(clean_body) > 40_000:
+            raise AdminError("too_large")
+        return clean_title, clean_body
+
     @staticmethod
     def _normalized_seed_urls(raw_seeds: list[str]) -> list[str]:
         urls: list[str] = []
@@ -108,7 +160,7 @@ class KbSourceService:
             if fetch_url in seen:
                 continue
             seen.add(fetch_url)
-            urls.append(raw.strip())
+            urls.append(fetch_url)
         if not urls:
             raise AdminError("invalid")
         if len(urls) > 50:
@@ -138,15 +190,42 @@ class KbSourceService:
             )
         )
 
-    async def patch_source(self, source_id: UUID, *, enabled: bool | None) -> KbSource:
+    async def patch_source(
+        self,
+        source_id: UUID,
+        *,
+        enabled: bool | None,
+        title: str | None = None,
+        body: str | None = None,
+    ) -> KbSource:
         source = await self._session.get(KbSource, source_id)
         if source is None:
             raise AdminError("not_found")
         if enabled is not None:
             source.enabled = enabled
+        editing_text = title is not None or body is not None
+        text_changed = False
+        if editing_text:
+            if source.source_kind != "text":
+                raise AdminError("invalid")
+            if source.status == "running":
+                raise AdminError("busy")
+            clean_title, clean_body = self._clean_manual_text(
+                title if title is not None else source.display_name or "",
+                body if body is not None else source.manual_text or "",
+            )
+            if (clean_title, clean_body) != (source.display_name, source.manual_text):
+                text_changed = True
+                source.display_name = clean_title
+                source.manual_text = clean_body
+                source.status = "queued"
+                source.stage = "idle"
+                source.error_code = None
         await self._session.commit()
         if enabled is not None:
             clear_units_cache()
+        if text_changed:
+            await enqueue_wakeup(source.id)
         return source
 
     async def sync_source(self, source_id: UUID) -> KbSource:
@@ -204,26 +283,48 @@ class KbSourceService:
         await self._session.commit()
         clear_units_cache()
 
-    async def list_pages(self, source_id: UUID) -> list[KbPage]:
+    async def list_pages(self, source_id: UUID) -> list[tuple[KbPage, int]]:
         source = await self._session.get(KbSource, source_id)
         if source is None:
             raise AdminError("not_found")
-        result = await self._session.execute(
-            select(KbPage).where(KbPage.source_id == source_id).order_by(KbPage.url)
+        live_chunk_count = (
+            select(func.count(KbChunk.id))
+            .join(KbSnapshot, KbSnapshot.id == KbChunk.snapshot_id)
+            .where(
+                KbChunk.page_id == KbPage.id,
+                KbSnapshot.state == "live",
+                _origin_count() < 2,
+            )
+            .correlate(KbPage)
+            .scalar_subquery()
         )
-        return list(result.scalars().all())
+        result = await self._session.execute(
+            select(KbPage, live_chunk_count)
+            .where(KbPage.source_id == source_id)
+            .order_by(KbPage.url)
+        )
+        rows = [(page, int(chunk_count)) for page, chunk_count in result.all()]
+        shared_count = await self._shared_chunk_count(source_id)
+        if len(rows) > 1 and shared_count > 0:
+            return [(self._general_page(source), shared_count), *rows]
+        return rows
 
     async def get_page(self, page_id: UUID) -> tuple[KbPage, list[KbChunk]]:
         page = await self._session.get(KbPage, page_id)
-        if page is None:
+        if page is not None:
+            chunks = await self._live_chunks(
+                KbChunk.page_id == page.id,
+                shared=False,
+            )
+            return page, chunks
+        source = await self._source_for_general_tab(page_id)
+        if source is None:
             raise AdminError("not_found")
-        result = await self._session.execute(
-            select(KbChunk)
-            .join(KbSnapshot, KbSnapshot.id == KbChunk.snapshot_id)
-            .where(KbChunk.page_id == page.id, KbSnapshot.state == "live")
-            .order_by(KbChunk.ordinal, KbChunk.id)
+        chunks = await self._live_chunks(
+            KbPage.source_id == source.id,
+            shared=True,
         )
-        return page, list(result.scalars().all())
+        return self._general_page(source), chunks
 
     async def patch_page(self, page_id: UUID, *, enabled: bool) -> KbPage:
         page = await self._session.get(KbPage, page_id)
@@ -302,6 +403,52 @@ class KbSourceService:
             ):
                 changed.append({"before": before_map[key], "after": after_map[key]})
         return {"added": added, "changed": changed, "removed": removed}
+
+    def _general_page(self, source: KbSource) -> KbPage:
+        return KbPage(
+            id=general_tab_id(source.id),
+            source_id=source.id,
+            site_id=source.site_id,
+            url=source.start_url,
+            citation_url=source.start_url,
+            title="General",
+            content_text="",
+            content_sha256="",
+            http_status=200,
+            enabled=True,
+            processing_status="ready",
+        )
+
+    async def _source_for_general_tab(self, page_id: UUID) -> KbSource | None:
+        result = await self._session.execute(select(KbSource))
+        return next(
+            (source for source in result.scalars().all() if general_tab_id(source.id) == page_id),
+            None,
+        )
+
+    async def _shared_chunk_count(self, source_id: UUID) -> int:
+        result = await self._session.execute(
+            select(func.count(KbChunk.id))
+            .join(KbPage, KbPage.id == KbChunk.page_id)
+            .join(KbSnapshot, KbSnapshot.id == KbChunk.snapshot_id)
+            .where(
+                KbPage.source_id == source_id,
+                KbSnapshot.state == "live",
+                _origin_count() >= 2,
+            )
+        )
+        return int(result.scalar_one() or 0)
+
+    async def _live_chunks(self, *filters, shared: bool) -> list[KbChunk]:
+        origin_filter = _origin_count() >= 2 if shared else _origin_count() < 2
+        result = await self._session.execute(
+            select(KbChunk)
+            .join(KbPage, KbPage.id == KbChunk.page_id)
+            .join(KbSnapshot, KbSnapshot.id == KbChunk.snapshot_id)
+            .where(*filters, KbSnapshot.state == "live", origin_filter)
+            .order_by(KbChunk.heading, KbChunk.ordinal, KbChunk.id)
+        )
+        return list(result.scalars().all())
 
     async def rollback_source(self, source_id: UUID) -> KbSnapshot:
         source = await self._session.get(KbSource, source_id)

@@ -1,67 +1,45 @@
 "use strict";
 (() => {
-  // embed-loader/bootstrap.ts
-  var isRecord = (value) => {
-    return typeof value === "object" && value !== null;
-  };
-  var parseWidget = (value) => {
-    if (!isRecord(value)) {
-      return null;
-    }
-    if (typeof value.name !== "string" || typeof value.greeting !== "string" || typeof value.privacy_url !== "string") {
-      return null;
-    }
-    const contactInfo = Array.isArray(value.contact_info) ? value.contact_info.filter(
-      (item) => typeof item === "string" && item.trim() !== ""
-    ) : [];
-    return {
-      name: value.name,
-      greeting: value.greeting,
-      privacy_url: value.privacy_url,
-      contact_info: contactInfo,
-      bot_enabled: value.bot_enabled !== false,
-      human_enabled: value.human_enabled !== false
-    };
-  };
-  var parseBootstrapResult = (value) => {
-    if (!isRecord(value) || typeof value.bootstrap_token !== "string") {
-      return null;
-    }
-    const widget = parseWidget(value.widget);
-    if (widget === null) {
-      return null;
-    }
-    const resume = typeof value.resume_token === "string" ? { resume_token: value.resume_token } : {};
-    return { widget, bootstrap_token: value.bootstrap_token, ...resume };
-  };
-  var requestBootstrap = async (widgetOrigin, siteKey, publicKey, resumeToken) => {
-    const body = {
-      site_key: siteKey,
-      public_key: publicKey,
-      resume_token: resumeToken
-    };
-    try {
-      const response = await fetch(`${widgetOrigin}/api/public/widget-bootstrap`, {
-        method: "POST",
-        headers: { "Content-Type": "text/plain;charset=UTF-8" },
-        body: JSON.stringify(body)
-      });
-      if (!response.ok) {
-        return null;
-      }
-      return parseBootstrapResult(await response.json());
-    } catch (e) {
-      return null;
-    }
-  };
-
   // src/lib/postmessage.ts
   var WIDGET_RESIZE_MIN = 320;
   var WIDGET_RESIZE_MAX = 720;
   var WIDGET_WIDTH_MIN = 360;
   var WIDGET_WIDTH_MAX = 560;
-  var isRecord2 = (value) => {
+  var isRecord = (value) => {
     return typeof value === "object" && value !== null;
+  };
+  var SNAPSHOT_STATES = /* @__PURE__ */ new Set([
+    "prechat",
+    "bot",
+    "queued",
+    "human",
+    "closed"
+  ]);
+  var parseAssignedAgent = (value) => {
+    if (value === null) {
+      return null;
+    }
+    if (!isRecord(value) || typeof value.id !== "string" || typeof value.display_name !== "string") {
+      return void 0;
+    }
+    return { id: value.id, display_name: value.display_name };
+  };
+  var parseConversationSnapshot = (value) => {
+    if (!isRecord(value) || typeof value.state !== "string" || !SNAPSHOT_STATES.has(value.state)) {
+      return void 0;
+    }
+    if (!Array.isArray(value.messages)) {
+      return void 0;
+    }
+    const assigned = value.assigned_agent === void 0 ? null : parseAssignedAgent(value.assigned_agent);
+    if (assigned === void 0) {
+      return void 0;
+    }
+    return {
+      state: value.state,
+      assigned_agent: assigned,
+      messages: value.messages.filter(isRecord)
+    };
   };
   var parseResize = (value) => {
     if (typeof value.height !== "number" || !Number.isInteger(value.height)) {
@@ -83,6 +61,7 @@
   };
   var SIMPLE_WIDGET_TYPES = /* @__PURE__ */ new Set([
     "widget.ready",
+    "widget.painted",
     "widget.rebootstrap",
     "widget.activated",
     "widget.close",
@@ -109,7 +88,7 @@
     return { type: "widget.open_url", url: value.url };
   };
   var parseWidgetToHost = (value) => {
-    if (!isRecord2(value) || typeof value.type !== "string") {
+    if (!isRecord(value) || typeof value.type !== "string") {
       return null;
     }
     const simple = parseSimpleWidget(value.type);
@@ -123,6 +102,67 @@
       return parseOpenUrl(value);
     }
     return null;
+  };
+
+  // embed-loader/bootstrap.ts
+  var isRecord2 = (value) => {
+    return typeof value === "object" && value !== null;
+  };
+  var parseWidget = (value) => {
+    if (!isRecord2(value)) {
+      return null;
+    }
+    if (typeof value.name !== "string" || typeof value.greeting !== "string" || typeof value.privacy_url !== "string") {
+      return null;
+    }
+    const contactInfo = Array.isArray(value.contact_info) ? value.contact_info.filter(
+      (item) => typeof item === "string" && item.trim() !== ""
+    ) : [];
+    return {
+      name: value.name,
+      greeting: value.greeting,
+      privacy_url: value.privacy_url,
+      contact_info: contactInfo,
+      bot_enabled: value.bot_enabled !== false,
+      human_enabled: value.human_enabled !== false
+    };
+  };
+  var parseBootstrapResult = (value) => {
+    if (!isRecord2(value) || typeof value.bootstrap_token !== "string") {
+      return null;
+    }
+    const widget = parseWidget(value.widget);
+    if (widget === null) {
+      return null;
+    }
+    const resume = typeof value.resume_token === "string" ? { resume_token: value.resume_token } : {};
+    const conversation = parseConversationSnapshot(value.conversation);
+    return {
+      widget,
+      bootstrap_token: value.bootstrap_token,
+      ...resume,
+      ...conversation === void 0 ? {} : { conversation }
+    };
+  };
+  var requestBootstrap = async (widgetOrigin, siteKey, publicKey, resumeToken) => {
+    const body = {
+      site_key: siteKey,
+      public_key: publicKey,
+      resume_token: resumeToken
+    };
+    try {
+      const response = await fetch(`${widgetOrigin}/api/public/widget-bootstrap`, {
+        method: "POST",
+        headers: { "Content-Type": "text/plain;charset=UTF-8" },
+        body: JSON.stringify(body)
+      });
+      if (!response.ok) {
+        return null;
+      }
+      return parseBootstrapResult(await response.json());
+    } catch (e) {
+      return null;
+    }
   };
 
   // embed-loader/sanitize.ts
@@ -197,8 +237,10 @@
       "max-width:calc(100vw - 32px)",
       "max-height:calc(100vh - 32px)",
       "opacity:0",
-      "transform:translateY(16px) scale(0.96)"
+      "transform:translateY(16px) scale(0.96)",
+      "pointer-events:none"
     ].join(";");
+    iframe.hidden = true;
     doc.body.appendChild(iframe);
     return iframe;
   };
@@ -257,6 +299,9 @@
     switch (frame.type) {
       case "widget.ready":
         handlers.onReady();
+        return;
+      case "widget.painted":
+        handlers.onPainted();
         return;
       case "widget.activated":
         handlers.onActivated();
@@ -489,6 +534,9 @@
       runtime.hideTimer = null;
     }
   };
+  var setLauncherBusy = (runtime, busy) => {
+    runtime.launcher.setAttribute("aria-busy", busy ? "true" : "false");
+  };
   var bootstrapFrame = (runtime) => {
     if (runtime.bootstrapToken === null || runtime.widget === null) {
       return null;
@@ -499,7 +547,8 @@
       widget: runtime.widget,
       page_url: "",
       page_title: "",
-      referrer: ""
+      referrer: "",
+      ...runtime.conversation === void 0 ? {} : { conversation: runtime.conversation }
     };
   };
   var panelState = (runtime) => {
@@ -535,9 +584,11 @@
   };
   var hidePanel = (runtime) => {
     clearHideTimer(runtime);
+    setLauncherBusy(runtime, false);
     if (runtime.iframe !== null) {
       runtime.iframe.style.opacity = "0";
       runtime.iframe.style.transform = "translateY(16px) scale(0.96)";
+      runtime.iframe.style.pointerEvents = "none";
       const delay = reducedMotionDelay(runtime.win);
       runtime.hideTimer = setTimeout(() => {
         runtime.hideTimer = null;
@@ -551,8 +602,10 @@
   };
   var showPanel = (runtime) => {
     clearHideTimer(runtime);
+    setLauncherBusy(runtime, false);
     if (runtime.iframe !== null) {
       runtime.iframe.hidden = false;
+      runtime.iframe.style.pointerEvents = "auto";
       runtime.win.requestAnimationFrame(() => {
         if (runtime.iframe === null) {
           return;
@@ -570,7 +623,11 @@
     runtime.pendingResume = null;
     runtime.bootstrapToken = null;
     runtime.widget = null;
+    runtime.conversation = void 0;
     runtime.bootstrapAcked = false;
+    runtime.panelPainted = false;
+    runtime.visitorActivated = false;
+    setLauncherBusy(runtime, false);
     if (runtime.iframe !== null) {
       runtime.iframe.remove();
       runtime.iframe = null;
@@ -578,35 +635,49 @@
     runtime.launcher.hidden = false;
     runtime.launcher.focus();
   };
+  var persistResumeIfReady = (runtime) => {
+    if (!runtime.visitorActivated || runtime.pendingResume === null) {
+      return;
+    }
+    writeResumeToken(runtime.config.siteKey, runtime.pendingResume);
+  };
   var persistActivated = (runtime) => {
+    runtime.visitorActivated = true;
     runtime.bootstrapAcked = true;
     clearRetryTimer(runtime);
-    if (runtime.pendingResume !== null) {
-      writeResumeToken(runtime.config.siteKey, runtime.pendingResume);
-    }
+    persistResumeIfReady(runtime);
   };
-  var applyBootstrap = (runtime, token, widget, resume) => {
+  var warmPanel = (runtime) => {
+    if (runtime.iframe !== null) {
+      return;
+    }
+    runtime.iframe = createPanel(
+      runtime.doc,
+      runtime.widgetOrigin,
+      runtime.config.siteKey,
+      runtime.config.publicKey,
+      originFromHref(runtime.win.location.href)
+    );
+  };
+  var applyBootstrap = (runtime, token, widget, resume, conversation) => {
     runtime.bootstrapToken = token;
     runtime.widget = widget;
+    runtime.conversation = conversation;
     runtime.bootstrapAcked = false;
     if (resume !== void 0) {
       runtime.pendingResume = resume;
     }
-    if (runtime.iframe === null) {
-      runtime.iframe = createPanel(
-        runtime.doc,
-        runtime.widgetOrigin,
-        runtime.config.siteKey,
-        runtime.config.publicKey,
-        originFromHref(runtime.win.location.href)
-      );
-    }
-    showPanel(runtime);
+    warmPanel(runtime);
     hideHostError(runtime.doc);
+    persistResumeIfReady(runtime);
   };
   var handleHostMessage = (runtime, event) => {
     acceptWidgetFrame(panelState(runtime), event, {
       onReady: () => sendBootstrapWithRetry(runtime),
+      onPainted: () => {
+        runtime.panelPainted = true;
+        showPanel(runtime);
+      },
       onActivated: () => persistActivated(runtime),
       onRebootstrap: () => {
         void runBootstrap(runtime);
@@ -631,21 +702,39 @@
     );
     runtime.opening = false;
     if (result === null) {
+      setLauncherBusy(runtime, false);
       showHostError(runtime.doc, () => {
         void runBootstrap(runtime);
       });
       return;
     }
-    applyBootstrap(runtime, result.bootstrap_token, result.widget, result.resume_token);
+    applyBootstrap(
+      runtime,
+      result.bootstrap_token,
+      result.widget,
+      result.resume_token,
+      result.conversation
+    );
     sendBootstrapWithRetry(runtime);
   };
   var handleOpen = (runtime) => {
     hideHostError(runtime.doc);
-    if (runtime.iframe !== null) {
+    if (runtime.iframe !== null && runtime.panelPainted) {
       showPanel(runtime);
       return;
     }
+    setLauncherBusy(runtime, true);
+    warmPanel(runtime);
     void runBootstrap(runtime);
+  };
+  var preconnectWidget = (doc, widgetOrigin) => {
+    if (doc.querySelector(`link[rel="preconnect"][href="${widgetOrigin}"]`) !== null) {
+      return;
+    }
+    const link = doc.createElement("link");
+    link.rel = "preconnect";
+    link.setAttribute("href", widgetOrigin);
+    doc.head.appendChild(link);
   };
   var installSupportChat = (win, doc, script2) => {
     if (win.__supportchatInstalled === true) {
@@ -658,6 +747,7 @@
       return;
     }
     win.__supportchatInstalled = true;
+    preconnectWidget(doc, widgetOrigin);
     const runtime = {
       win,
       doc,
@@ -668,12 +758,17 @@
       pendingResume: null,
       bootstrapToken: null,
       widget: null,
+      conversation: void 0,
       opening: false,
+      panelPainted: false,
+      visitorActivated: false,
       bootstrapAcked: false,
       retryTimer: null,
       hideTimer: null
     };
     runtime.launcher = mountLauncher(doc, () => handleOpen(runtime));
+    runtime.launcher.addEventListener("pointerenter", () => warmPanel(runtime));
+    runtime.launcher.addEventListener("focus", () => warmPanel(runtime));
     win.addEventListener("message", (event) => handleHostMessage(runtime, event));
     watchNavigation(win, () => {
       sendContext(panelState(runtime), win, doc);

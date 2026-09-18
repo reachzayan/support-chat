@@ -126,6 +126,87 @@ async def test_ssn_like_body_is_stored_once_stays_bot_and_warning_omits_digits(
             assert "123456789" not in row.body
 
 
+async def test_ssn_word_without_digits_is_refused_without_calling_the_model(
+    migrated_db,
+) -> None:
+    responder = RecordingResponder()
+    async with session_maker()() as session:
+        easy, _bg, _timing, _fcra = await seed_brand_articles(session)
+        visitor, conversation = await insert_bot_conversation(session, easy)
+        await session.commit()
+        service = ConversationService(session, responder=responder)
+        result = await service.visitor_message(
+            conversation.id,
+            visitor.id,
+            HOST_ORIGIN,
+            uuid.uuid4(),
+            "Can your platform keep a candidate SSN on file for our HR team?",
+        )
+        if result.generation_id is not None:
+            await service.run_bot_turn(conversation.id, result.generation_id)
+        conversation_id = conversation.id
+
+    assert responder.calls == []
+    assert conversation_state(conversation_id) == "bot"
+    assert message_count(conversation_id, role="system", body=SENSITIVE_WARN) == 1
+    assert message_count(conversation_id, role="system", body=TRANSFER_OFFER) == 1
+    assert message_count(conversation_id, role="bot") == 0
+
+
+async def test_third_person_medical_records_lookup_is_refused_without_calling_the_model(
+    migrated_db,
+) -> None:
+    medical_line = "Medical details aren't safe to share in chat."
+    responder = RecordingResponder()
+    async with session_maker()() as session:
+        easy, _bg, _timing, _fcra = await seed_brand_articles(session)
+        visitor, conversation = await insert_bot_conversation(session, easy)
+        await session.commit()
+        service = ConversationService(session, responder=responder)
+        result = await service.visitor_message(
+            conversation.id,
+            visitor.id,
+            HOST_ORIGIN,
+            uuid.uuid4(),
+            "Can you look up this person's medical records?",
+        )
+        if result.generation_id is not None:
+            await service.run_bot_turn(conversation.id, result.generation_id)
+        conversation_id = conversation.id
+
+    assert responder.calls == []
+    assert conversation_state(conversation_id) == "bot"
+    assert message_count(conversation_id, role="system", body=medical_line) == 1
+    assert message_count(conversation_id, role="system", body=TRANSFER_OFFER) == 1
+    assert message_count(conversation_id, role="system", body=WAITING_LINE) == 0
+
+
+async def test_chest_pain_advice_is_refused_without_calling_the_model(migrated_db) -> None:
+    medical_line = "Medical details aren't safe to share in chat."
+    responder = RecordingResponder()
+    async with session_maker()() as session:
+        easy, _bg, _timing, _fcra = await seed_brand_articles(session)
+        visitor, conversation = await insert_bot_conversation(session, easy)
+        await session.commit()
+        service = ConversationService(session, responder=responder)
+        result = await service.visitor_message(
+            conversation.id,
+            visitor.id,
+            HOST_ORIGIN,
+            uuid.uuid4(),
+            "Diagnose this chest pain and tell me if I need the ER.",
+        )
+        if result.generation_id is not None:
+            await service.run_bot_turn(conversation.id, result.generation_id)
+        conversation_id = conversation.id
+
+    assert responder.calls == []
+    assert conversation_state(conversation_id) == "bot"
+    assert message_count(conversation_id, role="system", body=medical_line) == 1
+    assert message_count(conversation_id, role="system", body=TRANSFER_OFFER) == 1
+    assert message_count(conversation_id, role="bot") == 0
+
+
 async def test_unattributed_model_text_is_not_persisted_as_a_bot_row(
     migrated_db,
 ) -> None:

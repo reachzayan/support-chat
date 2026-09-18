@@ -88,7 +88,7 @@ export const StaffNav = ({ current, displayName }: StaffNavProps) => {
         Skip to content
       </a>
       <div className="border-navy-mid flex items-center justify-center border-r px-3 py-3 lg:border-r-0 lg:border-b lg:py-4">
-        <span className="bg-ember dark:text-navy-deep flex size-10 items-center justify-center rounded-[8px] text-xs font-extrabold tracking-[-0.08em] text-white">
+        <span className="bg-ember dark:text-navy-deep flex size-10 items-center justify-center rounded-[8px] text-xs font-semibold tracking-[-0.08em] text-white">
           Support
         </span>
         <span className="sr-only">SupportChat specialist console</span>
@@ -139,13 +139,11 @@ export const StaffHeader = ({
     <header className="border-line bg-paper flex min-h-[82px] items-center justify-between gap-4 border-b px-5 py-4 lg:px-8">
       <div className="min-w-0">
         {eyebrow ? (
-          <p className="text-mute text-[10px] font-bold tracking-[0.16em] uppercase">{eyebrow}</p>
+          <p className="text-mute text-[11px] font-semibold tracking-[0.2em] uppercase">
+            {eyebrow}
+          </p>
         ) : null}
-        <h1
-          className={`text-navy text-xl font-extrabold tracking-[-0.035em] ${eyebrow ? "mt-1" : ""}`}
-        >
-          {title}
-        </h1>
+        <h1 className={`text-navy heading text-[1.65rem] ${eyebrow ? "mt-1" : ""}`}>{title}</h1>
         {description ? <p className="text-mute mt-1 max-w-2xl text-xs">{description}</p> : null}
       </div>
       {action ? <div className="shrink-0">{action}</div> : null}

@@ -1,14 +1,15 @@
 "use client"
 
-/* oxlint-disable react-perf/jsx-no-new-function-as-prop -- Retrieved-answer controls close over each immutable chunk record. */
+/* oxlint-disable react-perf/jsx-no-new-function-as-prop, react-perf/jsx-no-new-object-as-prop, react-perf/jsx-no-jsx-as-prop -- Retrieved-answer controls close over each immutable chunk record; motion props need inline transition objects; StaffHeader action takes composed controls. */
 
-import { ChevronDown, ExternalLink, Globe2, Plus, RefreshCw, Search } from "lucide-react"
-import { useCallback, useMemo, useState, type ChangeEvent } from "react"
+import { cn } from "cn"
+import { ChevronDown, ExternalLink, FileText, Globe2, Plus, RefreshCw, Search } from "lucide-react"
+import { AnimatePresence, motion, useReducedMotion } from "motion/react"
+import { useCallback, useMemo, useState, type ChangeEvent, type KeyboardEvent } from "react"
 
 import type {
   KbPageDetail,
   KbPageRecord,
-  KbProgressRecord,
   KbSourceRecord,
   SiteRecord,
 } from "@/components/admin/staff-api"
@@ -22,8 +23,13 @@ import {
   DialogDescription,
   DialogFooter,
   DialogHeader,
+  DialogResizeSection,
   DialogTitle,
 } from "@/components/ui/dialog"
+import { FieldError } from "@/components/ui/field"
+import { Input } from "@/components/ui/input"
+import { LinkButton, linkUnderlineClass } from "@/components/ui/link-button"
+import { ScrollArea } from "@/components/ui/scroll-area"
 import {
   Select,
   SelectContent,
@@ -36,6 +42,8 @@ import { Switch } from "@/components/ui/switch"
 import { Textarea } from "@/components/ui/textarea"
 import { safeHttpUrl } from "@/lib/ua"
 
+import { humanizeCode } from "./knowledge-format"
+import { resolveKnowledgeSiteId, selectedSiteValue } from "./knowledge-site"
 import { useKnowledgeState } from "./knowledge-state"
 import { SnapshotDiffSheet } from "./snapshot-diff-sheet"
 
@@ -44,84 +52,156 @@ type KnowledgeConsoleProps = {
   displayName: string
 }
 
+const EASE_OUT = [0.23, 1, 0.32, 1] as const
+const FADE_UP = { duration: 0.18, ease: EASE_OUT }
+const RAIL_SPRING = { type: "spring", stiffness: 500, damping: 42, mass: 0.6 } as const
+const EMPTY_PAGES: KbPageRecord[] = []
+
+const groupPagesBySource = (pages: KbPageRecord[]) => {
+  const grouped: Record<string, KbPageRecord[]> = {}
+  for (const page of pages) {
+    const bucket = grouped[page.source_id] ?? []
+    bucket.push(page)
+    grouped[page.source_id] = bucket
+  }
+  return grouped
+}
+
+const sourceMatchesQuery = (
+  source: KbSourceRecord,
+  sourcePages: KbPageRecord[],
+  needle: string,
+) => {
+  if (!needle) {
+    return true
+  }
+  if (`${source.display_name ?? ""} ${source.start_url}`.toLocaleLowerCase().includes(needle)) {
+    return true
+  }
+  return sourcePages.some((page) =>
+    `${page.title} ${page.url}`.toLocaleLowerCase().includes(needle),
+  )
+}
+
+const unitKindLabel = (kind: string) => {
+  if (kind === "faq") return "FAQ"
+  return kind.length > 0 ? `${kind[0].toLocaleUpperCase()}${kind.slice(1)}` : "Unit"
+}
+
+const originPagesLabel = (chunk: KbPageDetail["chunks"][number], pages: KbPageRecord[]) => {
+  const origins = chunk.origin_urls ?? []
+  if (origins.length < 2) {
+    return null
+  }
+  const titles = origins.flatMap((url) => {
+    const page = pages.find((item) => item.url === url && item.tab !== "general")
+    return page?.title ? [page.title] : []
+  })
+  if (titles.length === 0) {
+    return null
+  }
+  if (titles.length === 1) {
+    return `Also on ${titles[0]}`
+  }
+  if (titles.length === 2) {
+    return `Also on ${titles[0]} and ${titles[1]}`
+  }
+  return `Also on ${titles.slice(0, -1).join(", ")}, and ${titles[titles.length - 1]}`
+}
+
 // oxlint-disable-next-line eslint/max-lines-per-function -- This screen coordinates the existing knowledge state hook and its visible sections.
 export const KnowledgeConsole = ({ isAdmin, displayName: _displayName }: KnowledgeConsoleProps) => {
   const state = useKnowledgeState(isAdmin)
   const { handleAdd } = state
-  const [addWebsiteOpen, setAddWebsiteOpen] = useState(false)
+  const [addKnowledgeOpen, setAddKnowledgeOpen] = useState(false)
   const selectedSite = state.sites.find((site) => site.id === state.siteId) ?? null
   const handleAddWebsite = useCallback(async () => {
     const added = await handleAdd()
     if (added) {
-      setAddWebsiteOpen(false)
+      setAddKnowledgeOpen(false)
     }
   }, [handleAdd])
-  const handleOpenAddWebsite = useCallback(() => setAddWebsiteOpen(true), [])
+  const handleOpenAddKnowledge = useCallback(() => setAddKnowledgeOpen(true), [])
   return (
     <div className="view-transition-enter bg-ice flex min-h-0 flex-1 flex-col overflow-hidden">
       <div className="shrink-0">
         <StaffHeader
           title="Knowledge base"
-          description="Add the public pages this site should answer from."
+          description="Add websites or trusted text this site should answer from."
+          action={
+            <div className="flex flex-wrap items-end gap-2">
+              <SitePicker
+                compact
+                sites={state.sites}
+                siteId={state.siteId}
+                onSite={state.handleSite}
+              />
+              {isAdmin ? (
+                <Button
+                  type="button"
+                  onClick={handleOpenAddKnowledge}
+                  disabled={!state.siteId}
+                  className="bg-ember hover:bg-ember-mid focus-visible:ring-steel h-10 rounded-[9px] px-4 text-sm font-bold text-white focus-visible:ring-2 focus-visible:outline-none"
+                >
+                  <Plus aria-hidden="true" />
+                  Add knowledge
+                </Button>
+              ) : null}
+            </div>
+          }
+        />
+        <KnowledgeMetrics
+          sourceCount={state.sources.length}
+          pageCount={state.pages.filter((page) => page.tab !== "general").length}
         />
       </div>
-      <KnowledgeWebsiteBar
-        isAdmin={isAdmin}
-        selectedSite={selectedSite}
-        sites={state.sites}
-        siteId={state.siteId}
-        sourceCount={state.sources.length}
-        pageCount={state.pages.length}
-        onSite={state.handleSite}
-        onOpenAddWebsite={handleOpenAddWebsite}
-      />
-      <div id="main-content" className="min-h-0 flex-1 overflow-y-auto">
-        <div className="mx-auto flex w-full max-w-7xl flex-col gap-5 px-5 py-6 lg:px-8 lg:py-8">
-          <SourceTable
-            isAdmin={isAdmin}
-            sources={state.sources}
-            onSync={state.handleSync}
-            onToggle={state.handleToggleSource}
-            onDelete={state.handleDelete}
-            onSelect={state.handleSelectSource}
-            onViewChanges={state.handleViewChanges}
-          />
-          <CrawlActivity progress={state.progress} />
-          <SnapshotDiffSheet
-            open={state.diffSource !== null}
-            onOpenChange={state.handleDiffOpen}
-            diff={state.diff}
-            status={state.diffStatus}
-            canRollback={isAdmin && state.canRollback}
-            rollbackBusy={state.rollbackBusy}
-            onRollback={state.handleRollback}
-          />
-          <PageTable
-            pages={state.pages}
-            selectedId={state.pageDetail?.id ?? null}
-            isAdmin={isAdmin}
-            onSelect={state.handleSelectPage}
-            onToggle={state.handleTogglePage}
-            onRetry={state.handleRetryPage}
-          />
-          <IndexedCopy
-            detail={state.pageDetail}
-            isAdmin={isAdmin}
-            pendingIds={state.chunkPendingIds}
-            errors={state.chunkErrors}
-            notice={state.chunkNotice}
-            onToggle={state.handleToggleChunk}
-          />
-        </div>
+      <div id="main-content" className="flex min-h-0 flex-1 flex-col overflow-hidden lg:flex-row">
+        <SourcePane
+          isAdmin={isAdmin}
+          sources={state.sources}
+          pages={state.pages}
+          selectedSourceId={state.sourceId}
+          selectedPageId={state.pageDetail?.id ?? null}
+          onSync={state.handleSync}
+          onToggle={state.handleToggleSource}
+          onDelete={state.handleDelete}
+          onSelect={state.handleSelectSource}
+          onSelectPage={state.handleSelectPage}
+          onViewChanges={state.handleViewChanges}
+        />
+        <DetailPane
+          detail={state.pageDetail}
+          pages={state.pages}
+          hasSource={state.sources.length > 0}
+          isAdmin={isAdmin}
+          pendingIds={state.chunkPendingIds}
+          errors={state.chunkErrors}
+          notice={state.chunkNotice}
+          onTogglePage={state.handleTogglePage}
+          onRetryPage={state.handleRetryPage}
+          onToggleChunk={state.handleToggleChunk}
+        />
       </div>
+      <SnapshotDiffSheet
+        open={state.diffSource !== null}
+        onOpenChange={state.handleDiffOpen}
+        diff={state.diff}
+        status={state.diffStatus}
+        canRollback={isAdmin && state.canRollback}
+        rollbackBusy={state.rollbackBusy}
+        onRollback={state.handleRollback}
+        progress={state.detailProgress}
+      />
       {isAdmin ? (
-        <AddWebsiteDialog
-          open={addWebsiteOpen}
-          onOpenChange={setAddWebsiteOpen}
+        <AddKnowledgeDialog
+          open={addKnowledgeOpen}
+          onOpenChange={setAddKnowledgeOpen}
           siteName={selectedSite?.name ?? "this website"}
           urls={state.urls}
           onUrls={state.handleUrls}
           onAdd={handleAddWebsite}
+          onAddText={state.handleAddText}
+          busy={state.addBusy}
           error={state.addError}
         />
       ) : null}
@@ -129,71 +209,23 @@ export const KnowledgeConsole = ({ isAdmin, displayName: _displayName }: Knowled
   )
 }
 
-type KnowledgeWebsiteBarProps = {
-  isAdmin: boolean
-  selectedSite: SiteRecord | null
-  sites: SiteRecord[]
-  siteId: string
-  sourceCount: number
-  pageCount: number
-  onSite: (siteId: string) => void
-  onOpenAddWebsite: () => void
-}
-
-const KnowledgeWebsiteBar = ({
-  isAdmin,
-  selectedSite,
-  sites,
-  siteId,
+const KnowledgeMetrics = ({
   sourceCount,
   pageCount,
-  onSite,
-  onOpenAddWebsite,
-}: KnowledgeWebsiteBarProps) => (
-  <div className="border-line bg-paper shrink-0 border-b">
-    <div className="mx-auto flex w-full max-w-7xl flex-col gap-4 px-5 py-4 sm:flex-row sm:items-end sm:justify-between lg:px-8">
-      <div className="flex min-w-0 flex-wrap items-center gap-5">
-        <div className="flex min-w-0 items-center gap-3">
-          <span className="bg-ice-2 text-steel flex size-10 shrink-0 items-center justify-center rounded-[10px]">
-            <Globe2 aria-hidden="true" className="size-5" strokeWidth={1.8} />
-          </span>
-          <div className="min-w-0">
-            <p className="text-mute text-[10px] font-bold tracking-[0.14em] uppercase">
-              Active website
-            </p>
-            <p className="text-navy truncate text-sm font-extrabold">
-              {selectedSite?.name ?? "Choose a website"}
-            </p>
-          </div>
-        </div>
-        <div className="border-line hidden h-10 border-l sm:block" aria-hidden="true" />
-        <div className="flex items-center gap-5">
-          <OverviewMetric label="Sources" value={sourceCount} />
-          <OverviewMetric label="Indexed pages" value={pageCount} />
-        </div>
-      </div>
-      <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
-        <SitePicker sites={sites} siteId={siteId} onSite={onSite} />
-        {isAdmin ? (
-          <Button
-            type="button"
-            onClick={onOpenAddWebsite}
-            disabled={!siteId}
-            className="bg-ember hover:bg-ember-mid focus-visible:ring-steel h-10 rounded-[9px] px-4 text-sm font-bold text-white focus-visible:ring-2 focus-visible:outline-none"
-          >
-            <Plus aria-hidden="true" />
-            Add website
-          </Button>
-        ) : null}
-      </div>
-    </div>
+}: {
+  sourceCount: number
+  pageCount: number
+}) => (
+  <div className="border-line flex items-end gap-8 border-b px-5 py-3 lg:px-8">
+    <OverviewMetric label="Sources" value={sourceCount} />
+    <OverviewMetric label="Indexed pages" value={pageCount} />
   </div>
 )
 
 const OverviewMetric = ({ label, value }: { label: string; value: number }) => (
-  <div className="border-line border-l pl-4 first:border-l-0 first:pl-0">
-    <p className="text-mute text-[10px] font-bold tracking-[0.12em] uppercase">{label}</p>
-    <p className="text-navy mt-1 text-xl font-extrabold tabular-nums">{value}</p>
+  <div>
+    <p className="text-mute text-[11px] font-semibold tracking-[0.2em] uppercase">{label}</p>
+    <p className="text-navy heading mt-1 text-xl tabular-nums">{value}</p>
   </div>
 )
 
@@ -208,19 +240,28 @@ const SitePicker = ({
   siteId: string
   onSite: (siteId: string) => void
 }) => {
-  const items = useMemo(() => sites.map((site) => ({ label: site.name, value: site.id })), [sites])
+  const items = useMemo(
+    () => Object.fromEntries(sites.map((site) => [site.id, site.name])),
+    [sites],
+  )
   const handleSiteChange = useCallback(
-    (value: string | null) => {
-      if (typeof value === "string" && value.length > 0) {
-        onSite(value)
+    (value: unknown) => {
+      const selected = selectedSiteValue(value)
+      if (selected === null) {
+        return
       }
+      const nextId = resolveKnowledgeSiteId(sites, selected, siteId)
+      if (nextId === null) {
+        return
+      }
+      onSite(nextId)
     },
-    [onSite],
+    [onSite, siteId, sites],
   )
   return (
     <div className={`flex min-w-0 flex-col gap-1.5 ${compact ? "w-44" : "sm:w-56"}`}>
       <label
-        className={`${compact ? "sr-only" : "text-mute text-[10px] font-bold tracking-[0.12em] uppercase"}`}
+        className={`${compact ? "sr-only" : "text-mute text-[10px] font-semibold tracking-[0.12em] uppercase"}`}
         htmlFor="knowledge-site"
       >
         Website
@@ -239,9 +280,9 @@ const SitePicker = ({
         </SelectTrigger>
         <SelectContent alignItemWithTrigger={false} align="start">
           <SelectGroup>
-            {items.map((item) => (
-              <SelectItem key={item.value} value={item.value}>
-                {item.label}
+            {sites.map((site) => (
+              <SelectItem key={site.id} value={site.id}>
+                {site.name}
               </SelectItem>
             ))}
           </SelectGroup>
@@ -251,13 +292,15 @@ const SitePicker = ({
   )
 }
 
-const AddWebsiteDialog = ({
+const AddKnowledgeDialog = ({
   open,
   onOpenChange,
   siteName,
   urls,
   onUrls,
   onAdd,
+  onAddText,
+  busy,
   error,
 }: {
   open: boolean
@@ -266,162 +309,386 @@ const AddWebsiteDialog = ({
   urls: string
   onUrls: (event: ChangeEvent<HTMLTextAreaElement>) => void
   onAdd: () => void
+  onAddText: (title: string, body: string) => Promise<boolean>
+  busy: boolean
   error: string | null
 }) => {
+  const [kind, setKind] = useState<"website" | "text">("website")
+  const [title, setTitle] = useState("")
+  const [body, setBody] = useState("")
   const handleCancel = useCallback(() => onOpenChange(false), [onOpenChange])
+  const showWebsite = useCallback(() => setKind("website"), [])
+  const showText = useCallback(() => setKind("text"), [])
+  const handleTextSubmit = useCallback(async () => {
+    if (await onAddText(title, body)) {
+      setTitle("")
+      setBody("")
+      onOpenChange(false)
+    }
+  }, [body, onAddText, onOpenChange, title])
+  const handleTextKeyDown = useCallback(
+    (event: KeyboardEvent<HTMLTextAreaElement>) => {
+      if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
+        event.preventDefault()
+        void handleTextSubmit()
+      }
+    },
+    [handleTextSubmit],
+  )
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-xl gap-0 p-0">
-        <DialogHeader className="bg-ice/70 px-6 py-5">
-          <div className="bg-ember/10 text-ember mb-2 flex size-10 items-center justify-center rounded-[10px]">
-            <Plus aria-hidden="true" className="size-5" strokeWidth={2.2} />
-          </div>
-          <DialogTitle className="text-lg tracking-[-0.025em]">Add a website</DialogTitle>
-          <DialogDescription className="max-w-md leading-5">
-            Paste a homepage to crawl {siteName}. Add more than one HTTPS URL to index only those
-            pages.
-          </DialogDescription>
-        </DialogHeader>
-        <div className="flex flex-col gap-3 px-6 py-6">
-          <div>
-            <label className="text-ink block text-sm font-bold" htmlFor="knowledge-urls">
-              Website URL
-            </label>
-            <p className="text-mute mt-1 text-xs">
-              One HTTPS URL crawls the site. Additional lines index only those pages.
-            </p>
-          </div>
-          <Textarea
-            id="knowledge-urls"
-            name="pageUrls"
-            autoComplete="off"
-            aria-label="Website URL"
-            value={urls}
-            onChange={onUrls}
-            placeholder="https://example.com/services"
-            className="border-line bg-ice text-ink focus-visible:ring-steel min-h-24 w-full resize-y rounded-[9px] border px-3 py-3 font-mono text-sm leading-6 outline-none focus-visible:ring-2"
-            rows={3}
-            aria-invalid={error ? "true" : undefined}
-            aria-describedby={error ? "knowledge-urls-error" : undefined}
-          />
-          {error ? (
-            <p id="knowledge-urls-error" className="text-ember text-xs" role="alert">
-              {error}
-            </p>
-          ) : null}
-        </div>
-        <DialogFooter className="flex-row justify-end gap-2 px-6 py-4">
-          <Button type="button" variant="ghost" onClick={handleCancel}>
-            Cancel
-          </Button>
-          <Button
-            type="button"
-            onClick={onAdd}
-            className="bg-ember hover:bg-ember-mid focus-visible:ring-steel rounded-[9px] px-4 text-sm font-bold text-white focus-visible:ring-2 focus-visible:outline-none"
-          >
-            <Plus aria-hidden="true" />
-            Add pages
-          </Button>
-        </DialogFooter>
+        <AddKnowledgeHeader siteName={siteName} />
+        <DialogResizeSection className="flex flex-col gap-3 px-6 py-6">
+          <KnowledgeTypePicker kind={kind} onWebsite={showWebsite} onText={showText} />
+          {kind === "website" ? (
+            <WebsiteFields urls={urls} onUrls={onUrls} error={error} />
+          ) : (
+            <TextFields
+              title={title}
+              body={body}
+              onTitle={setTitle}
+              onBody={setBody}
+              onKeyDown={handleTextKeyDown}
+              error={error}
+            />
+          )}
+          <FieldError id="knowledge-add-error">{error ?? undefined}</FieldError>
+        </DialogResizeSection>
+        <AddKnowledgeFooter
+          kind={kind}
+          busy={busy}
+          onCancel={handleCancel}
+          onWebsite={onAdd}
+          onText={handleTextSubmit}
+        />
       </DialogContent>
     </Dialog>
   )
 }
 
-const SourceTableHeader = ({
-  count,
-  query,
-  onQuery,
-}: {
-  count: number
-  query: string
-  onQuery: (value: string) => void
-}) => (
-  <div className="border-line flex flex-col gap-1 border-b px-5 py-5 sm:flex-row sm:items-end sm:justify-between">
-    <div>
-      <p className="text-mute text-[10px] font-bold tracking-[0.14em] uppercase">Content inputs</p>
-      <h2 className="text-navy mt-1 text-lg font-extrabold tracking-[-0.025em]">Sources</h2>
-      <p className="text-mute mt-1 text-xs">Websites and pages connected to this knowledge base.</p>
+const AddKnowledgeHeader = ({ siteName }: { siteName: string }) => (
+  <DialogHeader className="bg-ice/70 px-6 py-5">
+    <div className="bg-ember/10 text-ember mb-2 flex size-10 items-center justify-center rounded-[10px]">
+      <Plus aria-hidden="true" className="size-5" strokeWidth={2.2} />
     </div>
-    <div className="flex items-center gap-3">
-      <label className="border-line bg-ice flex items-center gap-2 rounded-[9px] border px-3 py-2">
-        <Search aria-hidden="true" className="text-mute size-3.5" />
-        <span className="sr-only">Search sources</span>
-        <input
-          type="search"
-          aria-label="Search sources"
-          value={query}
-          onChange={(event) => onQuery(event.target.value)}
-          placeholder="Search sources"
-          className="text-ink placeholder:text-mute w-40 bg-transparent text-xs outline-none"
-        />
+    <DialogTitle className="text-lg">Add knowledge</DialogTitle>
+    <DialogDescription className="max-w-md leading-5">
+      Connect public pages or add trusted text for {siteName}.
+    </DialogDescription>
+  </DialogHeader>
+)
+
+const KnowledgeTypePicker = ({
+  kind,
+  onWebsite,
+  onText,
+}: {
+  kind: "website" | "text"
+  onWebsite: () => void
+  onText: () => void
+}) => (
+  <div className="bg-ice-2 flex w-fit gap-1 rounded-[9px] p-1" aria-label="Knowledge type">
+    <button
+      type="button"
+      aria-pressed={kind === "website"}
+      onClick={onWebsite}
+      className={`rounded-[7px] px-3 py-2 text-xs font-bold ${kind === "website" ? "bg-paper text-navy shadow-sm" : "text-mute"}`}
+    >
+      Website
+    </button>
+    <button
+      type="button"
+      aria-pressed={kind === "text"}
+      onClick={onText}
+      className={`rounded-[7px] px-3 py-2 text-xs font-bold ${kind === "text" ? "bg-paper text-navy shadow-sm" : "text-mute"}`}
+    >
+      Plain text
+    </button>
+  </div>
+)
+
+const AddKnowledgeFooter = ({
+  kind,
+  busy,
+  onCancel,
+  onWebsite,
+  onText,
+}: {
+  kind: "website" | "text"
+  busy: boolean
+  onCancel: () => void
+  onWebsite: () => void
+  onText: () => void
+}) => (
+  <DialogFooter className="flex-row justify-end gap-2 px-6 py-4">
+    <Button type="button" variant="ghost" onClick={onCancel}>
+      Cancel
+    </Button>
+    <Button
+      type="button"
+      onClick={kind === "website" ? onWebsite : onText}
+      disabled={busy}
+      className="bg-ember hover:bg-ember-mid focus-visible:ring-steel rounded-[9px] px-4 text-sm font-bold text-white focus-visible:ring-2 focus-visible:outline-none"
+    >
+      <Plus aria-hidden="true" />
+      {busy ? "Adding…" : kind === "website" ? "Add pages" : "Add text"}
+    </Button>
+  </DialogFooter>
+)
+
+const WebsiteFields = ({
+  urls,
+  onUrls,
+  error,
+}: {
+  urls: string
+  onUrls: (event: ChangeEvent<HTMLTextAreaElement>) => void
+  error: string | null
+}) => (
+  <div className="flex flex-col gap-3">
+    <div>
+      <label className="text-ink block text-sm font-medium" htmlFor="knowledge-urls">
+        Website URL
       </label>
-      <span className="text-mute text-xs font-semibold">{count} connected</span>
+      <p className="text-mute mt-1 text-xs">
+        One HTTPS URL crawls the site. Additional lines index only those pages.
+      </p>
+    </div>
+    <Textarea
+      id="knowledge-urls"
+      name="pageUrls"
+      autoComplete="off"
+      value={urls}
+      onChange={onUrls}
+      placeholder="https://example.com/services"
+      className="border-line bg-ice text-ink focus-visible:ring-steel min-h-24 w-full resize-y rounded-[9px] border px-3 py-3 font-mono text-base leading-6 outline-none focus-visible:ring-2 sm:text-sm"
+      rows={3}
+      aria-invalid={error ? "true" : undefined}
+      aria-describedby="knowledge-add-error"
+    />
+  </div>
+)
+
+const TextFields = ({
+  title,
+  body,
+  onTitle,
+  onBody,
+  onKeyDown,
+  error,
+}: {
+  title: string
+  body: string
+  onTitle: (value: string) => void
+  onBody: (value: string) => void
+  onKeyDown: (event: KeyboardEvent<HTMLTextAreaElement>) => void
+  error: string | null
+}) => (
+  <div className="flex flex-col gap-4">
+    <div>
+      <label className="text-ink block text-sm font-medium" htmlFor="knowledge-title">
+        Title
+      </label>
+      <input
+        id="knowledge-title"
+        value={title}
+        onChange={(event) => onTitle(event.target.value)}
+        maxLength={300}
+        className="border-line bg-ice text-ink focus-visible:ring-steel mt-2 h-10 w-full rounded-[9px] border px-3 text-base outline-none focus-visible:ring-2 sm:text-sm"
+        placeholder="Collections policy"
+        aria-invalid={error ? "true" : undefined}
+        aria-describedby="knowledge-add-error"
+      />
+    </div>
+    <div>
+      <label className="text-ink block text-sm font-medium" htmlFor="knowledge-content">
+        Content
+      </label>
+      <p className="text-mute mt-1 text-xs">
+        Add verified information only. Do not include sensitive personal data.
+      </p>
+      <Textarea
+        id="knowledge-content"
+        value={body}
+        onChange={(event) => onBody(event.target.value)}
+        onKeyDown={onKeyDown}
+        maxLength={40_000}
+        rows={9}
+        className="border-line bg-ice text-ink focus-visible:ring-steel mt-2 min-h-48 w-full resize-y rounded-[9px] border px-3 py-3 text-base leading-6 outline-none focus-visible:ring-2 sm:text-sm"
+        placeholder="Paste the trusted information the assistant may use…"
+        aria-invalid={error ? "true" : undefined}
+        aria-describedby="knowledge-add-error"
+      />
     </div>
   </div>
 )
 
-const SourceTable = ({
+const PaneSearch = ({
+  id,
+  label,
+  value,
+  onQuery,
+  placeholder,
+}: {
+  id: string
+  label: string
+  value: string
+  onQuery: (value: string) => void
+  placeholder: string
+}) => (
+  <label htmlFor={id} className="relative block">
+    <span className="sr-only">{label}</span>
+    <Search aria-hidden="true" className="text-mute absolute top-2.5 left-3 size-3.5" />
+    <Input
+      id={id}
+      type="search"
+      aria-label={label}
+      value={value}
+      onChange={(event) => onQuery(event.target.value)}
+      placeholder={placeholder}
+      className="border-line bg-ice-2/60 text-ink placeholder:text-mute h-9 rounded-[9px] border pr-3 pl-9 text-xs"
+    />
+  </label>
+)
+
+const SourcePane = ({
   isAdmin,
   sources,
+  pages,
+  selectedSourceId,
+  selectedPageId,
   onSync,
   onToggle,
   onDelete,
   onSelect,
+  onSelectPage,
   onViewChanges,
 }: {
   isAdmin: boolean
   sources: KbSourceRecord[]
+  pages: KbPageRecord[]
+  selectedSourceId: string | null
+  selectedPageId: string | null
   onSync: (source: KbSourceRecord) => void
   onToggle: (source: KbSourceRecord) => void
   onDelete: (source: KbSourceRecord) => void
   onSelect: (source: KbSourceRecord) => void
+  onSelectPage: (page: KbPageRecord) => void
   onViewChanges: (source: KbSourceRecord) => void
 }) => {
   const [query, setQuery] = useState("")
-  const filtered = sources.filter((source) =>
-    source.start_url.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase()),
-  )
-  if (sources.length === 0) {
-    return (
-      <section className="border-line bg-paper rounded-[8px] border px-6 py-12 text-center">
-        <p className="text-ink text-sm font-bold">
-          Add the public pages this site should answer from.
-        </p>
-      </section>
+  const pagesBySource = useMemo(() => groupPagesBySource(pages), [pages])
+  const filtered = useMemo(() => {
+    const needle = query.trim().toLocaleLowerCase()
+    return sources.filter((source) =>
+      sourceMatchesQuery(source, pagesBySource[source.id] ?? EMPTY_PAGES, needle),
     )
-  }
+  }, [pagesBySource, query, sources])
   return (
-    <section className="border-line bg-paper overflow-hidden rounded-xl border">
-      <SourceTableHeader count={sources.length} query={query} onQuery={setQuery} />
-      <div className="overflow-x-auto">
-        <table className="w-full min-w-[760px] border-collapse text-left text-sm">
-          <thead className="bg-ice-2">
-            <tr>
-              <th className="text-ink px-5 py-3 text-xs font-bold">URL</th>
-              <th className="text-ink px-5 py-3 text-xs font-bold">Status</th>
-              <th className="text-ink px-5 py-3 text-xs font-bold">Pages</th>
-              <th className="text-ink px-5 py-3 text-xs font-bold">Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {filtered.map((source) => (
-              <SourceRow
-                key={source.id}
-                source={source}
-                isAdmin={isAdmin}
-                onSync={onSync}
-                onToggle={onToggle}
-                onDelete={onDelete}
-                onSelect={onSelect}
-                onViewChanges={onViewChanges}
-              />
-            ))}
-          </tbody>
-        </table>
+    <section className="border-line bg-paper flex min-h-0 w-full flex-col border-b lg:w-[28rem] lg:shrink-0 lg:border-r lg:border-b-0">
+      <div className="flex h-14 items-center justify-between gap-3 px-5">
+        <h2 className="text-navy heading text-sm">Sources</h2>
+        <span className="text-mute text-xs font-semibold">{sources.length} connected</span>
       </div>
+      {sources.length === 0 ? (
+        <div className="flex flex-1 items-center justify-center px-6 py-12 text-center">
+          <p className="text-ink heading text-sm">
+            Add a website or trusted text this site should answer from.
+          </p>
+        </div>
+      ) : (
+        <>
+          <div className="px-4 pb-3">
+            <PaneSearch
+              id="knowledge-source-search"
+              label="Search sources"
+              value={query}
+              onQuery={setQuery}
+              placeholder="Search sources"
+            />
+          </div>
+          <ScrollArea className="min-h-0 flex-1">
+            <SourceList
+              sources={filtered}
+              pagesBySource={pagesBySource}
+              selectedSourceId={selectedSourceId}
+              selectedPageId={selectedPageId}
+              isAdmin={isAdmin}
+              onSelect={onSelect}
+              onSync={onSync}
+              onToggle={onToggle}
+              onDelete={onDelete}
+              onSelectPage={onSelectPage}
+              onViewChanges={onViewChanges}
+            />
+          </ScrollArea>
+        </>
+      )}
     </section>
   )
+}
+
+const SourceList = ({
+  sources,
+  pagesBySource,
+  selectedSourceId,
+  selectedPageId,
+  isAdmin,
+  onSelect,
+  onSync,
+  onToggle,
+  onDelete,
+  onSelectPage,
+  onViewChanges,
+}: {
+  sources: KbSourceRecord[]
+  pagesBySource: Record<string, KbPageRecord[]>
+  selectedSourceId: string | null
+  selectedPageId: string | null
+  isAdmin: boolean
+  onSelect: (source: KbSourceRecord) => void
+  onSync: (source: KbSourceRecord) => void
+  onToggle: (source: KbSourceRecord) => void
+  onDelete: (source: KbSourceRecord) => void
+  onSelectPage: (page: KbPageRecord) => void
+  onViewChanges: (source: KbSourceRecord) => void
+}) => (
+  <ul className="px-2 pb-4">
+    {sources.map((source) => (
+      <SourceRow
+        key={source.id}
+        source={source}
+        pages={pagesBySource[source.id] ?? EMPTY_PAGES}
+        selected={source.id === selectedSourceId}
+        selectedPageId={selectedPageId}
+        isAdmin={isAdmin}
+        onSelect={onSelect}
+        onSync={onSync}
+        onToggle={onToggle}
+        onDelete={onDelete}
+        onSelectPage={onSelectPage}
+        onViewChanges={onViewChanges}
+      />
+    ))}
+  </ul>
+)
+
+const ingestIsActive = (source: KbSourceRecord) =>
+  source.status !== "ready" &&
+  (source.status === "running" ||
+    source.stage === "discovering" ||
+    source.stage === "processing" ||
+    source.stage === "validating" ||
+    source.stage === "promoting")
+
+const sourceIsSyncing = (source: KbSourceRecord) =>
+  ingestIsActive(source) || source.status === "running" || source.status === "queued"
+
+const sourceSyncActionLabel = (source: KbSourceRecord) => {
+  if (source.source_kind === "text") return "Reprocess"
+  if (source.status === "failed" || (source.pages_failed ?? 0) > 0) return "Retry crawl"
+  return "Sync"
 }
 
 const SourceRowActions = ({
@@ -443,76 +710,157 @@ const SourceRowActions = ({
   const handleToggle = useCallback(() => onToggle(source), [onToggle, source])
   const handleDelete = useCallback(() => onDelete(source), [onDelete, source])
   const handleViewChanges = useCallback(() => onViewChanges(source), [onViewChanges, source])
+  const syncing = sourceIsSyncing(source)
   return (
     <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-      <button
-        type="button"
-        onClick={handleViewChanges}
-        className="text-steel hover:text-navy text-xs font-bold transition-[color,transform] duration-150 ease-out active:scale-[0.98] motion-safe:hover:-translate-y-px"
-      >
-        View changes
-      </button>
+      <LinkButton type="button" onClick={handleViewChanges}>
+        View progress
+      </LinkButton>
       {isAdmin ? (
         <>
-          <button
+          <LinkButton type="button" onClick={handleSync} disabled={syncing}>
+            <RefreshCw aria-hidden="true" className={cn("size-3.5", syncing && "animate-spin")} />
+            {sourceSyncActionLabel(source)}
+          </LinkButton>
+          <LinkButton
             type="button"
-            onClick={handleSync}
-            className="text-steel hover:text-navy inline-flex items-center gap-1.5 text-xs font-bold transition-[color,transform] duration-150 ease-out active:scale-[0.98] motion-safe:hover:-translate-y-px"
-          >
-            <RefreshCw aria-hidden="true" className="size-3.5" />
-            {source.status === "failed" || (source.pages_failed ?? 0) > 0 ? "Retry crawl" : "Sync"}
-          </button>
-          <button
-            type="button"
+            variant={source.enabled ? "emphasis" : "default"}
             onClick={handleToggle}
-            className={`${source.enabled ? "text-ember" : "text-steel"} hover:text-navy text-xs font-bold transition-[color,transform] duration-150 ease-out active:scale-[0.98] motion-safe:hover:-translate-y-px`}
           >
             {source.enabled ? "Disable" : "Enable"}
-          </button>
-          <button
-            type="button"
-            onClick={handleDelete}
-            className="text-ember hover:text-ember-mid text-xs font-bold transition-[color,transform] duration-150 ease-out active:scale-[0.98] motion-safe:hover:-translate-y-px"
-          >
+          </LinkButton>
+          <LinkButton type="button" variant="ember" onClick={handleDelete}>
             Delete
-          </button>
+          </LinkButton>
         </>
       ) : null}
     </div>
   )
 }
 
-const SourceRow = ({
+const SelectedRail = ({ layoutId }: { layoutId: string }) => (
+  <motion.span
+    layoutId={layoutId}
+    transition={RAIL_SPRING}
+    aria-hidden="true"
+    className="bg-steel absolute top-2 bottom-2 left-0 w-0.5 rounded-full"
+  />
+)
+
+const SourcePages = ({
+  pages,
+  selectedPageId,
+  onSelectPage,
+}: {
+  pages: KbPageRecord[]
+  selectedPageId: string | null
+  onSelectPage: (page: KbPageRecord) => void
+}) => {
+  if (pages.length === 0) {
+    return <p className="text-mute px-1 py-2 text-xs">No pages yet.</p>
+  }
+  return (
+    <ul className="flex flex-col gap-0.5 pb-1">
+      {pages.map((page) => (
+        <SourcePageRow
+          key={page.id}
+          page={page}
+          selected={page.id === selectedPageId}
+          onSelect={onSelectPage}
+        />
+      ))}
+    </ul>
+  )
+}
+
+const SourcePageRow = ({
+  page,
+  selected,
+  onSelect,
+}: {
+  page: KbPageRecord
+  selected: boolean
+  onSelect: (page: KbPageRecord) => void
+}) => {
+  const handleSelect = useCallback(() => onSelect(page), [onSelect, page])
+  return (
+    <li>
+      <button
+        type="button"
+        onClick={handleSelect}
+        aria-current={selected ? "true" : undefined}
+        aria-label={page.title}
+        className="focus-visible:ring-steel w-full rounded-[6px] px-1 py-1.5 text-left focus-visible:ring-2 focus-visible:outline-none"
+      >
+        <span className="block max-w-full truncate">
+          <span
+            className={cn(
+              linkUnderlineClass,
+              "inline text-sm",
+              selected
+                ? "text-navy after:scale-x-100 font-semibold"
+                : "text-steel after:scale-x-100 after:opacity-40 hover:text-navy hover:after:opacity-100",
+            )}
+          >
+            {page.title}
+          </span>
+        </span>
+      </button>
+    </li>
+  )
+}
+
+const SourceRowTrigger = ({ source }: { source: KbSourceRecord }) => (
+  <CollapsibleTrigger className="group w-full gap-2">
+    <span className="flex min-w-0 flex-1 items-center gap-2">
+      <span className="text-navy min-w-0 truncate text-sm font-semibold">
+        {source.display_name || source.start_url}
+      </span>
+      {source.source_kind === "text" ? <Badge>Text</Badge> : null}
+    </span>
+    <span className="text-mute flex shrink-0 items-center gap-1.5 font-mono text-[10px] tabular-nums">
+      {source.page_count} {source.page_count === 1 ? "page" : "pages"}
+      <ChevronDown
+        aria-hidden="true"
+        className="size-4 transition-transform duration-200 ease-out group-aria-expanded:rotate-180"
+      />
+    </span>
+  </CollapsibleTrigger>
+)
+
+const SourceRowBody = ({
   source,
+  pages,
+  selectedPageId,
   isAdmin,
   onSync,
   onToggle,
   onDelete,
-  onSelect,
+  onSelectPage,
   onViewChanges,
 }: {
   source: KbSourceRecord
+  pages: KbPageRecord[]
+  selectedPageId: string | null
   isAdmin: boolean
   onSync: (source: KbSourceRecord) => void
   onToggle: (source: KbSourceRecord) => void
   onDelete: (source: KbSourceRecord) => void
-  onSelect: (source: KbSourceRecord) => void
+  onSelectPage: (page: KbPageRecord) => void
   onViewChanges: (source: KbSourceRecord) => void
 }) => {
-  const handleSelect = useCallback(() => onSelect(source), [onSelect, source])
+  const Icon = source.source_kind === "text" ? FileText : Globe2
   return (
-    <tr className="border-line hover:bg-ice/60 border-t transition-colors duration-150">
-      <td className="px-5 py-3">
-        <button
-          type="button"
-          onClick={handleSelect}
-          className="text-steel hover:text-navy focus-visible:ring-steel font-mono text-xs transition-[color,transform] duration-150 ease-out focus-visible:ring-2 focus-visible:outline-none motion-safe:hover:-translate-y-px"
-        >
-          {source.start_url}
-        </button>
-      </td>
-      <td className="text-mute px-5 py-3 text-xs">
-        <div className="flex flex-col gap-1" aria-live="polite">
+    <div className="flex items-start gap-3">
+      <span
+        aria-hidden="true"
+        className="bg-ice text-steel mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-[8px]"
+      >
+        <Icon className="size-4" strokeWidth={1.8} />
+      </span>
+      <div className="min-w-0 flex-1">
+        <SourceRowTrigger source={source} />
+        <div className="text-mute mt-2 flex flex-col gap-1 text-xs" aria-live="polite">
           <span className="text-ink inline-flex items-center gap-1.5 font-semibold">
             <span
               className={`size-2 rounded-full ${source.status === "ready" ? "bg-[#29915E]" : "bg-ember"}`}
@@ -521,29 +869,78 @@ const SourceRow = ({
           </span>
           <SourceProgress source={source} />
         </div>
-      </td>
-      <td className="text-mute px-5 py-3 text-xs">{source.page_count}</td>
-      <td className="px-5 py-3">
-        <SourceRowActions
-          source={source}
-          isAdmin={isAdmin}
-          onSync={onSync}
-          onToggle={onToggle}
-          onDelete={onDelete}
-          onViewChanges={onViewChanges}
-        />
-      </td>
-    </tr>
+        <div className="mt-3">
+          <SourceRowActions
+            source={source}
+            isAdmin={isAdmin}
+            onSync={onSync}
+            onToggle={onToggle}
+            onDelete={onDelete}
+            onViewChanges={onViewChanges}
+          />
+        </div>
+        <CollapsibleContent className="mt-3">
+          <SourcePages pages={pages} selectedPageId={selectedPageId} onSelectPage={onSelectPage} />
+        </CollapsibleContent>
+      </div>
+    </div>
   )
 }
 
-const ingestIsActive = (source: KbSourceRecord) =>
-  source.status !== "ready" &&
-  (source.status === "running" ||
-    source.stage === "discovering" ||
-    source.stage === "processing" ||
-    source.stage === "validating" ||
-    source.stage === "promoting")
+const SourceRow = ({
+  source,
+  pages,
+  selected,
+  selectedPageId,
+  isAdmin,
+  onSelect,
+  onSync,
+  onToggle,
+  onDelete,
+  onSelectPage,
+  onViewChanges,
+}: {
+  source: KbSourceRecord
+  pages: KbPageRecord[]
+  selected: boolean
+  selectedPageId: string | null
+  isAdmin: boolean
+  onSelect: (source: KbSourceRecord) => void
+  onSync: (source: KbSourceRecord) => void
+  onToggle: (source: KbSourceRecord) => void
+  onDelete: (source: KbSourceRecord) => void
+  onSelectPage: (page: KbPageRecord) => void
+  onViewChanges: (source: KbSourceRecord) => void
+}) => {
+  const handleSelect = useCallback(() => onSelect(source), [onSelect, source])
+  return (
+    <li className="px-1 py-0.5">
+      {/* oxlint-disable-next-line jsx-a11y/click-events-have-key-events, jsx-a11y/no-static-element-interactions -- Nested Sync/page buttons cannot live inside another button; the source title is the keyboard control. */}
+      <div
+        onClick={handleSelect}
+        className={cn(
+          "relative cursor-pointer rounded-[10px] px-3 py-3 transition-colors duration-150",
+          selected ? "bg-ice-2" : "hover:bg-ice-2/70",
+        )}
+      >
+        {selected ? <SelectedRail layoutId="knowledge-source-rail" /> : null}
+        <Collapsible open={selected}>
+          <SourceRowBody
+            source={source}
+            pages={pages}
+            selectedPageId={selectedPageId}
+            isAdmin={isAdmin}
+            onSync={onSync}
+            onToggle={onToggle}
+            onDelete={onDelete}
+            onSelectPage={onSelectPage}
+            onViewChanges={onViewChanges}
+          />
+        </Collapsible>
+      </div>
+    </li>
+  )
+}
 
 const sourceStatusLabel = (source: KbSourceRecord) => {
   if (ingestIsActive(source) || source.status === "running") {
@@ -570,27 +967,6 @@ const sourceFailureReason = (source: KbSourceRecord) => {
   const code = source.error_code ?? source.snapshot_error_code
   return code ? humanizeCode(code) : null
 }
-
-const humanizeCode = (code: string) =>
-  (
-    ({
-      faq_pair_preservation: "FAQ answers did not match",
-      numeric_fact_preservation: "numeric facts were lost",
-      smoke_assertions: "required content was missing",
-      no_truncation: "content was truncated",
-      dedupe: "duplicate content was found",
-      size_cap: "content exceeded the size limit",
-      validation: "validation failed",
-      empty: "no usable content",
-      extract: "extraction failed",
-      persist: "could not save the page",
-      timeout: "the crawl timed out",
-      browser: "browser renderer unavailable",
-      browser_crash: "browser renderer crashed",
-      url_overlap: "page belongs to another source",
-      page_failures: "pages failed during the crawl",
-    }) as Record<string, string>
-  )[code] ?? code.replaceAll("_", " ")
 
 const ingestProgressLabel = (source: KbSourceRecord, discovered: number, embedded: number) => {
   if (source.stage === "discovering") {
@@ -679,404 +1055,262 @@ const SourceProgress = ({ source }: { source: KbSourceRecord }) => {
   )
 }
 
-const CrawlActivity = ({ progress }: { progress: KbProgressRecord | null }) => {
-  if (!progress || (progress.current_jobs.length === 0 && progress.recent_events.length === 0)) {
-    return null
-  }
-  return (
-    <section className="border-line bg-paper rounded-xl border px-5 py-5" aria-live="polite">
-      <p className="text-mute text-[10px] font-bold tracking-[0.14em] uppercase">Crawl activity</p>
-      <h2 className="text-navy mt-1 text-base font-extrabold">Latest page runs</h2>
-      {progress.current_jobs.length > 0 ? (
-        <ul className="mt-3 space-y-2">
-          {progress.current_jobs.map((job) => (
-            <li key={`${job.page_url}:${job.started_at}`} className="text-ink text-xs">
-              <span className="font-mono">{job.page_url}</span> — {humanizeCode(job.stage)}
-              {job.renderer ? ` via ${job.renderer}` : ""}
-            </li>
-          ))}
-        </ul>
-      ) : null}
-      <ul className="border-line mt-3 divide-y border-t">
-        {progress.recent_events.slice(0, 10).map((event) => (
-          <li
-            key={`${event.page_url}:${event.timestamp}`}
-            className="flex flex-col gap-1 py-2 text-xs sm:flex-row sm:items-center sm:justify-between"
-          >
-            <span className="text-ink min-w-0 truncate font-mono">{event.page_url}</span>
-            <span className={event.error_code ? "text-ember font-semibold" : "text-mute"}>
-              {event.error_code ? humanizeCode(event.error_code) : humanizeCode(event.state)}
-              {event.renderer ? ` · ${event.renderer}` : ""}
-              {event.http_status ? ` · HTTP ${event.http_status}` : ""}
-              {event.duration_ms !== null ? ` · ${event.duration_ms} ms` : ""}
-            </span>
-            {event.error_message ? (
-              <span className="text-ember sm:max-w-80 sm:truncate" title={event.error_message}>
-                {event.error_message}
-              </span>
-            ) : null}
-          </li>
-        ))}
-      </ul>
-    </section>
-  )
-}
-
-const PageTable = ({
+const DetailPane = ({
+  detail,
   pages,
-  selectedId,
-  isAdmin,
-  onSelect,
-  onToggle,
-  onRetry,
-}: {
-  pages: KbPageRecord[]
-  selectedId: string | null
-  isAdmin: boolean
-  onSelect: (page: KbPageRecord) => void
-  onToggle: (page: KbPageRecord) => void
-  onRetry: (page: KbPageRecord) => void
-}) => {
-  const [query, setQuery] = useState("")
-  const normalized = query.trim().toLocaleLowerCase()
-  const filtered = pages.filter((page) =>
-    `${page.title} ${page.url} ${page.processing_status ?? ""}`
-      .toLocaleLowerCase()
-      .includes(normalized),
-  )
-  if (pages.length === 0) {
-    return null
-  }
-  return (
-    <section className="border-line bg-paper overflow-hidden rounded-xl border">
-      <div className="border-line flex flex-col gap-3 border-b px-5 py-5 sm:flex-row sm:items-end sm:justify-between">
-        <div>
-          <p className="text-mute text-[10px] font-bold tracking-[0.14em] uppercase">
-            Indexed content
-          </p>
-          <h2 className="text-navy mt-1 text-lg font-extrabold tracking-[-0.025em]">Pages</h2>
-          <p className="text-mute mt-1 text-xs">
-            Open a page to inspect the copy the assistant retrieves.
-          </p>
-        </div>
-        <label className="border-line bg-ice flex items-center gap-2 rounded-[9px] border px-3 py-2">
-          <Search aria-hidden="true" className="text-mute size-3.5" />
-          <span className="sr-only">Search pages</span>
-          <input
-            type="search"
-            aria-label="Search pages"
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
-            placeholder="Search pages"
-            className="text-ink placeholder:text-mute w-44 bg-transparent text-xs outline-none"
-          />
-        </label>
-      </div>
-      <div className="overflow-x-auto">
-        <table className="w-full min-w-[680px] border-collapse text-left text-sm">
-          <thead className="bg-ice-2">
-            <tr>
-              <th className="text-ink px-5 py-3 text-xs font-bold">Title</th>
-              <th className="text-ink px-5 py-3 text-xs font-bold">URL</th>
-              <th className="text-ink px-5 py-3 text-xs font-bold">Status</th>
-              {isAdmin ? <th className="text-ink px-5 py-3 text-xs font-bold">Actions</th> : null}
-            </tr>
-          </thead>
-          <tbody>
-            {filtered.map((page) => (
-              <PageRow
-                key={page.id}
-                page={page}
-                selected={page.id === selectedId}
-                isAdmin={isAdmin}
-                onSelect={onSelect}
-                onToggle={onToggle}
-                onRetry={onRetry}
-              />
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </section>
-  )
-}
-
-const PageRow = ({
-  page,
-  selected,
-  isAdmin,
-  onSelect,
-  onToggle,
-  onRetry,
-}: {
-  page: KbPageRecord
-  selected: boolean
-  isAdmin: boolean
-  onSelect: (page: KbPageRecord) => void
-  onToggle: (page: KbPageRecord) => void
-  onRetry: (page: KbPageRecord) => void
-}) => {
-  const handleSelect = useCallback(() => onSelect(page), [onSelect, page])
-  const handleToggle = useCallback(() => onToggle(page), [onToggle, page])
-  const handleRetry = useCallback(() => onRetry(page), [onRetry, page])
-  return (
-    <tr
-      className={`border-line hover:bg-ice/60 border-t transition-colors duration-150 ${selected ? "bg-ice-2" : "bg-paper"}`}
-    >
-      <td className="px-5 py-3">
-        <button
-          type="button"
-          onClick={handleSelect}
-          className="text-steel hover:text-navy focus-visible:ring-steel text-left text-sm font-semibold transition-[color,transform] duration-150 ease-out focus-visible:ring-2 focus-visible:outline-none motion-safe:hover:-translate-y-px"
-        >
-          {page.title}
-        </button>
-      </td>
-      <td className="px-5 py-3">
-        <button
-          type="button"
-          onClick={handleSelect}
-          className="text-steel hover:text-navy focus-visible:ring-steel font-mono text-xs transition-[color,transform] duration-150 ease-out focus-visible:ring-2 focus-visible:outline-none motion-safe:hover:-translate-y-px"
-        >
-          {page.url}
-        </button>
-      </td>
-      <td
-        className={`px-5 py-3 text-xs ${page.processing_status === "failed" ? "text-ember font-semibold" : "text-mute"}`}
-      >
-        {pageStatusLabel(page)}
-      </td>
-      {isAdmin ? (
-        <td className="px-5 py-3">
-          <div className="flex items-center gap-3">
-            {page.processing_status === "failed" ? (
-              <button
-                type="button"
-                onClick={handleRetry}
-                className="text-steel hover:text-navy text-xs font-bold"
-              >
-                Retry page
-              </button>
-            ) : null}
-            <button
-              type="button"
-              onClick={handleToggle}
-              aria-label={page.enabled ? "Disable page" : "Enable page"}
-              className={`${page.enabled ? "text-ember" : "text-steel"} hover:text-navy text-xs font-bold transition-[color,transform] duration-150 ease-out active:scale-[0.98] motion-safe:hover:-translate-y-px`}
-            >
-              {page.enabled ? "Disable" : "Enable"}
-            </button>
-          </div>
-        </td>
-      ) : null}
-    </tr>
-  )
-}
-
-const pageStatusLabel = (page: KbPageRecord) => {
-  if (page.processing_status === "failed") {
-    return page.failure_reason ? `Skipped (${humanizeCode(page.failure_reason)})` : "Failed"
-  }
-  if (page.processing_status === "fetching") {
-    return "Fetching"
-  }
-  if (page.processing_status === "extracting" || page.processing_status === "llm_extracting") {
-    return "Extracting"
-  }
-  if (page.processing_status === "embedding") {
-    return "Embedding"
-  }
-  if (page.processing_status === "unchanged") {
-    return "Unchanged"
-  }
-  return page.enabled ? "Enabled" : "Disabled"
-}
-
-const IndexedCopyHeader = ({ detail }: { detail: KbPageDetail }) => (
-  <div className="mb-3 flex flex-col gap-1">
-    <p className="text-mute text-[10px] font-bold tracking-[0.14em] uppercase">Page inspection</p>
-    <h2 className="text-navy text-lg font-extrabold tracking-[-0.025em]">Source details</h2>
-    {safeHttpUrl(detail.url) ? (
-      <a
-        href={safeHttpUrl(detail.url) ?? undefined}
-        target="_blank"
-        rel="noreferrer noopener"
-        className="text-steel hover:text-navy decoration-steel/40 inline-flex w-fit items-center gap-1.5 font-mono text-xs underline underline-offset-4 transition-colors duration-150"
-      >
-        {detail.url}
-        <ExternalLink aria-hidden="true" className="size-3.5" />
-      </a>
-    ) : (
-      <p className="text-mute font-mono text-xs">{detail.url}</p>
-    )}
-  </div>
-)
-
-// oxlint-disable-next-line eslint/max-lines-per-function -- Chunk toggles and admin actions share one detail panel state boundary.
-const IndexedCopyChunks = ({
-  detail,
-  isAdmin,
-  pendingIds,
-  errors,
-  onToggle,
-}: {
-  detail: KbPageDetail
-  isAdmin: boolean
-  pendingIds: string[]
-  errors: Record<string, string>
-  onToggle: (pageId: string, chunk: KbPageDetail["chunks"][number]) => Promise<void>
-}) => {
-  if (detail.chunks.length === 0) {
-    return null
-  }
-  return (
-    <Collapsible
-      defaultOpen={false}
-      className="border-line bg-paper overflow-hidden rounded-[12px] border shadow-[0_8px_24px_rgba(13,31,58,0.08)] dark:border-[#202833] dark:bg-[#07090C] dark:shadow-[0_8px_24px_rgba(0,0,0,0.24)]"
-    >
-      <CollapsibleTrigger className="group text-ink hover:bg-ice-2 px-5 py-4 transition-[background-color,border-color,transform] duration-[180ms] ease-[cubic-bezier(0.23,1,0.32,1)] active:scale-[0.997] dark:text-white dark:hover:bg-[#12171E]">
-        <span className="flex items-center gap-3">
-          <span className="bg-steel h-9 w-px rounded-full" aria-hidden="true" />
-          <span className="flex flex-col gap-0.5">
-            <span className="text-mute text-[10px] font-bold tracking-[0.14em] uppercase dark:text-white/60">
-              Retrieval units
-            </span>
-            <span className="text-navy text-sm font-extrabold dark:text-white">
-              Retrieved answers{" "}
-              <span className="text-mute font-mono text-xs dark:text-white/55">
-                {detail.chunks.filter((chunk) => chunk.enabled).length} of {detail.chunks.length}{" "}
-                enabled
-              </span>
-            </span>
-          </span>
-        </span>
-        <ChevronDown
-          aria-hidden="true"
-          className="text-mute size-5 transition-transform duration-200 ease-out group-aria-expanded:rotate-180 dark:text-white/65"
-        />
-      </CollapsibleTrigger>
-      <CollapsibleContent className="border-line mt-0 flex flex-col gap-3 border-t px-5 pt-4 pb-5 dark:border-white/10">
-        {detail.chunks.map((chunk) => (
-          <article
-            key={chunk.id}
-            className={`border-line text-ink hover:border-steel/40 rounded-[10px] border px-4 py-4 transition-[opacity,background-color,border-color] duration-150 dark:border-white/10 dark:text-white ${chunk.enabled ? "bg-ice hover:bg-ice-2 dark:bg-[#12171E] dark:hover:bg-[#18222D]" : "bg-ice/60 opacity-70 dark:bg-[#12171E]/70"}`}
-          >
-            <div className="flex items-start justify-between gap-3">
-              <h3 className="text-navy text-sm font-bold dark:text-white">{chunk.heading}</h3>
-              <div className="flex shrink-0 items-center gap-2">
-                <Badge
-                  className={
-                    chunk.enabled
-                      ? "bg-[#E8F5EE] text-[#247A4D] dark:bg-[#163627] dark:text-[#8DDEAE]"
-                      : "bg-ice-2 text-mute dark:bg-white/10 dark:text-white/60"
-                  }
-                >
-                  {chunk.enabled ? "Enabled" : "Disabled"}
-                </Badge>
-                <span className="text-mute font-mono text-[10px] dark:text-white/55">
-                  #{chunk.ordinal + 1}
-                </span>
-              </div>
-            </div>
-            <p className="text-ink mt-2 text-sm leading-6 whitespace-pre-wrap dark:text-white/80">
-              {chunk.body}
-            </p>
-            {isAdmin ? (
-              <div className="border-line mt-4 flex items-center justify-between gap-3 border-t pt-3 dark:border-white/10">
-                <span className="text-mute text-xs font-bold">Include in answers</span>
-                <Switch
-                  aria-label={`Include ${chunk.heading} in answers`}
-                  checked={chunk.enabled}
-                  disabled={pendingIds.includes(chunk.id)}
-                  onCheckedChange={() => void onToggle(detail.id, chunk)}
-                />
-              </div>
-            ) : null}
-            {errors[chunk.id] ? (
-              <p className="text-ember mt-3 text-xs" role="alert">
-                {errors[chunk.id]}{" "}
-                <button
-                  type="button"
-                  className="underline underline-offset-2"
-                  onClick={() => void onToggle(detail.id, chunk)}
-                >
-                  Retry
-                </button>
-              </p>
-            ) : null}
-          </article>
-        ))}
-      </CollapsibleContent>
-    </Collapsible>
-  )
-}
-
-const IndexedCopy = ({
-  detail,
+  hasSource,
   isAdmin,
   pendingIds,
   errors,
   notice,
-  onToggle,
+  onTogglePage,
+  onRetryPage,
+  onToggleChunk,
 }: {
   detail: KbPageDetail | null
+  pages: KbPageRecord[]
+  hasSource: boolean
   isAdmin: boolean
   pendingIds: string[]
   errors: Record<string, string>
   notice: string
-  onToggle: (pageId: string, chunk: KbPageDetail["chunks"][number]) => Promise<void>
-}) => {
-  if (detail === null) {
-    return null
-  }
-  return (
-    <section className="border-line bg-paper rounded-xl border p-5 lg:p-6">
-      <IndexedCopyHeader detail={detail} />
-      {detail.skip_reason ? (
-        <p className="text-ember mt-4 text-sm">Skipped: {humanizeCode(detail.skip_reason)}</p>
-      ) : null}
-      {detail.failure_reason && detail.failure_reason !== detail.skip_reason ? (
-        <p className="text-ember mt-2 text-sm">Failed: {humanizeCode(detail.failure_reason)}</p>
-      ) : null}
-      {notice ? (
-        <output className="border-ember/20 bg-ember/10 text-ember mt-4 block rounded-[8px] border px-3 py-2 text-sm">
-          {notice}
-        </output>
-      ) : null}
-      <div className="flex flex-col gap-3">
-        <Collapsible
-          defaultOpen={true}
-          className="border-line bg-paper overflow-hidden rounded-[12px] border shadow-[0_8px_24px_rgba(13,31,58,0.08)] dark:border-[#202833] dark:bg-[#07090C] dark:shadow-[0_8px_24px_rgba(0,0,0,0.24)]"
-        >
-          <CollapsibleTrigger className="group text-ink hover:bg-ice-2 px-5 py-4 transition-[background-color,border-color,transform] duration-[180ms] ease-[cubic-bezier(0.23,1,0.32,1)] active:scale-[0.997] dark:text-white dark:hover:bg-[#12171E]">
-            <span className="flex items-center gap-3">
-              <span className="bg-steel h-9 w-px rounded-full" aria-hidden="true" />
-              <span className="flex flex-col gap-0.5">
-                <span className="text-mute text-[10px] font-bold tracking-[0.14em] uppercase dark:text-white/60">
-                  Raw page content
-                </span>
-                <span className="text-navy text-sm font-extrabold dark:text-white">
-                  Indexed copy
-                </span>
-              </span>
-            </span>
-            <ChevronDown
-              aria-hidden="true"
-              className="text-mute size-5 transition-transform duration-200 ease-out group-aria-expanded:rotate-180 dark:text-white/65"
-            />
-          </CollapsibleTrigger>
-          <CollapsibleContent className="border-line mt-0 border-t px-5 pt-4 pb-5 text-sm leading-6 dark:border-white/10">
-            <p className="text-ink whitespace-pre-wrap dark:text-white/80">{detail.content_text}</p>
-          </CollapsibleContent>
-        </Collapsible>
-        <IndexedCopyChunks
+  onTogglePage: (page: KbPageRecord) => void
+  onRetryPage: (page: KbPageRecord) => void
+  onToggleChunk: (pageId: string, chunk: KbPageDetail["chunks"][number]) => Promise<void>
+}) => (
+  <section className="bg-paper flex min-h-0 min-w-0 flex-1 flex-col">
+    <div className="flex h-14 items-center px-5">
+      <h2 className="text-navy heading text-sm">Retrieved answers</h2>
+    </div>
+    <ScrollArea className="min-h-0 flex-1">
+      {detail ? (
+        <PageInspection
           detail={detail}
+          pages={pages}
           isAdmin={isAdmin}
           pendingIds={pendingIds}
           errors={errors}
-          onToggle={onToggle}
+          notice={notice}
+          onTogglePage={onTogglePage}
+          onRetryPage={onRetryPage}
+          onToggle={onToggleChunk}
         />
+      ) : (
+        <p className="text-mute px-5 py-8 text-sm">
+          {hasSource
+            ? "Select a page to inspect retrieved answers."
+            : "Add a source to get started."}
+        </p>
+      )}
+    </ScrollArea>
+  </section>
+)
+
+const PageRowActions = ({
+  page,
+  onToggle,
+  onRetry,
+}: {
+  page: KbPageRecord
+  onToggle: (page: KbPageRecord) => void
+  onRetry: (page: KbPageRecord) => void
+}) => {
+  const handleToggle = useCallback(() => onToggle(page), [onToggle, page])
+  const handleRetry = useCallback(() => onRetry(page), [onRetry, page])
+  return (
+    <div className="flex items-center gap-3">
+      {page.processing_status === "failed" ? (
+        <LinkButton type="button" onClick={handleRetry}>
+          Retry page
+        </LinkButton>
+      ) : null}
+      <LinkButton
+        type="button"
+        variant={page.enabled ? "emphasis" : "default"}
+        onClick={handleToggle}
+        aria-label={page.enabled ? "Disable page" : "Enable page"}
+      >
+        {page.enabled ? "Disable" : "Enable"}
+      </LinkButton>
+    </div>
+  )
+}
+
+const InspectionHeader = ({
+  detail,
+  isAdmin,
+  onTogglePage,
+  onRetryPage,
+}: {
+  detail: KbPageDetail
+  isAdmin: boolean
+  onTogglePage: (page: KbPageRecord) => void
+  onRetryPage: (page: KbPageRecord) => void
+}) => {
+  const href = safeHttpUrl(detail.url)
+  return (
+    <div className="mb-4 flex flex-col gap-1">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <p className="text-mute text-[11px] font-semibold tracking-[0.2em] uppercase">
+            {detail.tab === "general" ? "Shared answers" : "Page inspection"}
+          </p>
+          <h3 className="text-navy heading text-base">{detail.title}</h3>
+        </div>
+        {isAdmin && detail.tab !== "general" ? (
+          <PageRowActions page={detail} onToggle={onTogglePage} onRetry={onRetryPage} />
+        ) : null}
       </div>
-    </section>
+      {href ? (
+        <a
+          href={href}
+          target="_blank"
+          rel="noreferrer noopener"
+          className="text-steel hover:text-navy decoration-steel/40 inline-flex w-fit items-center gap-1.5 font-mono text-xs underline underline-offset-4 transition-colors duration-150"
+        >
+          {detail.url}
+          <ExternalLink aria-hidden="true" className="size-3.5" />
+        </a>
+      ) : (
+        <p className="text-mute font-mono text-xs">{detail.url}</p>
+      )}
+      <p className="text-mute mt-2 text-xs font-semibold">
+        {detail.chunks.filter((chunk) => chunk.enabled).length} of {detail.chunks.length} answers
+        enabled
+      </p>
+    </div>
+  )
+}
+
+const InspectionNotices = ({ detail, notice }: { detail: KbPageDetail; notice: string }) => (
+  <>
+    {detail.skip_reason ? (
+      <p className="text-ember mt-2 text-sm">Skipped: {humanizeCode(detail.skip_reason)}</p>
+    ) : null}
+    {detail.failure_reason && detail.failure_reason !== detail.skip_reason ? (
+      <p className="text-ember mt-2 text-sm">Failed: {humanizeCode(detail.failure_reason)}</p>
+    ) : null}
+    {notice ? <output className="text-ember mt-3 block text-sm">{notice}</output> : null}
+  </>
+)
+
+const AnswerUnit = ({
+  pageId,
+  pages,
+  chunk,
+  isAdmin,
+  pending,
+  error,
+  onToggle,
+}: {
+  pageId: string
+  pages: KbPageRecord[]
+  chunk: KbPageDetail["chunks"][number]
+  isAdmin: boolean
+  pending: boolean
+  error: string | undefined
+  onToggle: (pageId: string, chunk: KbPageDetail["chunks"][number]) => Promise<void>
+}) => {
+  const originLabel = originPagesLabel(chunk, pages)
+  return (
+    <article className={cn("py-4 transition-opacity duration-150", !chunk.enabled && "opacity-60")}>
+      <div className="flex items-start justify-between gap-3">
+        <h4 className="text-navy heading text-sm">{chunk.heading}</h4>
+        <div className="flex shrink-0 items-center gap-2">
+          <Badge className="bg-ice-2 text-steel">{unitKindLabel(chunk.kind)}</Badge>
+          <Badge className={chunk.enabled ? "bg-[#E8F5EE] text-[#247A4D]" : "bg-ice-2 text-mute"}>
+            {chunk.enabled ? "Enabled" : "Disabled"}
+          </Badge>
+          <span className="text-mute font-mono text-[10px]">#{chunk.ordinal + 1}</span>
+        </div>
+      </div>
+      <p className="text-ink mt-2 text-sm leading-6 whitespace-pre-wrap">{chunk.body}</p>
+      {originLabel ? <p className="text-mute mt-2 text-xs">{originLabel}</p> : null}
+      {isAdmin ? (
+        <div className="mt-3 flex items-center justify-between gap-3">
+          <span className="text-mute text-xs font-bold">Include in answers</span>
+          <Switch
+            aria-label={`Include ${chunk.heading} in answers`}
+            checked={chunk.enabled}
+            disabled={pending}
+            onCheckedChange={() => void onToggle(pageId, chunk)}
+          />
+        </div>
+      ) : null}
+      {error ? (
+        <p className="text-ember mt-3 text-xs" role="alert">
+          {error}{" "}
+          <button
+            type="button"
+            className="underline underline-offset-2"
+            onClick={() => void onToggle(pageId, chunk)}
+          >
+            Retry
+          </button>
+        </p>
+      ) : null}
+    </article>
+  )
+}
+
+const PageInspection = ({
+  detail,
+  pages,
+  isAdmin,
+  pendingIds,
+  errors,
+  notice,
+  onTogglePage,
+  onRetryPage,
+  onToggle,
+}: {
+  detail: KbPageDetail
+  pages: KbPageRecord[]
+  isAdmin: boolean
+  pendingIds: string[]
+  errors: Record<string, string>
+  notice: string
+  onTogglePage: (page: KbPageRecord) => void
+  onRetryPage: (page: KbPageRecord) => void
+  onToggle: (pageId: string, chunk: KbPageDetail["chunks"][number]) => Promise<void>
+}) => {
+  const reducedMotion = useReducedMotion()
+  return (
+    <AnimatePresence mode="wait">
+      <motion.section
+        key={detail.id}
+        initial={reducedMotion ? false : { opacity: 0, y: 8 }}
+        animate={{ opacity: 1, y: 0 }}
+        exit={reducedMotion ? undefined : { opacity: 0, y: 6 }}
+        transition={FADE_UP}
+        className="px-5 pt-2 pb-8"
+      >
+        <InspectionHeader
+          detail={detail}
+          isAdmin={isAdmin}
+          onTogglePage={onTogglePage}
+          onRetryPage={onRetryPage}
+        />
+        <InspectionNotices detail={detail} notice={notice} />
+        {detail.chunks.length === 0 ? (
+          <p className="text-mute mt-4 text-sm">No retrieved answers on this page yet.</p>
+        ) : (
+          <div className="divide-line mt-2 divide-y">
+            {detail.chunks.map((chunk) => (
+              <AnswerUnit
+                key={chunk.id}
+                pageId={detail.id}
+                pages={pages}
+                chunk={chunk}
+                isAdmin={isAdmin}
+                pending={pendingIds.includes(chunk.id)}
+                error={errors[chunk.id]}
+                onToggle={onToggle}
+              />
+            ))}
+          </div>
+        )}
+      </motion.section>
+    </AnimatePresence>
   )
 }

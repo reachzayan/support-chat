@@ -16,7 +16,7 @@ from app.models.kb_source import KbSource
 
 REFUSAL_BODIES: dict[SensitiveCategory, str] = {
     SensitiveCategory.SSN: (
-        "Please do not share Social Security numbers or other screening identifiers."
+        "Please do not share Social Security numbers or other personal identifiers."
     ),
     SensitiveCategory.DL: "Please don't share driver's licence numbers here.",
     SensitiveCategory.PLATE: "Please don't share plate numbers here.",

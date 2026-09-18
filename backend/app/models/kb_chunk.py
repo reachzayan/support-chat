@@ -81,6 +81,9 @@ class KbChunk(Base):
     requires_human: Mapped[bool] = mapped_column(Boolean, server_default=text("false"))
     legal_sensitive: Mapped[bool] = mapped_column(Boolean, server_default=text("false"))
     display_locator: Mapped[str | None] = mapped_column(String, nullable=True)
+    origin_urls: Mapped[list] = mapped_column(
+        JSONB, default=list, server_default=text("'[]'::jsonb")
+    )
     body: Mapped[str] = mapped_column(Text)
     context_prefix: Mapped[str] = mapped_column(Text, server_default=text("''"))
     search_document: Mapped[str] = mapped_column(

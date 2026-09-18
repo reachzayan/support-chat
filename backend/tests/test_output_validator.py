@@ -21,3 +21,14 @@ def test_factual_claim_without_citations_is_rejected() -> None:
     outcome = evaluate(TIMING_BODY, allowed_ids=[TIMING_ID], cited=[])
     assert outcome.accepted is False
     assert outcome.reason == "no_citation"
+
+
+def test_common_business_acronyms_are_not_mistaken_for_license_plates() -> None:
+    body = "SampleMail checks addresses with USPS and goes beyond standard NCOA."
+    outcome = evaluate(
+        body,
+        allowed_ids=[TIMING_ID],
+        cited=[TIMING_ID],
+        cited_answer_text=body,
+    )
+    assert outcome.accepted is True

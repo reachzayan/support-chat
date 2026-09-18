@@ -42,7 +42,7 @@ export const HandoffMachineSummary = ({
         <Tooltip>
           <TooltipTrigger
             id={`machine-summary-${handoff.id}`}
-            className="text-mute text-[10px] font-bold tracking-[0.12em] uppercase"
+            className="text-mute text-[10px] font-semibold tracking-[0.12em] uppercase"
           >
             Machine summary
           </TooltipTrigger>

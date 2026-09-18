@@ -10,8 +10,6 @@ from app.api.articles import router as articles_router
 from app.api.auth import router as auth_router
 from app.api.canned_replies import router as canned_replies_router
 from app.api.conversations import router as conversations_router
-from app.api.eval import eval_endpoints_enabled
-from app.api.eval import router as eval_router
 from app.api.health import router as health_router
 from app.api.kb_sources import router as kb_sources_router
 from app.api.logs import router as logs_router
@@ -106,8 +104,6 @@ def create_app() -> FastAPI:
     application.include_router(articles_router)
     application.include_router(kb_sources_router)
     application.include_router(logs_router)
-    if eval_endpoints_enabled():
-        application.include_router(eval_router)
     application.include_router(visitor_ws_router)
     application.include_router(agent_ws_router)
 

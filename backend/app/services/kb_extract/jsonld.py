@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from app.services.kb_extract.text import locator_for, strip_html_text, tidy_text
+from app.services.kb_extract.text import locator_for, strip_html_text, tidy_inline
 from app.services.kb_extract.types import EvidenceUnit
 
 
@@ -48,7 +48,7 @@ def _walk(payload: Any, url: str) -> list[EvidenceUnit]:
 
 
 def _question_unit(payload: dict, url: str) -> EvidenceUnit | None:
-    name = tidy_text(str(payload.get("name") or payload.get("text") or ""))
+    name = tidy_inline(str(payload.get("name") or payload.get("text") or ""))
     answer = payload.get("acceptedAnswer") or payload.get("suggestedAnswer") or {}
     if isinstance(answer, list) and answer:
         answer = answer[0]

@@ -63,8 +63,8 @@ class Settings(BaseSettings):
     embed_query_timeout: float = 3.0
     embed_ingest_timeout: float = 30.0
     embed_batch: int = 32
-    chunk_target_chars: int = 1800
-    chunk_overlap_chars: int = 200
+    chunk_target_chars: int = 900
+    chunk_overlap_chars: int = 150
     openai_embed_max_tokens: int = 8000
     max_answer_chars: int = 20000
     max_bot_answer_chars: int = 1500
@@ -80,7 +80,6 @@ class Settings(BaseSettings):
     kb_ingest_stuck_minutes: int = 10
     kb_ingest_source_timeout_seconds: float = 600.0
     kb_llm_extract_concurrency: int = 4
-    kb_llm_extract_prompt_version: str = "v1"
     kb_ingest_retry_sleep: float = 0.0
 
     def trusted_proxy_networks(self) -> list:

@@ -6,6 +6,7 @@ import {
   staffRead,
   staffWrite,
   type KbDiff,
+  type KbProgressRecord,
   type KbSnapshotRecord,
   type KbSourceRecord,
 } from "@/components/admin/staff-api"
@@ -20,20 +21,24 @@ const rollbackSources = async (source: KbSourceRecord) => {
 }
 
 const loadDiffPayload = async (source: KbSourceRecord) => {
-  const [diffResponse, snapResponse] = await Promise.all([
+  const [diffResponse, snapResponse, progressResponse] = await Promise.all([
     staffRead(`/api/kb-sources/${source.id}/diff`),
     staffRead(`/api/kb-sources/${source.id}/snapshots`),
+    staffRead(`/api/kb-sources/${source.id}/progress`),
   ])
-  if (!diffResponse.ok) {
-    return null
-  }
-  const payload = (await diffResponse.json()) as KbDiff
+  const payload = diffResponse.ok
+    ? ((await diffResponse.json()) as KbDiff)
+    : { added: [], changed: [], removed: [] }
   let snapshots: KbSnapshotRecord[] = []
+  let progress: KbProgressRecord | null = null
   if (snapResponse.ok) {
     const listed = (await snapResponse.json()) as { items: KbSnapshotRecord[] }
     snapshots = listed.items
   }
-  return { payload, snapshots }
+  if (progressResponse.ok) {
+    progress = (await progressResponse.json()) as KbProgressRecord
+  }
+  return { payload, snapshots, progress, diffAvailable: diffResponse.ok }
 }
 
 const formatDiffStatus = (payload: KbDiff, hasSuperseded: boolean) => {
@@ -46,14 +51,15 @@ const formatDiffStatus = (payload: KbDiff, hasSuperseded: boolean) => {
   return `${added} added, ${changed} changed, ${removed} removed. A previous snapshot can be restored.`
 }
 
+// oxlint-disable-next-line eslint/max-lines-per-function -- This hook owns one cohesive source-progress panel state.
 export const useKnowledgeDiff = (setSources: (value: SetStateAction<KbSourceRecord[]>) => void) => {
   const [diffSource, setDiffSource] = useState<KbSourceRecord | null>(null)
   const [diff, setDiff] = useState<KbDiff | null>(null)
   const [diffStatus, setDiffStatus] = useState("Select a source to view snapshot changes.")
   const [canRollback, setCanRollback] = useState(false)
   const [rollbackBusy, setRollbackBusy] = useState(false)
+  const [detailProgress, setDetailProgress] = useState<KbProgressRecord | null>(null)
   const diffRequestRef = useRef(0)
-
   const handleViewChanges = useCallback(async (source: KbSourceRecord) => {
     const requestId = diffRequestRef.current + 1
     diffRequestRef.current = requestId
@@ -62,22 +68,24 @@ export const useKnowledgeDiff = (setSources: (value: SetStateAction<KbSourceReco
     setDiffStatus("Loading snapshot changes.")
     setCanRollback(false)
     const loaded = await loadDiffPayload(source)
-    if (diffRequestRef.current !== requestId || loaded === null) {
-      if (loaded === null && diffRequestRef.current === requestId) {
-        setDiffStatus("Could not load snapshot changes.")
-      }
+    if (diffRequestRef.current !== requestId) {
       return
     }
     const hasSuperseded = loaded.snapshots.some((row) => row.state === "superseded")
     setDiff(loaded.payload)
+    setDetailProgress(loaded.progress)
     setCanRollback(hasSuperseded)
-    setDiffStatus(formatDiffStatus(loaded.payload, hasSuperseded))
+    setDiffStatus(
+      loaded.diffAvailable
+        ? formatDiffStatus(loaded.payload, hasSuperseded)
+        : "Could not load snapshot changes.",
+    )
   }, [])
-
   const handleDiffOpen = useCallback((open: boolean) => {
     if (!open) {
       setDiffSource(null)
       setDiff(null)
+      setDetailProgress(null)
       setCanRollback(false)
       setDiffStatus("Select a source to view snapshot changes.")
     }
@@ -124,5 +132,6 @@ export const useKnowledgeDiff = (setSources: (value: SetStateAction<KbSourceReco
     diffStatus,
     canRollback,
     rollbackBusy,
+    detailProgress,
   }
 }

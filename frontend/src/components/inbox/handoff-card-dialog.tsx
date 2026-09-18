@@ -45,7 +45,7 @@ const HandoffResolvedBlock = ({
   outcome: NonNullable<HandoffContextRecord["outcome"]>
 }) => (
   <div className="bg-ice rounded-[8px] px-3 py-2">
-    <p className="text-navy text-sm font-bold">Resolved: {outcome.outcome.replaceAll("_", " ")}</p>
+    <p className="text-navy heading text-sm">Resolved: {outcome.outcome.replaceAll("_", " ")}</p>
     {outcome.note ? <p className="text-mute mt-1 text-xs leading-5">{outcome.note}</p> : null}
   </div>
 )

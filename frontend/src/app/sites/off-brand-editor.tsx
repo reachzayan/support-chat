@@ -46,8 +46,8 @@ export const OffBrandEditor = ({ site, isAdmin, onError, onSaved }: OffBrandEdit
 
   return (
     <Field className="border-line border-t pt-5">
-      <p className="text-mute text-[10px] font-bold tracking-[0.12em] uppercase">Guardrails</p>
-      <h3 className="text-navy text-sm font-extrabold">Off-brand blocklist</h3>
+      <p className="text-mute text-[10px] font-semibold tracking-[0.12em] uppercase">Guardrails</p>
+      <h3 className="text-navy heading text-sm">Off-brand blocklist</h3>
       <FieldDescription>
         One competitor or unrelated brand per line. Mentions without matching knowledge return an
         out-of-scope reply.

@@ -3,7 +3,7 @@ import uuid
 import pytest
 from structlog.testing import capture_logs
 
-from app.chat.outcome_copy import INSUFFICIENT_HUMAN, TECH_FAIL_HUMAN
+from app.chat.outcome_copy import INSUFFICIENT_HUMAN, REPEATED_MISS_HUMAN, TECH_FAIL_HUMAN
 from app.services.grounded_response import (
     Citation,
     EvidenceUnit,
@@ -40,6 +40,10 @@ TIMING_EVIDENCE = EvidenceUnit(
 )
 
 CLARIFY_SCOPE_LINE = "What would you like to know about screening or compliance?"
+PRODUCTS_CLARIFY = "What would you like to know about our products or services?"
+PRODUCTS_KEEP_HELPING = (
+    "I can help with questions about our products and services. What do you need?"
+)
 
 
 def _citation(unit: EvidenceUnit, body: str) -> Citation:
@@ -54,6 +58,61 @@ def _citation(unit: EvidenceUnit, body: str) -> Citation:
         source_title=unit.source_title,
         source_url=unit.source_url,
     )
+
+
+async def test_forged_source_text_with_valid_chunk_id_is_rejected() -> None:
+    from dataclasses import replace
+
+    body = "Results are guaranteed in 12 hours."
+
+    async def complete(_turn, _units):
+        return ModelDraft(body, [replace(_citation(TIMING_EVIDENCE, body), cited_text=body)])
+
+    decision = await GroundedResponseEngine(complete).respond(
+        TurnContext(visitor_text="How long?", evidence=[TIMING_EVIDENCE])
+    )
+    assert decision.body == PRODUCTS_CLARIFY
+    assert decision.reason_code == "grounding_reject"
+
+
+async def test_connective_words_between_cited_service_names_are_allowed() -> None:
+    from dataclasses import replace
+
+    body = "These include DOT physicals and random pool management."
+    citations = [
+        replace(
+            _citation(DOT_EVIDENCE, body),
+            response_start=body.index(phrase),
+            response_end=body.index(phrase) + len(phrase),
+        )
+        for phrase in ("DOT physicals", "random pool management.")
+    ]
+
+    async def complete(_turn, _units):
+        return ModelDraft(body, citations)
+
+    decision = await GroundedResponseEngine(complete).respond(
+        TurnContext(visitor_text="What services?", evidence=[DOT_EVIDENCE])
+    )
+    assert decision.outcome is ResponseOutcome.SYNTHESIZED_ANSWER
+    assert decision.body == body
+
+
+async def test_one_valid_citation_does_not_authorize_an_uncited_business_claim() -> None:
+    from dataclasses import replace
+
+    body = "We provide DOT testing. All customers receive free annual audits."
+
+    async def complete(_turn, _units):
+        return ModelDraft(body, [replace(_citation(DOT_EVIDENCE, body), response_end=23)])
+
+    decision = await GroundedResponseEngine(complete).respond(
+        TurnContext(visitor_text="What is included?", evidence=[DOT_EVIDENCE])
+    )
+    assert decision.body == "We provide DOT testing."
+    assert "free annual audits" not in decision.body
+    assert decision.reason_code is None
+    assert decision.outcome is ResponseOutcome.SYNTHESIZED_ANSWER
 
 
 @pytest.mark.parametrize(
@@ -104,26 +163,58 @@ async def test_paraphrased_factual_answer_is_accepted() -> None:
 
 
 @pytest.mark.asyncio
-async def test_source_copy_is_rejected_as_grounding_reject() -> None:
+async def test_single_cited_source_answer_is_accepted() -> None:
     body = DOT_EVIDENCE.answer_verbatim
 
     async def complete(_turn: TurnContext, _units: list[EvidenceUnit]) -> ModelDraft:
         return ModelDraft(body=body, citations=[_citation(DOT_EVIDENCE, body)])
 
-    with capture_logs() as events:
-        decision = await GroundedResponseEngine(complete=complete).respond(
-            TurnContext(visitor_text="Do you provide drug screening?", evidence=[DOT_EVIDENCE])
+    decision = await GroundedResponseEngine(complete=complete).respond(
+        TurnContext(visitor_text="Do you provide drug screening?", evidence=[DOT_EVIDENCE])
+    )
+
+    assert decision.outcome is ResponseOutcome.SYNTHESIZED_ANSWER
+    assert decision.reason_code is None
+    assert decision.body == body
+    assert decision.offer_handoff is False
+    assert decision.provider_status is ProviderStatus.OK
+    assert decision.citations[0].chunk_id == DOT_EVIDENCE.id
+
+
+@pytest.mark.asyncio
+async def test_stitched_source_dump_is_still_rejected() -> None:
+    body = f"{DOT_EVIDENCE.answer_verbatim}\n\n{TIMING_EVIDENCE.answer_verbatim}"
+    second_start = len(DOT_EVIDENCE.answer_verbatim) + 2
+
+    async def complete(_turn: TurnContext, _units: list[EvidenceUnit]) -> ModelDraft:
+        return ModelDraft(
+            body=body,
+            citations=[
+                _citation(DOT_EVIDENCE, body),
+                Citation(
+                    chunk_id=TIMING_EVIDENCE.id,
+                    snapshot_id=TIMING_EVIDENCE.snapshot_id,
+                    response_start=second_start,
+                    response_end=len(body),
+                    source_start=0,
+                    source_end=len(TIMING_EVIDENCE.answer_verbatim),
+                    cited_text=TIMING_EVIDENCE.answer_verbatim,
+                    source_title=TIMING_EVIDENCE.source_title,
+                    source_url=TIMING_EVIDENCE.source_url,
+                ),
+            ],
         )
 
-    assert decision.reason_code == "grounding_reject"
-    assert decision.body == INSUFFICIENT_HUMAN
-    assert decision.offer_handoff is True
-    assert decision.provider_status is ProviderStatus.OK
-    assert decision.citations == []
-    assert any(
-        event.get("event") == "grounded_draft_reject" and event.get("reason") == "source_copy"
-        for event in events
+    decision = await GroundedResponseEngine(complete=complete).respond(
+        TurnContext(
+            visitor_text="Tell me everything about DOT testing and turnaround.",
+            evidence=[DOT_EVIDENCE, TIMING_EVIDENCE],
+        )
     )
+
+    assert decision.outcome is ResponseOutcome.CLARIFICATION
+    assert decision.reason_code == "grounding_reject"
+    assert decision.body == PRODUCTS_CLARIFY
 
 
 @pytest.mark.asyncio
@@ -162,8 +253,8 @@ async def test_unsupported_numeric_still_rejects_to_insufficient() -> None:
         )
 
     assert decision.reason_code == "grounding_reject"
-    assert decision.body == INSUFFICIENT_HUMAN
-    assert decision.offer_handoff is True
+    assert decision.body == PRODUCTS_CLARIFY
+    assert decision.offer_handoff is False
     assert decision.provider_status is ProviderStatus.OK
     assert any(
         event.get("event") == "grounded_draft_reject"
@@ -185,8 +276,8 @@ async def test_unsupported_regulated_still_rejects_to_insufficient() -> None:
         )
 
     assert decision.reason_code == "grounding_reject"
-    assert decision.body == INSUFFICIENT_HUMAN
-    assert decision.offer_handoff is True
+    assert decision.body == PRODUCTS_CLARIFY
+    assert decision.offer_handoff is False
     assert decision.provider_status is ProviderStatus.OK
     assert any(
         event.get("event") == "grounded_draft_reject"
@@ -209,13 +300,50 @@ async def test_no_citation_rejects_factual_draft() -> None:
         TurnContext(visitor_text="Do you provide drug screening?", evidence=[DOT_EVIDENCE])
     )
 
-    assert decision.body == INSUFFICIENT_HUMAN
-    assert decision.offer_handoff is True
+    assert decision.body == PRODUCTS_CLARIFY
+    assert decision.offer_handoff is False
     assert decision.reason_code == "grounding_reject"
     assert decision.provider_status is ProviderStatus.OK
     assert decision.citations == []
     assert decision.request_id == "req_test"
+    assert decision.outcome is ResponseOutcome.CLARIFICATION
+
+
+@pytest.mark.asyncio
+async def test_second_grounding_reject_hands_off_to_a_specialist() -> None:
+    body = "We provide DOT drug testing for small employers."
+
+    async def complete(_turn, _units):
+        return ModelDraft(body, citations=[])
+
+    decision = await GroundedResponseEngine(complete).respond(
+        TurnContext(
+            visitor_text="What is included?",
+            evidence=[DOT_EVIDENCE],
+            prior_miss_count=1,
+            prior_miss_reason="grounding_reject",
+        )
+    )
+    assert decision.body == REPEATED_MISS_HUMAN
+    assert decision.offer_handoff is True
+    assert decision.reason_code == "repeated_miss"
     assert decision.outcome is ResponseOutcome.KNOWLEDGE_GAP
+
+
+@pytest.mark.asyncio
+async def test_samplesite_first_grounding_reject_keeps_screening_clarify() -> None:
+    async def complete(_turn, _units):
+        return ModelDraft(body="Results come back in 12 hours.", citations=[])
+
+    decision = await GroundedResponseEngine(complete).respond(
+        TurnContext(
+            visitor_text="How fast?",
+            evidence=[TIMING_EVIDENCE],
+            site_name="SampleSite",
+        )
+    )
+    assert decision.body == CLARIFY_SCOPE_LINE
+    assert decision.offer_handoff is False
 
 
 @pytest.mark.asyncio
@@ -258,6 +386,129 @@ async def test_stale_source_helper_still_routes_to_tech_fail() -> None:
 
 
 @pytest.mark.asyncio
+async def test_grounding_reject_after_an_off_topic_miss_still_clarifies() -> None:
+    body = "We provide DOT drug testing for small employers."
+
+    async def complete(_turn, _units):
+        return ModelDraft(body, citations=[])
+
+    decision = await GroundedResponseEngine(complete).respond(
+        TurnContext(
+            visitor_text="Do you provide DOT testing?",
+            evidence=[DOT_EVIDENCE],
+            prior_miss_count=1,
+            prior_miss_reason="no_evidence",
+        )
+    )
+    assert decision.body == PRODUCTS_CLARIFY
+    assert decision.offer_handoff is False
+    assert decision.reason_code == "grounding_reject"
+    assert decision.outcome is ResponseOutcome.CLARIFICATION
+
+
+@pytest.mark.parametrize(
+    "visitor_text",
+    [
+        "Which page did that come from?",
+        "Where did you get that?",
+        "What URL did that come from?",
+        "Cite the URL you used.",
+    ],
+)
+@pytest.mark.asyncio
+async def test_page_followup_after_an_answer_keeps_helping_instead_of_missing(
+    visitor_text: str,
+) -> None:
+    calls = {"count": 0}
+
+    async def complete(_turn: TurnContext, _units: list[EvidenceUnit]) -> ModelDraft:
+        calls["count"] += 1
+        return ModelDraft(body="should not run", citations=[])
+
+    decision = await GroundedResponseEngine(complete=complete).respond(
+        TurnContext(
+            visitor_text=visitor_text,
+            evidence=[DOT_EVIDENCE],
+            prior_messages=(
+                {"role": "user", "content": "What is SampleMail?"},
+                {
+                    "role": "assistant",
+                    "content": "SampleMail verifies every address before mailing.",
+                },
+            ),
+        )
+    )
+    assert decision.body == PRODUCTS_KEEP_HELPING
+    assert decision.offer_handoff is False
+    assert decision.reason_code == "source_followup"
+    assert decision.outcome is ResponseOutcome.SYNTHESIZED_ANSWER
+    assert calls["count"] == 0
+
+
+@pytest.mark.asyncio
+async def test_page_followup_without_a_prior_answer_is_still_a_clarify() -> None:
+    decision = await GroundedResponseEngine(complete=None).respond(
+        TurnContext(visitor_text="Which page did that come from?", evidence=[])
+    )
+    assert decision.body == PRODUCTS_CLARIFY
+    assert decision.reason_code == "no_evidence"
+
+
+@pytest.mark.asyncio
+async def test_model_canned_clarify_counts_as_a_retrieval_miss() -> None:
+    calls = {"count": 0}
+
+    async def complete(_turn: TurnContext, _units: list[EvidenceUnit]) -> ModelDraft:
+        calls["count"] += 1
+        return ModelDraft(body=PRODUCTS_CLARIFY, citations=[])
+
+    decision = await GroundedResponseEngine(complete=complete).respond(
+        TurnContext(visitor_text="Who is going to win the World Series?", evidence=[DOT_EVIDENCE])
+    )
+    assert decision.body == PRODUCTS_CLARIFY
+    assert decision.reason_code == "no_evidence"
+    assert decision.offer_handoff is False
+    assert decision.outcome is ResponseOutcome.CLARIFICATION
+    assert calls["count"] == 1
+
+
+@pytest.mark.asyncio
+async def test_second_model_canned_clarify_hands_off() -> None:
+    async def complete(_turn, _units):
+        return ModelDraft(body=PRODUCTS_CLARIFY, citations=[])
+
+    decision = await GroundedResponseEngine(complete).respond(
+        TurnContext(
+            visitor_text="Pick a horse at Churchill Downs.",
+            evidence=[DOT_EVIDENCE],
+            prior_miss_count=1,
+            prior_miss_reason="no_evidence",
+        )
+    )
+    assert decision.body == INSUFFICIENT_HUMAN
+    assert decision.offer_handoff is True
+    assert decision.reason_code == "repeated_miss"
+
+
+@pytest.mark.asyncio
+async def test_grounding_reject_does_not_inherit_an_untyped_miss_count() -> None:
+    async def complete(_turn, _units):
+        return ModelDraft(body="We provide DOT drug testing for small employers.", citations=[])
+
+    decision = await GroundedResponseEngine(complete).respond(
+        TurnContext(
+            visitor_text="How are skip-tracing phone numbers scored?",
+            evidence=[DOT_EVIDENCE],
+            prior_miss_count=2,
+            prior_miss_reason=None,
+        )
+    )
+    assert decision.body == PRODUCTS_CLARIFY
+    assert decision.offer_handoff is False
+    assert decision.reason_code == "grounding_reject"
+
+
+@pytest.mark.asyncio
 async def test_first_no_evidence_miss_asks_neutral_clarification() -> None:
     calls = {"count": 0}
 
@@ -272,5 +523,40 @@ async def test_first_no_evidence_miss_asks_neutral_clarification() -> None:
     assert decision.outcome is ResponseOutcome.CLARIFICATION
     assert decision.reason_code == "no_evidence"
     assert decision.offer_handoff is False
-    assert decision.body == CLARIFY_SCOPE_LINE
+    assert decision.body == PRODUCTS_CLARIFY
     assert calls["count"] == 0
+
+
+@pytest.mark.asyncio
+async def test_samplesite_no_evidence_keeps_screening_clarification() -> None:
+    decision = await GroundedResponseEngine(complete=None).respond(
+        TurnContext(
+            visitor_text="what's the weather in Dallas",
+            evidence=[],
+            site_name="SampleSite",
+        )
+    )
+    assert decision.body == CLARIFY_SCOPE_LINE
+    assert decision.reason_code == "no_evidence"
+
+
+@pytest.mark.asyncio
+async def test_leading_uncited_preamble_is_dropped_and_cited_sentence_is_kept() -> None:
+    from dataclasses import replace
+
+    cited = "We support DOT drug and alcohol testing, random pool management, and DOT physicals."
+    body = f"Happy to help. {cited}"
+    start = body.index(cited)
+
+    async def complete(_turn, _units):
+        return ModelDraft(
+            body,
+            [replace(_citation(DOT_EVIDENCE, body), response_start=start, response_end=len(body))],
+        )
+
+    decision = await GroundedResponseEngine(complete).respond(
+        TurnContext(visitor_text="What testing do you support?", evidence=[DOT_EVIDENCE])
+    )
+    assert decision.outcome is ResponseOutcome.SYNTHESIZED_ANSWER
+    assert decision.body == cited
+    assert decision.reason_code is None

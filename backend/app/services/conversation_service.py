@@ -14,12 +14,13 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.chat.display_citations import visitor_citation_payloads
 from app.chat.outcome_copy import (
     DISENGAGE_LINE,
-    KEEP_HELPING_LINE,
     chitchat_reply,
     contact_line,
     is_transfer_offer_body,
+    keep_helping_line,
     transfer_offer_line,
 )
 from app.chat.state_machine import IllegalTransition, apply_event
@@ -33,6 +34,7 @@ from app.llm.intent import (
     is_transfer_consent,
     is_transfer_decline,
 )
+from app.llm.prompts import document_body
 from app.llm.safety_markers import SensitiveCategory
 from app.models.conversation import INQUIRY_TYPES, Conversation
 from app.models.kb_chunk import KbChunk
@@ -61,6 +63,9 @@ from app.services.grounded_response import (
     ResponseDecision,
     ResponseOutcome,
     TurnContext,
+    _has_prior_assistant,
+    _is_source_followup,
+    _safe_source_followup,
     _safe_technical_failure,
     contextual_grounding_query,
 )
@@ -69,7 +74,7 @@ from app.services.kb_embedder import default_embedder
 from app.services.kb_hybrid import HybridKbSearch
 from app.services.pii_redactor import redact_for_log
 from app.services.rate_limit import RateLimiter, RateLimitExceeded, RateLimitUnavailable
-from app.services.refusal_library import lookup_refusal
+from app.services.refusal_library import fallback_refusal_body, lookup_refusal
 from app.services.route_decision import live_snapshots_for_site
 from app.settings import get_settings
 
@@ -91,7 +96,7 @@ ASSISTANT_LINE = "You're now chatting with the assistant."
 CLOSED_BY_PREFIX = "This chat was closed by "
 IDLE_TTL = timedelta(minutes=5)
 OPEN_IDLE_STATES = frozenset({"prechat", "bot", "queued", "human"})
-SENSITIVE_LINE = "Please do not share Social Security numbers or other screening identifiers."
+SENSITIVE_LINE = "Please do not share Social Security numbers or other personal identifiers."
 
 
 class CommandError(Exception):
@@ -126,6 +131,9 @@ class BootstrapResult:
     resume_token: str | None
     bot_enabled: bool
     human_enabled: bool
+    conversation_state: str
+    assigned_agent: dict | None
+    messages: list[Message]
 
 
 def _transition(state: str | None, event: str) -> str:
@@ -244,6 +252,8 @@ class ConversationService:
             site.id, resume_token, peer_ip(client_host), cap_user_agent(user_agent)
         )
         conversation = await self._open_or_create_conversation(site.id, visitor.id)
+        messages, _ = await self.replay(conversation.id, 0)
+        assigned = await self.assigned_agent_view(conversation)
         return BootstrapResult(
             site_name=site.name,
             greeting=site.greeting,
@@ -256,6 +266,9 @@ class ConversationService:
             resume_token=issued_resume,
             bot_enabled=site.bot_enabled,
             human_enabled=site.human_enabled,
+            conversation_state=conversation.state,
+            assigned_agent=assigned,
+            messages=messages,
         )
 
     async def hello(
@@ -431,7 +444,8 @@ class ConversationService:
         conversation, site_key = await self._lock_visitor_conversation(
             conversation_id, visitor_id, parent_origin
         )
-        if await self._sites.get_by_id(conversation.site_id) is None:
+        site = await self._sites.get_by_id(conversation.site_id)
+        if site is None:
             raise CommandError("invalid")
         conversation.intent = "escalate"
         inserted = None
@@ -444,7 +458,9 @@ class ConversationService:
             )
         else:
             conversation.active_generation_id = None
-            inserted = await self._insert_message(conversation, "system", KEEP_HELPING_LINE)
+            inserted = await self._insert_message(
+                conversation, "system", keep_helping_line(site.name)
+            )
         await self._commit_and_schedule()
         log.info(
             "escalate",
@@ -735,7 +751,7 @@ class ConversationService:
             return None
         if is_chitchat(text):
             conversation.active_generation_id = None
-            reply = chitchat_reply(text, site.contact_info)
+            reply = chitchat_reply(text, site.contact_info, site_name=site.name)
             if reply:
                 await self._insert_message(conversation, "system", reply)
             return None
@@ -795,7 +811,11 @@ class ConversationService:
         self, conversation: Conversation, site: Site, category: SensitiveCategory
     ) -> None:
         refusal = await lookup_refusal(self._session, site.id, category)
-        body = refusal.body if refusal is not None else SENSITIVE_LINE
+        body = (
+            refusal.body
+            if refusal is not None
+            else (fallback_refusal_body(category) or SENSITIVE_LINE)
+        )
         conversation.active_generation_id = None
         if refusal is not None and refusal.chunk_id is not None:
             await self._insert_message(
@@ -833,7 +853,20 @@ class ConversationService:
         try:
             return await self._run_bot_turn(conversation_id, generation_id)
         except Exception:
-            log.info("bot_turn_failed", conversation_id=str(conversation_id), role="bot", length=0)
+            log.exception(
+                "bot_turn_failed", conversation_id=str(conversation_id), role="bot", length=0
+            )
+            try:
+                conversation = await self._conversations.get_by_id(conversation_id)
+                if conversation is not None:
+                    return await self._finalize_grounded_decision(
+                        conversation_id,
+                        generation_id,
+                        conversation.site_id,
+                        _safe_technical_failure(reason="provider_exception"),
+                    )
+            except Exception:
+                log.exception("bot_turn_fail_persist_failed", conversation_id=str(conversation_id))
             await self._release_generation(conversation_id, generation_id)
             return None
 
@@ -886,6 +919,15 @@ class ConversationService:
         )
         prior_messages = tuple(prior_provider_messages(window, visitor_text))
         stage_timings["history_load"] = (time.perf_counter_ns() - started) // 1_000_000
+        if _is_source_followup(visitor_text) and _has_prior_assistant(prior_messages):
+            return await self._finalize_grounded_decision(
+                conversation_id,
+                generation_id,
+                site.id,
+                _safe_source_followup(site.name),
+                visitor_text=visitor_text,
+                stage_timings=stage_timings,
+            )
         retrieval_text = contextual_grounding_query(visitor_text, prior_messages)
         evidence = await self._retrieve_evidence(site.id, retrieval_text, stage_timings)
         complete = getattr(self._responder, "generate_grounded_draft", None)
@@ -913,6 +955,7 @@ class ConversationService:
                 site_name=site.name,
                 prior_messages=prior_messages,
                 prior_miss_count=conversation.fallback_count,
+                prior_miss_reason=self._last_bot_reason(window, conversation.fallback_count),
                 off_brand_blocklist=tuple(getattr(site, "off_brand_blocklist", None) or ()),
             ),
             stage_timings=stage_timings,
@@ -932,32 +975,9 @@ class ConversationService:
         visitor_text: str,
         stage_timings: dict[str, int] | None = None,
     ) -> list[EvidenceUnit]:
-        settings = get_settings()
         snapshots = await live_snapshots_for_site(self._session, site_id)
         if not snapshots:
             return []
-        token_estimate = sum(item.token_estimate for item in snapshots)
-        if token_estimate < settings.full_context_max_tokens:
-            from app.services.full_context import load_live_units
-
-            units = await load_live_units(self._session, [item.id for item in snapshots])
-            return [
-                EvidenceUnit(
-                    id=unit.id,
-                    canonical_question=unit.canonical_question,
-                    aliases=unit.aliases,
-                    topic_label=unit.topic_label or unit.heading,
-                    answer_verbatim=unit.answer_verbatim,
-                    source_title=unit.title,
-                    source_url=unit.url,
-                    snapshot_id=unit.snapshot_id,
-                    risk_class=unit.risk_class,
-                    answer_mode=unit.answer_mode,
-                    enabled=True,
-                    live=True,
-                )
-                for unit in units
-            ]
         hits = await HybridKbSearch(self._session).search_with_deferred_embed(
             self._embedder,
             site_id,
@@ -978,8 +998,9 @@ class ConversationService:
                 answer_mode=hit.answer_mode,
                 enabled=hit.enabled,
                 live=True,
+                source_heading="" if hit.structured else hit.heading,
             )
-            for hit in hits[:5]
+            for hit in hits
         ]
 
     async def _legacy_grounded_draft(
@@ -1039,8 +1060,8 @@ class ConversationService:
                     response_start=start,
                     response_end=end,
                     source_start=0,
-                    source_end=len(unit.answer_verbatim),
-                    cited_text=unit.answer_verbatim,
+                    source_end=len(document_body(unit)),
+                    cited_text=document_body(unit),
                     source_title=unit.source_title,
                     source_url=unit.source_url,
                 )
@@ -1079,11 +1100,58 @@ class ConversationService:
         else:
             timings.setdefault("liveness_check", 0)
         conversation.active_generation_id = None
-        system_reason = self._system_reason_for(decision)
+        if self._is_repeated_miss(conversation, decision):
+            started = time.perf_counter_ns()
+            await self._open_handoff(
+                conversation,
+                reason="repeated_miss",
+                original_question=visitor_text,
+                stage_timings=timings,
+            )
+            await self._commit_and_schedule()
+            timings["commit"] = (time.perf_counter_ns() - started) // 1_000_000
+            log.info(
+                "grounded_turn",
+                conversation_id=str(conversation_id),
+                generation_id=str(generation_id),
+                site_id=str(site_id),
+                snapshot_id=None,
+                request_id=decision.request_id,
+                outcome=decision.outcome.value if decision.outcome is not None else None,
+                reason=decision.reason_code,
+                citation_count=0,
+                stage_timings=dict(timings),
+            )
+            return CommandResult(conversation=conversation, site_key=site_key)
         started = time.perf_counter_ns()
+        inserted = await self._persist_grounded_reply(conversation, decision)
+        await self._session.commit()
+        timings["commit"] = (time.perf_counter_ns() - started) // 1_000_000
+        snapshot_id = None
+        if decision.citations and decision.citations[0].snapshot_id is not None:
+            snapshot_id = str(decision.citations[0].snapshot_id)
+        log.info(
+            "grounded_turn",
+            conversation_id=str(conversation_id),
+            generation_id=str(generation_id),
+            site_id=str(site_id),
+            snapshot_id=snapshot_id,
+            request_id=decision.request_id,
+            outcome=decision.outcome.value if decision.outcome is not None else None,
+            reason=decision.reason_code,
+            citation_count=len(decision.citations),
+            stage_timings=dict(timings),
+        )
+        return CommandResult(conversation=conversation, site_key=site_key, message=inserted)
+
+    async def _persist_grounded_reply(
+        self, conversation: Conversation, decision: ResponseDecision
+    ) -> Message:
+        system_reason = self._system_reason_for(decision)
         if decision.citations:
             conversation.state = _transition(conversation.state, "bot_reply")
             source_ids = list(dict.fromkeys(citation.chunk_id for citation in decision.citations))
+            chips = visitor_citation_payloads(citations=decision.citations)
             inserted = await self._insert_message(
                 conversation,
                 "bot",
@@ -1091,10 +1159,8 @@ class ConversationService:
                 source_chunk_ids=source_ids,
                 snapshot_id=decision.citations[0].snapshot_id,
                 system_reason=system_reason,
-                source_urls=list(
-                    dict.fromkeys(citation.source_url for citation in decision.citations)
-                ),
-                source_title=decision.citations[0].source_title,
+                source_urls=[str(chip["source_url"]) for chip in chips if chip["source_url"]],
+                source_title=chips[0]["source_title"] if chips else None,
                 response_outcome=decision.outcome.value if decision.outcome is not None else None,
                 response_reason_code=decision.reason_code,
             )
@@ -1115,18 +1181,28 @@ class ConversationService:
                 )
             conversation.fallback_count = 0
         else:
+            prior_bot = None
+            if decision.reason_code == "source_followup":
+                prior_bot = await self._previous_cited_bot(conversation.id)
             inserted = await self._insert_message(
                 conversation,
                 "bot",
                 decision.body,
                 system_reason=system_reason,
+                source_chunk_ids=(
+                    list(prior_bot.source_chunk_ids)
+                    if prior_bot and prior_bot.source_chunk_ids
+                    else None
+                ),
+                snapshot_id=prior_bot.snapshot_id if prior_bot else None,
+                source_urls=(
+                    list(prior_bot.source_urls) if prior_bot and prior_bot.source_urls else None
+                ),
+                source_title=prior_bot.source_title if prior_bot else None,
                 response_outcome=decision.outcome.value if decision.outcome is not None else None,
                 response_reason_code=decision.reason_code,
             )
-            if (
-                decision.outcome is ResponseOutcome.CLARIFICATION
-                and decision.reason_code == "no_evidence"
-            ):
+            if decision.outcome is ResponseOutcome.CLARIFICATION:
                 conversation.fallback_count += 1
         if decision.offer_handoff and decision.outcome in {
             ResponseOutcome.KNOWLEDGE_GAP,
@@ -1137,27 +1213,34 @@ class ConversationService:
         }:
             # Persist the offer as bot speech; consent on the next visitor turn.
             conversation.fallback_count = max(conversation.fallback_count, 1)
-        await self._session.commit()
-        timings["commit"] = (time.perf_counter_ns() - started) // 1_000_000
-        snapshot_id = None
-        if decision.citations and decision.citations[0].snapshot_id is not None:
-            snapshot_id = str(decision.citations[0].snapshot_id)
-        log.info(
-            "grounded_turn",
-            conversation_id=str(conversation_id),
-            generation_id=str(generation_id),
-            site_id=str(site_id),
-            snapshot_id=snapshot_id,
-            request_id=decision.request_id,
-            outcome=decision.outcome.value if decision.outcome is not None else None,
-            reason=decision.reason_code,
-            citation_count=len(decision.citations),
-            stage_timings=dict(timings),
-        )
-        return CommandResult(conversation=conversation, site_key=site_key, message=inserted)
+        return inserted
+
+    @staticmethod
+    def _is_repeated_miss(_conversation: Conversation, decision: ResponseDecision) -> bool:
+        return decision.reason_code == "repeated_miss"
+
+    @staticmethod
+    def _last_bot_reason(window: list[Message], fallback_count: int) -> str | None:
+        if fallback_count <= 0:
+            return None
+        for row in reversed(window):
+            if row.role == "bot" and row.response_reason_code:
+                return row.response_reason_code
+        return None
+
+    async def _previous_cited_bot(self, conversation_id: UUID) -> Message | None:
+        recent = await self._messages.list_recent_roles(conversation_id, {"bot"}, 8)
+        for row in reversed(recent):
+            if row.source_urls:
+                return row
+        return None
 
     @staticmethod
     def _system_reason_for(decision: ResponseDecision) -> str:
+        if decision.outcome is ResponseOutcome.CLARIFICATION:
+            return "clarify"
+        if decision.reason_code == "source_followup":
+            return "answer"
         if decision.reason_code == "tech_fail" or (
             decision.provider_status is ProviderStatus.TECH_FAIL
         ):
@@ -1166,8 +1249,6 @@ class ConversationService:
             return "insufficient"
         if decision.citations:
             return "answer"
-        if decision.outcome is ResponseOutcome.CLARIFICATION:
-            return "clarify"
         if decision.outcome is ResponseOutcome.BOUNDARY:
             return "policy_boundary"
         if decision.outcome is ResponseOutcome.KNOWLEDGE_GAP:
@@ -1475,10 +1556,15 @@ class ConversationService:
                 else None
             ),
             "source_urls": list(message.source_urls) if message.source_urls is not None else None,
-            "display_locator": message.display_locator,
+            "display_locator": None,
             "source_title": message.source_title,
             "system_reason": message.system_reason,
             "created_at": created,
+            "citations": visitor_citation_payloads(
+                citations=list(message.citations or []),
+                source_urls=list(message.source_urls) if message.source_urls is not None else None,
+                source_title=message.source_title,
+            ),
         }
 
     async def parent_origin_allowed(self, site_id: UUID, parent_origin: str) -> bool:

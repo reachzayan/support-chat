@@ -12,14 +12,14 @@ def test_contact_line_joins_multiple_entries_with_or() -> None:
 
 
 def test_bye_reply_appends_contact_line_when_site_has_contact_info() -> None:
-    reply = chitchat_reply("bye", ["555-123-4567"])
+    reply = chitchat_reply("bye", ["555-123-4567"], site_name="SampleSite")
     assert reply == f"{BYE_LINE} You can also reach us at 555-123-4567."
 
 
 def test_bye_reply_is_unchanged_without_contact_info() -> None:
-    assert chitchat_reply("bye") == BYE_LINE
-    assert chitchat_reply("bye", []) == BYE_LINE
+    assert chitchat_reply("bye", site_name="SampleSite") == BYE_LINE
+    assert chitchat_reply("bye", [], site_name="SampleSite") == BYE_LINE
 
 
 def test_thanks_reply_does_not_gain_a_contact_line() -> None:
-    assert chitchat_reply("thanks", ["555-123-4567"]) == THANKS_LINE
+    assert chitchat_reply("thanks", ["555-123-4567"], site_name="SampleSite") == THANKS_LINE

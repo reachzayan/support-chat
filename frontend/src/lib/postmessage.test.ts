@@ -28,6 +28,59 @@ describe("host to widget frames", () => {
     }
     expect(frame.widget.name).toBe("SupportChat demo")
     expect(frame.bootstrap_token).toBe("tok")
+    expect(frame.conversation).toBeUndefined()
+  })
+
+  test("accepts a prechat conversation snapshot on bootstrap", () => {
+    const frame = parseHostToWidget({
+      type: "host.bootstrap",
+      bootstrap_token: "tok",
+      widget: {
+        name: "SupportChat demo",
+        greeting: "Talk to a specialist about screening.",
+        privacy_url: "http://localhost:3000/privacy",
+      },
+      page_url: "http://localhost:3000/demo",
+      page_title: "Testing LiveChat inhouse",
+      referrer: "",
+      conversation: {
+        state: "prechat",
+        assigned_agent: null,
+        messages: [],
+      },
+    })
+
+    expect(frame?.type).toBe("host.bootstrap")
+    if (frame?.type !== "host.bootstrap") {
+      return
+    }
+    expect(frame.conversation).toEqual({
+      state: "prechat",
+      assigned_agent: null,
+      messages: [],
+    })
+  })
+
+  test("keeps bootstrap when the conversation snapshot is malformed", () => {
+    const frame = parseHostToWidget({
+      type: "host.bootstrap",
+      bootstrap_token: "tok",
+      widget: {
+        name: "SupportChat demo",
+        greeting: "Talk to a specialist about screening.",
+        privacy_url: "http://localhost:3000/privacy",
+      },
+      page_url: "http://localhost:3000/demo",
+      page_title: "Testing LiveChat inhouse",
+      referrer: "",
+      conversation: { state: "nope", messages: [] },
+    })
+
+    expect(frame?.type).toBe("host.bootstrap")
+    if (frame?.type !== "host.bootstrap") {
+      return
+    }
+    expect(frame.conversation).toBeUndefined()
   })
 
   test("rejects unknown host types", () => {
@@ -45,6 +98,10 @@ describe("widget to host frames", () => {
     })
     expect(parseWidgetToHost({ type: "widget.resize", height: 5000 })).toBeNull()
     expect(parseWidgetToHost({ type: "widget.resize", height: 100 })).toBeNull()
+  })
+
+  test("accepts widget.painted", () => {
+    expect(parseWidgetToHost({ type: "widget.painted" })).toEqual({ type: "widget.painted" })
   })
 
   test("rejects unknown widget types", () => {

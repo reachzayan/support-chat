@@ -56,7 +56,9 @@ export const createPanel = (
     "max-height:calc(100vh - 32px)",
     "opacity:0",
     "transform:translateY(16px) scale(0.96)",
+    "pointer-events:none",
   ].join(";")
+  iframe.hidden = true
   doc.body.appendChild(iframe)
   return iframe
 }
@@ -108,6 +110,7 @@ export const acceptWidgetFrame = (
   event: MessageEvent,
   handlers: {
     onReady: () => void
+    onPainted: () => void
     onActivated: () => void
     onRebootstrap: () => void
     onClose: () => void
@@ -133,6 +136,7 @@ const dispatchWidgetFrame = (
   frame: NonNullable<ReturnType<typeof parseWidgetToHost>>,
   handlers: {
     onReady: () => void
+    onPainted: () => void
     onActivated: () => void
     onRebootstrap: () => void
     onClose: () => void
@@ -143,6 +147,9 @@ const dispatchWidgetFrame = (
   switch (frame.type) {
     case "widget.ready":
       handlers.onReady()
+      return
+    case "widget.painted":
+      handlers.onPainted()
       return
     case "widget.activated":
       handlers.onActivated()

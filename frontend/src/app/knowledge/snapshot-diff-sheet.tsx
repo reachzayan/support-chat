@@ -2,7 +2,7 @@
 
 import { useCallback } from "react"
 
-import type { KbDiff, KbEvidenceUnit } from "@/components/admin/staff-api"
+import type { KbDiff, KbEvidenceUnit, KbProgressRecord } from "@/components/admin/staff-api"
 import {
   Sheet,
   SheetContent,
@@ -12,6 +12,8 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet"
 
+import { describeProgressEvent } from "./knowledge-format"
+
 type SnapshotDiffSheetProps = {
   open: boolean
   onOpenChange: (open: boolean) => void
@@ -20,6 +22,7 @@ type SnapshotDiffSheetProps = {
   canRollback: boolean
   rollbackBusy: boolean
   onRollback: () => void
+  progress: KbProgressRecord | null
 }
 
 export const SnapshotDiffSheet = ({
@@ -30,6 +33,7 @@ export const SnapshotDiffSheet = ({
   canRollback,
   rollbackBusy,
   onRollback,
+  progress,
 }: SnapshotDiffSheetProps) => {
   const handleOpenChange = useCallback(
     (next: boolean) => {
@@ -47,12 +51,13 @@ export const SnapshotDiffSheet = ({
         className="bg-paper border-line w-full gap-0 overflow-y-auto p-0 data-[side=right]:sm:max-w-2xl"
       >
         <SheetHeader className="border-line border-b px-5 py-4">
-          <SheetTitle className="text-navy text-base font-extrabold">Snapshot changes</SheetTitle>
+          <SheetTitle>Source progress</SheetTitle>
           <SheetDescription className="text-mute text-xs">
-            Added, changed, and removed evidence from the last crawl.
+            Processing history and evidence changes for this source.
           </SheetDescription>
         </SheetHeader>
         <div className="flex flex-col gap-5 px-5 py-5">
+          <CrawlActivity progress={progress} />
           <p aria-live="polite" className="text-mute text-xs">
             {status}
           </p>
@@ -83,6 +88,49 @@ export const SnapshotDiffSheet = ({
   )
 }
 
+const CrawlActivity = ({ progress }: { progress: KbProgressRecord | null }) => {
+  if (!progress || (progress.current_jobs.length === 0 && progress.recent_events.length === 0)) {
+    return null
+  }
+  return (
+    <section className="border-line bg-paper rounded-xl border px-5 py-5" aria-live="polite">
+      <p className="text-mute text-[11px] font-semibold tracking-[0.2em] uppercase">
+        Processing history
+      </p>
+      <h2 className="text-navy heading mt-1 text-base">Latest runs</h2>
+      {progress.current_jobs.length > 0 ? (
+        <ul className="mt-3 space-y-2">
+          {progress.current_jobs.map((job) => (
+            <li key={`${job.page_url}:${job.started_at}`} className="flex flex-col gap-0.5 text-xs">
+              <span className="text-mute min-w-0 truncate font-mono">{job.page_url}</span>
+              <span className="text-ink">
+                {job.message ??
+                  describeProgressEvent({ stage: job.stage, state: "running", error_code: null })}
+              </span>
+            </li>
+          ))}
+        </ul>
+      ) : null}
+      <ul className="border-line mt-3 divide-y border-t">
+        {progress.recent_events.slice(0, 10).map((event) => {
+          const summary = describeProgressEvent(event)
+          return (
+            <li
+              key={`${event.page_url}:${event.timestamp}`}
+              className="flex flex-col gap-0.5 py-2 text-xs"
+            >
+              <span className="text-mute min-w-0 truncate font-mono">{event.page_url}</span>
+              <span className={event.error_code ? "text-ember font-semibold" : "text-ink"}>
+                {summary}
+              </span>
+            </li>
+          )
+        })}
+      </ul>
+    </section>
+  )
+}
+
 const DiffSection = ({
   title,
   units,
@@ -94,7 +142,7 @@ const DiffSection = ({
 }) => {
   return (
     <section>
-      <h3 className="text-navy text-sm font-extrabold">{title}</h3>
+      <h3 className="text-navy heading text-sm">{title}</h3>
       {units.length === 0 ? (
         <p className="text-mute mt-2 text-xs">{empty}</p>
       ) : (
@@ -104,9 +152,7 @@ const DiffSection = ({
               key={`${unit.kind}-${unit.heading}-${unit.answer_verbatim}`}
               className="border-line rounded-[8px] border px-4 py-3"
             >
-              <p className="text-navy text-sm font-bold">
-                {unit.canonical_question ?? unit.heading}
-              </p>
+              <p className="text-navy heading text-sm">{unit.canonical_question ?? unit.heading}</p>
               <pre className="text-ink mt-2 font-sans text-sm leading-6 whitespace-pre-wrap">
                 {unit.answer_verbatim}
               </pre>
@@ -125,7 +171,7 @@ const ChangedSection = ({
 }) => {
   return (
     <section>
-      <h3 className="text-navy text-sm font-extrabold">Changed</h3>
+      <h3 className="text-navy heading text-sm">Changed</h3>
       {items.length === 0 ? (
         <p className="text-mute mt-2 text-xs">No changed units.</p>
       ) : (
@@ -135,7 +181,7 @@ const ChangedSection = ({
               key={`${item.before.heading}-${item.after.heading}`}
               className="border-line rounded-[8px] border px-4 py-3"
             >
-              <p className="text-navy text-sm font-bold">
+              <p className="text-navy heading text-sm">
                 {item.after.canonical_question ?? item.after.heading}
               </p>
               <div className="mt-3 grid gap-3 md:grid-cols-2">

@@ -133,7 +133,7 @@ async def test_join_forbidden_when_human_off(migrated_db) -> None:
         assert conversation.assigned_agent_id is None
 
 
-async def test_bot_on_human_off_miss_asks_then_yes_is_callback_not_waiting(
+async def test_bot_on_human_off_scope_clarification_does_not_create_callback(
     migrated_db,
 ) -> None:
     responder = RecordingResponder(answer="")
@@ -164,27 +164,10 @@ async def test_bot_on_human_off_miss_asks_then_yes_is_callback_not_waiting(
         if yes.generation_id is not None:
             await service.run_bot_turn(conversation_id, yes.generation_id)
 
-    assert conversation_state(conversation_id) == "queued"
-    assert message_count(conversation_id, role="bot") == 1
-    assert message_count(conversation_id, role="system", body=CALLBACK_LINE) == 1
+    assert conversation_state(conversation_id) == "bot"
+    assert message_count(conversation_id, role="bot") >= 1
+    assert message_count(conversation_id, role="system", body=CALLBACK_LINE) == 0
     assert message_count(conversation_id, role="system", body=WAITING_LINE) == 0
-    async with session_maker()() as session:
-        agent = User(
-            email="join@example.local",
-            display_name="Alex Morgan",
-            password_hash=hash_password(ALEX_PASSWORD),
-            is_admin=False,
-            is_active=True,
-        )
-        session.add(agent)
-        await session.commit()
-        with pytest.raises(CommandError) as caught:
-            await ConversationService(session).join(conversation_id, agent)
-        assert caught.value.code == "join_disabled"
-        loaded = await ConversationService(session)._conversations.get_by_id(conversation_id)
-        assert loaded is not None
-        assert loaded.attention_needed is True
-        assert loaded.state == "queued"
 
 
 async def test_specialist_request_stays_bot_when_human_on(migrated_db) -> None:

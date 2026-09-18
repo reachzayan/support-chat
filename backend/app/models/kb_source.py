@@ -8,6 +8,7 @@ from sqlalchemy import (
     ForeignKey,
     Integer,
     String,
+    Text,
     UniqueConstraint,
     func,
     text,
@@ -37,7 +38,7 @@ class KbSource(Base):
             name="ck_kb_sources_stage",
         ),
         CheckConstraint(
-            "source_kind IN ('website','legacy_faq','policy')", name="ck_kb_sources_kind"
+            "source_kind IN ('website','legacy_faq','policy','text')", name="ck_kb_sources_kind"
         ),
     )
 
@@ -74,6 +75,8 @@ class KbSource(Base):
         String, server_default=text(f"'{DEFAULT_EMBEDDER_ID}'")
     )
     source_kind: Mapped[str] = mapped_column(String, server_default=text("'website'"))
+    display_name: Mapped[str | None] = mapped_column(String, nullable=True)
+    manual_text: Mapped[str | None] = mapped_column(Text, nullable=True)
     enabled: Mapped[bool] = mapped_column(Boolean, server_default=text("true"))
     created_by: Mapped[UUID | None] = mapped_column(ForeignKey("users.id"), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

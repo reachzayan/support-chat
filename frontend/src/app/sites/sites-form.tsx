@@ -164,7 +164,7 @@ export const RouteSwitch = ({
       className="border-line bg-paper text-ink focus-visible:ring-steel flex min-h-14 cursor-pointer items-center justify-between gap-4 rounded-[8px] border px-3 py-3 text-left focus-visible:ring-2 focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-50"
     >
       <span className="min-w-0">
-        <span className="text-navy block text-sm font-bold">{label}</span>
+        <span className="text-navy block text-sm font-medium">{label}</span>
         <span className="text-mute mt-0.5 block text-xs leading-5 font-normal">{description}</span>
       </span>
       <span

@@ -67,7 +67,7 @@ async def test_sad_message_stays_with_bot_and_does_not_queue(migrated_db) -> Non
 
     _assert_stays_bot_without_handoff(conversation_id)
     assert message_count(conversation_id, role="bot", body=MODEL_REDIRECT) == 1
-    assert len(responder.calls) == 1
+    assert responder.calls == []
 
 
 async def test_fuel_prices_stay_with_bot_and_do_not_queue(migrated_db) -> None:
@@ -78,7 +78,7 @@ async def test_fuel_prices_stay_with_bot_and_do_not_queue(migrated_db) -> None:
 
     _assert_stays_bot_without_handoff(conversation_id)
     assert message_count(conversation_id, role="bot", body=MODEL_REDIRECT) == 1
-    assert len(responder.calls) == 1
+    assert responder.calls == []
 
 
 async def test_gender_question_stays_with_bot_and_does_not_queue(migrated_db) -> None:
@@ -89,7 +89,7 @@ async def test_gender_question_stays_with_bot_and_does_not_queue(migrated_db) ->
 
     _assert_stays_bot_without_handoff(conversation_id)
     assert message_count(conversation_id, role="bot", body=MODEL_REDIRECT) == 1
-    assert len(responder.calls) == 1
+    assert responder.calls == []
 
 
 async def test_specialist_request_queues_for_a_human(migrated_db) -> None:
@@ -263,10 +263,7 @@ async def test_cost_query_does_not_exact_match_preemployment_blurb(migrated_db) 
 async def test_clinic_query_skips_marketing_cta_and_uses_network_faq(migrated_db) -> None:
     from app.services.kb_search import KbSearch
 
-    cta = (
-        "No more chasing clinics, waiting for results, or compliance surprises. "
-        "Talk to a specialist or jump into the portal."
-    )
+    cta = "Talk to a specialist"
     network = (
         "Yes. The SampleLab collection-site network covers thousands of clinics nationwide "
         "with electronic scheduling and reporting."

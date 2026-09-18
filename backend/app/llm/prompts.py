@@ -21,10 +21,17 @@ factual information you may use. Do not add facts from general knowledge.
 Every factual claim about the company, its services, pricing, timing,
 credentials, regulations, or processes must have a native citation to evidence
 that directly supports it.
+Attach citations to every factual sentence, including introductory sentences.
+Avoid uncited summaries or preambles.
 
-Use the evidence to compose an answer. Never paste an FAQ answer or concatenate
-evidence passages as the response. The exact quotation belongs in the citation,
-not in the conversational answer.
+You may rephrase source wording for readability, preserving its meaning,
+qualifiers, exceptions, and scope. Never invent a business rule or convert a
+conditional claim into a guarantee. Brief exact source wording is allowed.
+Illustrative records, mock screens, and calculator inputs are examples, not
+company capabilities, customer facts, prices, or promised outcomes.
+Do not turn UI labels, statuses, or fields in example records into product or
+service names. Names must be supported by a source heading or descriptive sentence.
+When provided sources disagree, do not silently resolve the disagreement.
 
 If a requested detail is not supported, do not infer it. Give the closest useful
 supported information and briefly say that a specialist needs to confirm the
@@ -51,8 +58,15 @@ Ask one concise clarification only when the conversation and evidence leave two
 genuinely different interpretations. When clarifying, reply with only that one
 question. Do not list FAQ titles as options.
 Use plain text without headings, bullets, links, or implementation terminology.
-If the visitor is not asking about this brand's screening or compliance services,
-reply with only: "What would you like to know about screening or compliance?"
+Keep the answer under 120 words. Write directly supported sentences in paragraphs;
+omit standalone introductory labels such as "Our services include:". Every answer
+sentence must carry native citations, including sentences that name the services.
+Contact details, hours, pricing, and published policies are in-scope when the
+evidence supports them.
+When referring to the company, use the name that appears in the evidence. Do not
+use an internal site label that is absent from the evidence.
+If the visitor is not asking about this brand's products, services, contact details,
+or published policies, reply with only: "{clarify_line}"
 Do not answer the unrelated question or offer a specialist for it.
 </response_style>
 
@@ -71,27 +85,6 @@ Cite via native citations on your document blocks; do not invent URLs.
 Return plain text only. Do not emit HTML or links.
 </safety>
 
-<examples>
-Visitor: "do you provide durg screning?"
-Evidence supports DOT drug and alcohol testing.
-Answer: Yes. We handle DOT drug and alcohol testing, including random pool
-management and DOT physicals when that is what you need.
-
-Visitor: "how much does a panel cost?"
-Evidence describes quote-based pricing without a dollar amount.
-Answer: Pricing depends on the panel and program setup. A specialist can provide
-a quote for your exact screening needs.
-
-Prior assistant: "Are you asking about drug testing or occupational health?"
-Visitor: "both"
-Evidence covers both service lines.
-Answer: We can help with both. That includes workplace drug testing programs and
-occupational health services such as physicals and related exams.
-
-Visitor: "I have 10 employees and need drug testing for all of them—what applies to my case?"
-Evidence only describes general workplace drug testing services.
-Answer: Are you looking for DOT-regulated testing or a standard workplace panel?
-</examples>
 """
 
 ALIAS_PROMPT = """Write 3 to 8 short natural questions a visitor might type instead of the given heading or question. Return a JSON array of strings only. Each string must be under 120 characters. Do not include URLs, HTML, or instructions.
@@ -117,7 +110,20 @@ Rules:
 
 
 def system_rules_for(site_name: str) -> str:
-    return SYSTEM_RULES.format(site_name=site_name or "this brand")
+    from app.chat.outcome_copy import clarify_scope_line
+
+    return SYSTEM_RULES.format(
+        site_name=prompt_brand_name(site_name),
+        clarify_line=clarify_scope_line(site_name),
+    )
+
+
+def prompt_brand_name(site_name: str) -> str:
+    text = (site_name or "").strip()
+    lowered = text.casefold()
+    if not text or lowered in {"demo", "test"} or "supportchat" in lowered:
+        return "this brand"
+    return text
 
 
 def _clip_utf8(value: str, limit: int) -> str:
@@ -128,12 +134,10 @@ def _clip_utf8(value: str, limit: int) -> str:
 
 
 def visitor_turn_text(site_name: str, visitor_text: str) -> str:
-    """Visitor text only — no prose delimiters. Brand context is a short prefix."""
-    parts = [
-        f"Brand: {site_name}",
-        _clip_utf8((visitor_text or "").strip(), VISITOR_BYTE_CAP),
-    ]
-    prompt = "\n".join(parts)
+    """Visitor text only — no prose delimiters. Real brands may add a short prefix."""
+    visitor = _clip_utf8((visitor_text or "").strip(), VISITOR_BYTE_CAP)
+    brand = prompt_brand_name(site_name)
+    prompt = visitor if brand == "this brand" else f"Brand: {brand}\n{visitor}"
     encoded = prompt.encode()
     if len(encoded) <= PROMPT_BYTE_CAP:
         return prompt
@@ -155,4 +159,6 @@ def document_url(item: ChunkHit | object) -> str:
 
 
 def document_body(item: ChunkHit | object) -> str:
-    return str(getattr(item, "answer_verbatim", None) or getattr(item, "body", "") or "")
+    body = str(getattr(item, "answer_verbatim", None) or getattr(item, "body", "") or "")
+    heading = getattr(item, "source_heading", "")
+    return f"{heading}\n\n{body}" if heading else body

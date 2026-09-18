@@ -64,6 +64,8 @@ def test_first_person_result_question_is_sensitive() -> None:
     assert is_sensitive_request("how fast are results") is False
     assert is_sensitive_request("I take Xanax, will that show up") is True
     assert is_sensitive_request("will marijuana show up on a pre-employment screen") is False
+    assert is_sensitive_request("Diagnose this chest pain and tell me if I need the ER.") is True
+    assert is_sensitive_request("how fast are DOT physicals") is False
 
 
 def test_arithmetic_is_not_silent_chitchat() -> None:

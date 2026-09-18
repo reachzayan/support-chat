@@ -104,7 +104,7 @@ const ComposerField = ({
       </PopoverTrigger>
       <PopoverContent initialFocus={false} finalFocus={false} className="overflow-hidden">
         <div className="border-line flex items-center justify-between border-b px-3 py-2">
-          <p className="text-navy text-xs font-extrabold">Canned responses</p>
+          <p className="text-navy heading text-xs">Canned responses</p>
           <Link
             href="/admin/canned-responses"
             className="text-steel text-xs font-bold underline underline-offset-2"

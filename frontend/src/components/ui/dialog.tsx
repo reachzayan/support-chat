@@ -5,9 +5,17 @@
 import { Dialog as DialogPrimitive } from "@base-ui/react/dialog"
 import { cn } from "cn"
 import { XIcon } from "lucide-react"
+import { motion, useReducedMotion, type HTMLMotionProps } from "motion/react"
 import * as React from "react"
+import { useLayoutEffect, useRef, useState } from "react"
 
 import { Button } from "@/components/ui/button"
+
+const DIALOG_RESIZE_TRANSITION = { duration: 0.2, ease: [0.23, 1, 0.32, 1] } as const
+const REDUCED_MOTION_TRANSITION = { duration: 0 } as const
+
+const DIALOG_FRAME =
+  "border-line bg-paper text-ink pointer-events-auto isolate z-50 flex max-h-[min(92vh,48rem)] w-[calc(100%-2rem)] max-w-lg flex-col overflow-hidden rounded-2xl border shadow-[0_16px_48px_rgba(13,31,58,0.22)] transition-[opacity,scale] duration-200 ease-[cubic-bezier(0.23,1,0.32,1)] data-ending-style:scale-[0.97] data-ending-style:opacity-0 data-starting-style:scale-[0.97] data-starting-style:opacity-0"
 
 const Dialog = ({ ...props }: DialogPrimitive.Root.Props) => {
   return <DialogPrimitive.Root data-slot="dialog" {...props} />
@@ -22,7 +30,7 @@ const DialogOverlay = ({ className, ...props }: DialogPrimitive.Backdrop.Props) 
     <DialogPrimitive.Backdrop
       data-slot="dialog-overlay"
       className={cn(
-        "fixed inset-0 z-50 bg-navy/40 transition-opacity duration-200 ease-out data-ending-style:opacity-0 data-starting-style:opacity-0 supports-backdrop-filter:backdrop-blur-xs dark:bg-black/60",
+        "bg-navy/40 fixed inset-0 z-50 transition-opacity duration-200 ease-out data-ending-style:opacity-0 data-starting-style:opacity-0 dark:bg-black/60",
         className,
       )}
       {...props}
@@ -41,26 +49,71 @@ const DialogContent = ({
   return (
     <DialogPortal>
       <DialogOverlay />
-      <DialogPrimitive.Popup
-        data-slot="dialog-content"
-        className={cn(
-          "border-line bg-paper text-ink fixed top-1/2 left-1/2 z-50 flex max-h-[min(92vh,48rem)] w-[calc(100%-2rem)] max-w-lg -translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden rounded-xl border shadow-[0_16px_48px_rgba(13,31,58,0.22)] transition-[opacity,scale] duration-200 ease-[cubic-bezier(0.23,1,0.32,1)] data-ending-style:scale-[0.97] data-ending-style:opacity-0 data-starting-style:scale-[0.97] data-starting-style:opacity-0",
-          className,
-        )}
-        {...props}
+      <DialogPrimitive.Viewport
+        data-slot="dialog-viewport"
+        className="pointer-events-none fixed inset-0 z-50 flex items-center justify-center p-4"
       >
-        {children}
-        {showCloseButton ? (
-          <DialogPrimitive.Close
-            data-slot="dialog-close"
-            render={<Button variant="ghost" className="absolute top-3 right-3" size="icon-sm" />}
-          >
-            <XIcon />
-            <span className="sr-only">Close</span>
-          </DialogPrimitive.Close>
-        ) : null}
-      </DialogPrimitive.Popup>
+        <DialogPrimitive.Popup
+          data-slot="dialog-content"
+          className={cn(DIALOG_FRAME, className)}
+          {...props}
+        >
+          {children}
+          {showCloseButton ? (
+            <DialogPrimitive.Close
+              data-slot="dialog-close"
+              render={<Button variant="ghost" className="absolute top-3 right-3" size="icon-sm" />}
+            >
+              <XIcon />
+              <span className="sr-only">Close</span>
+            </DialogPrimitive.Close>
+          ) : null}
+        </DialogPrimitive.Popup>
+      </DialogPrimitive.Viewport>
     </DialogPortal>
+  )
+}
+
+// Fixed dialogs ignore layout animations; measure inner content and tween height instead.
+const DialogResizeSection = ({
+  className,
+  children,
+  ...props
+}: Omit<HTMLMotionProps<"div">, "children"> & { children: React.ReactNode }) => {
+  const reducedMotion = useReducedMotion()
+  const measureRef = useRef<HTMLDivElement>(null)
+  const [height, setHeight] = useState<number | "auto">("auto")
+
+  useLayoutEffect(() => {
+    const node = measureRef.current
+    if (!node) {
+      return
+    }
+    const updateHeight = () => {
+      setHeight(node.offsetHeight)
+    }
+    updateHeight()
+    if (typeof ResizeObserver === "undefined") {
+      return
+    }
+    const observer = new ResizeObserver(updateHeight)
+    observer.observe(node)
+    return () => observer.disconnect()
+  }, [])
+
+  return (
+    <motion.div
+      // oxlint-disable-next-line react-perf/jsx-no-new-object-as-prop -- motion.div animate requires a height object
+      animate={{ height }}
+      initial={false}
+      transition={reducedMotion ? REDUCED_MOTION_TRANSITION : DIALOG_RESIZE_TRANSITION}
+      className="overflow-hidden"
+      {...props}
+    >
+      <div ref={measureRef} className={cn(className)}>
+        {children}
+      </div>
+    </motion.div>
   )
 }
 
@@ -88,7 +141,7 @@ const DialogTitle = ({ className, ...props }: DialogPrimitive.Title.Props) => {
   return (
     <DialogPrimitive.Title
       data-slot="dialog-title"
-      className={cn("text-navy text-base font-extrabold", className)}
+      className={cn("text-navy heading text-base", className)}
       {...props}
     />
   )
@@ -109,6 +162,7 @@ export {
   DialogPortal,
   DialogOverlay,
   DialogContent,
+  DialogResizeSection,
   DialogHeader,
   DialogFooter,
   DialogTitle,

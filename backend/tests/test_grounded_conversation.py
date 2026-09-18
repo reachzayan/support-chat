@@ -2,7 +2,8 @@ import uuid
 
 from sqlalchemy import select
 
-from app.chat.outcome_copy import INSUFFICIENT_HUMAN, TECH_FAIL_HUMAN
+from app.chat.outcome_copy import PRODUCTS_CLARIFY_LINE as PRODUCTS_CLARIFY
+from app.chat.outcome_copy import TECH_FAIL_HUMAN
 from app.db import session_maker
 from app.models.kb_page import KbPage
 from app.models.message import Message
@@ -90,7 +91,7 @@ async def test_yes_no_factual_answer_commits_message_and_citation(migrated_db) -
     assert citations[0].response_end == len(PARAPHRASE_BODY)
 
 
-async def test_small_corpus_sends_every_live_unit_to_responder(migrated_db) -> None:
+async def test_small_corpus_retrieves_only_the_exact_live_unit(migrated_db) -> None:
     async with session_maker()() as session:
         site = await insert_site(session, "small-corpus-site", "Small Corpus Site")
         chunks = [
@@ -122,13 +123,13 @@ async def test_small_corpus_sends_every_live_unit_to_responder(migrated_db) -> N
             visitor.id,
             HOST_ORIGIN,
             uuid.uuid4(),
-            "Which workplace screening options are available?",
+            "Screening service 5",
         )
         assert result.generation_id is not None
         await service.run_bot_turn(conversation.id, result.generation_id)
 
     assert len(responder.calls) == 1
-    assert set(responder.calls[0]["document_ids"]) == {chunk.id for chunk in chunks}
+    assert responder.calls[0]["document_ids"] == [selected.id]
 
 
 async def test_misspelled_durg_screening_retrieves_same_evidence(migrated_db) -> None:
@@ -508,9 +509,9 @@ async def test_no_citation_never_persists_provider_claim(migrated_db) -> None:
         )
 
     assert message is not None
-    assert message.body == INSUFFICIENT_HUMAN
+    assert message.body == PRODUCTS_CLARIFY
     assert uncited_body not in message.body
-    assert message.system_reason == "insufficient"
+    assert message.system_reason == "clarify"
     assert message.response_reason_code == "grounding_reject"
-    assert message.response_outcome == "knowledge_gap"
+    assert message.response_outcome == "clarification"
     assert citations == []

@@ -107,7 +107,7 @@ const EmptyTranscript = ({ loading }: { loading: boolean }) => {
       className="bg-ice flex min-h-0 min-w-0 flex-1 flex-col items-center justify-center px-8"
       aria-busy={loading}
     >
-      <h1 className="text-navy text-base font-extrabold">
+      <h1 className="text-navy heading text-base">
         {loading ? "Opening conversation…" : "Select a conversation"}
       </h1>
       <p className="text-mute mt-2 max-w-xs text-center text-sm leading-6">

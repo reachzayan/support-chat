@@ -12,7 +12,7 @@ export default function DemoPage() {
       <div className="absolute top-5 right-5">
         <ThemeToggle />
       </div>
-      <h1 className="max-w-lg text-2xl font-extrabold tracking-[-0.04em] text-balance sm:text-3xl">
+      <h1 className="heading max-w-lg text-2xl text-balance sm:text-3xl">
         This is a demo website for the Chatbot widget.
       </h1>
       <script dangerouslySetInnerHTML={embedConfig} />

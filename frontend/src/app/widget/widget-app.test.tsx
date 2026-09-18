@@ -1,6 +1,6 @@
 import { screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
-import { beforeEach, describe, expect, test, vi } from "vitest"
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest"
 
 import { renderWithProviders } from "@/test/render"
 
@@ -32,7 +32,11 @@ class FakeSocket {
   }
 }
 
-const dispatchBootstrap = () => {
+const dispatchBootstrap = (conversation?: {
+  state: string
+  assigned_agent: { id: string; display_name: string } | null
+  messages: unknown[]
+}) => {
   window.dispatchEvent(
     new MessageEvent("message", {
       origin: PARENT,
@@ -48,6 +52,7 @@ const dispatchBootstrap = () => {
         page_url: "http://localhost:3000/demo",
         page_title: "Testing LiveChat inhouse",
         referrer: "",
+        ...(conversation === undefined ? {} : { conversation }),
       },
     }),
   )
@@ -56,6 +61,53 @@ const dispatchBootstrap = () => {
 const emit = (socket: FakeSocket | undefined, payload: unknown) => {
   socket?.onmessage?.({ data: JSON.stringify(payload) } as MessageEvent)
 }
+
+describe("widget first paint", () => {
+  beforeEach(() => {
+    FakeSocket.instances = []
+    vi.stubGlobal("WebSocket", FakeSocket)
+    vi.stubGlobal("fetch", vi.fn())
+  })
+
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  test("a prechat snapshot shows the form before any socket state", async () => {
+    const postMessage = vi.spyOn(window.parent, "postMessage")
+    renderWithProviders(<WidgetApp />)
+    dispatchBootstrap({ state: "prechat", assigned_agent: null, messages: [] })
+
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Start the chat" })).toBeInTheDocument(),
+    )
+    expect(screen.queryByText("Connecting…")).not.toBeInTheDocument()
+    expect(
+      postMessage.mock.calls.filter(
+        (call) => (call[0] as { type?: string }).type === "widget.painted",
+      ).length,
+    ).toBe(1)
+  })
+
+  test("a resume snapshot shows the prior visitor line before any socket state", async () => {
+    renderWithProviders(<WidgetApp />)
+    dispatchBootstrap({
+      state: "bot",
+      assigned_agent: null,
+      messages: [{ type: "message", id: 11, role: "visitor", body: VISITOR_LINE }],
+    })
+
+    await waitFor(() => expect(screen.getByText(VISITOR_LINE)).toBeInTheDocument())
+    expect(screen.queryByText("Connecting…")).not.toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Send" })).toBeInTheDocument()
+  })
+
+  test("the widget document stays transparent over the host page", () => {
+    renderWithProviders(<WidgetApp />)
+    expect(document.documentElement.style.backgroundColor).toBe("transparent")
+    expect(document.body.style.backgroundColor).toBe("transparent")
+  })
+})
 
 describe("widget bootstrap race", () => {
   test("registers the host listener before posting widget.ready", () => {

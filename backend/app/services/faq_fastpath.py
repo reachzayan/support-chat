@@ -14,8 +14,8 @@ _CTA_SNIPPETS = (
 
 
 def is_marketing_cta(text: str) -> bool:
-    lowered = (text or "").casefold()
-    return any(snippet in lowered for snippet in _CTA_SNIPPETS)
+    body = " ".join((text or "").casefold().split())
+    return body in _CTA_SNIPPETS
 
 
 def normalize_fast_query(value: str) -> str | None:

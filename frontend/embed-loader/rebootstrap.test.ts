@@ -32,6 +32,9 @@ const openActivated = async () => {
       data: { type: "widget.activated" },
     }),
   )
+  await vi.waitFor(() =>
+    expect(window.localStorage.getItem(`supportchat.visitor.${DEMO_KEY}`)).toBe(RESUME),
+  )
   return { fetchMock, iframe }
 }
 

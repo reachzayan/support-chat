@@ -46,7 +46,7 @@ const RailSection = ({
   <Collapsible defaultOpen={defaultOpen} className="border-line border-b pb-1 last:border-b-0">
     <CollapsibleTrigger
       aria-label={title}
-      className="group text-mute hover:text-ink flex w-full items-center justify-between px-5 py-3 text-left text-[10px] font-bold tracking-[0.12em] uppercase focus-visible:ring-0"
+      className="group text-mute hover:text-ink flex w-full items-center justify-between px-5 py-3 text-left text-[10px] font-semibold tracking-[0.12em] uppercase focus-visible:ring-0"
     >
       <span>{title}</span>
       <ChevronDown
@@ -80,7 +80,7 @@ const VisitorRailHeader = ({
     </span>
     <div className="min-w-0">
       <div className="flex min-w-0 items-center gap-2">
-        <p className="text-navy truncate text-sm font-extrabold tracking-[-0.02em]">{name}</p>
+        <p className="text-navy heading truncate text-sm">{name}</p>
         {closed ? <span className={`${META_PILL} tracking-[0.08em] uppercase`}>Closed</span> : null}
       </div>
       <p className="text-mute mt-0.5 flex items-center gap-1.5 truncate text-xs">
