@@ -1,9 +1,11 @@
+import asyncio
 from hashlib import sha256
 from json import dumps, loads
-from typing import Protocol
+from typing import ClassVar, Protocol
 from uuid import UUID
 
 from app.redis import get_redis
+from app.services.bot_trace import record_trace
 from app.services.kb_tokens import normalize_query
 from app.settings import get_settings
 
@@ -84,9 +86,9 @@ def axis_for_text(text: str) -> int:
     return 10
 
 
-def query_vector_cache_key(normalized_query: str) -> str:
-    digest = sha256(normalized_query.encode("utf-8")).hexdigest()
-    return f"kb:qvec:{digest}"
+def query_vector_cache_key(normalized_query: str, embedder_id: str) -> str:
+    digest = sha256(f"{embedder_id}\0{normalized_query}".encode()).hexdigest()
+    return f"kb:qvec:v2:{digest}"
 
 
 def document_vector_cache_key(text: str, embedder_id: str) -> str:
@@ -97,11 +99,11 @@ def document_vector_cache_key(text: str, embedder_id: str) -> str:
 EMBED_DOC_TTL = 30 * 24 * 60 * 60
 
 
-async def _cached_query_vector(normalized_query: str) -> list[float] | None:
+async def _cached_query_vector(normalized_query: str, embedder_id: str) -> list[float] | None:
     if not normalized_query:
         return None
     try:
-        raw = await get_redis().get(query_vector_cache_key(normalized_query))
+        raw = await get_redis().get(query_vector_cache_key(normalized_query, embedder_id))
     except Exception:
         return None
     if not raw:
@@ -115,13 +117,13 @@ async def _cached_query_vector(normalized_query: str) -> list[float] | None:
     return [float(item) for item in parsed]
 
 
-async def _store_query_vector(normalized_query: str, vector: list[float]) -> None:
+async def _store_query_vector(normalized_query: str, embedder_id: str, vector: list[float]) -> None:
     if not normalized_query or not vector:
         return
     settings = get_settings()
     try:
         await get_redis().set(
-            query_vector_cache_key(normalized_query),
+            query_vector_cache_key(normalized_query, embedder_id),
             dumps(vector),
             ex=settings.query_vector_cache_ttl,
         )
@@ -175,8 +177,32 @@ class FakeEmbedder:
 
 
 class OpenAIEmbedder:
+    _shared_clients: ClassVar[dict[tuple[object, object, str | None, float, int], object]] = {}
+
     def __init__(self, api_key: str | None) -> None:
         self._api_key = api_key
+
+    def _shared_client(self, *, timeout: float, max_retries: int):
+        from openai import AsyncOpenAI
+
+        key = (asyncio.get_running_loop(), AsyncOpenAI, self._api_key, timeout, max_retries)
+        client = self._shared_clients.get(key)
+        if client is None:
+            client = AsyncOpenAI(
+                api_key=self._api_key,
+                timeout=timeout,
+                max_retries=max_retries,
+            )
+            self._shared_clients[key] = client
+        return client
+
+    @classmethod
+    async def close_shared_clients(cls) -> None:
+        loop = asyncio.get_running_loop()
+        keys = [key for key in cls._shared_clients if key[0] is loop]
+        clients = [cls._shared_clients.pop(key) for key in keys]
+        for client in clients:
+            await client.close()
 
     @property
     def model(self) -> str:
@@ -191,7 +217,7 @@ class OpenAIEmbedder:
         return configured_embedder_id()
 
     async def embed_documents(self, texts: list[str]) -> list[list[float]]:
-        from openai import APITimeoutError, AsyncOpenAI, RateLimitError
+        from openai import APITimeoutError, RateLimitError
 
         settings = get_settings()
         limit = settings.openai_embed_max_tokens
@@ -209,25 +235,22 @@ class OpenAIEmbedder:
                 missing.append(index)
         if not missing:
             return [item for item in vectors if item is not None]
-        client = AsyncOpenAI(api_key=self._api_key, timeout=settings.embed_ingest_timeout)
-        try:
-            batch_size = settings.embed_batch
-            pending_texts = [texts[index] for index in missing]
-            fetched: list[list[float]] = []
-            for start in range(0, len(pending_texts), batch_size):
-                batch = pending_texts[start : start + batch_size]
-                response = await _embed_with_retry(
-                    client,
-                    model=settings.openai_embed_model,
-                    batch=batch,
-                    dimensions=settings.openai_embed_dim,
-                    rate_error=RateLimitError,
-                    timeout_error=APITimeoutError,
-                )
-                ordered = sorted(response.data, key=lambda row: row.index)
-                fetched.extend(list(row.embedding) for row in ordered)
-        finally:
-            await client.close()
+        client = self._shared_client(timeout=settings.embed_ingest_timeout, max_retries=0)
+        batch_size = settings.embed_batch
+        pending_texts = [texts[index] for index in missing]
+        fetched: list[list[float]] = []
+        for start in range(0, len(pending_texts), batch_size):
+            batch = pending_texts[start : start + batch_size]
+            response = await _embed_with_retry(
+                client,
+                model=settings.openai_embed_model,
+                batch=batch,
+                dimensions=settings.openai_embed_dim,
+                rate_error=RateLimitError,
+                timeout_error=APITimeoutError,
+            )
+            ordered = sorted(response.data, key=lambda row: row.index)
+            fetched.extend(list(row.embedding) for row in ordered)
         for offset, index in enumerate(missing):
             vector = fetched[offset]
             vectors[index] = vector
@@ -235,20 +258,21 @@ class OpenAIEmbedder:
         return [item for item in vectors if item is not None]
 
     async def embed_query(self, text: str) -> list[float] | None:
-        from openai import APITimeoutError, AsyncOpenAI
+        from openai import APITimeoutError
 
         if not self._api_key:
             return None
         settings = get_settings()
         normalized = normalize_query(text)
-        cached = await _cached_query_vector(normalized)
+        embedder_id = self.embedder_id
+        cached = await _cached_query_vector(normalized, embedder_id)
         if cached is not None:
+            record_trace("retrieval", query_vector_cache_hit=True)
             return cached
+        record_trace("retrieval", query_vector_cache_hit=False)
         if count_embed_tokens(text) > settings.openai_embed_max_tokens:
             return None
-        client = AsyncOpenAI(
-            api_key=self._api_key, timeout=settings.embed_query_timeout, max_retries=0
-        )
+        client = self._shared_client(timeout=settings.embed_query_timeout, max_retries=0)
         try:
             response = await client.embeddings.create(
                 model=settings.openai_embed_model,
@@ -258,10 +282,8 @@ class OpenAIEmbedder:
             )
         except (APITimeoutError, OSError, TimeoutError):
             return None
-        finally:
-            await client.close()
         vector = list(response.data[0].embedding)
-        await _store_query_vector(normalized, vector)
+        await _store_query_vector(normalized, embedder_id, vector)
         return vector
 
 
