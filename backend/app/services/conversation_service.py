@@ -1,3 +1,4 @@
+import asyncio
 import time
 from base64 import urlsafe_b64decode, urlsafe_b64encode
 from dataclasses import dataclass
@@ -31,6 +32,7 @@ from app.llm.intent import (
     is_chitchat,
     is_contact_request,
     is_escalate_request,
+    is_handoff_declined,
     is_transfer_consent,
     is_transfer_decline,
 )
@@ -54,6 +56,8 @@ from app.repositories.origins import InvalidOrigin, canonicalize_origin, sanitiz
 from app.repositories.site_repo import SiteRepository
 from app.repositories.user_repo import UserRepository
 from app.repositories.visitor_repo import VisitorRepository
+from app.services.bot_trace import record_trace
+from app.services.full_context import prior_provider_messages
 from app.services.grounded_response import (
     Citation,
     EvidenceUnit,
@@ -65,16 +69,18 @@ from app.services.grounded_response import (
     TurnContext,
     _has_prior_assistant,
     _is_source_followup,
-    _safe_source_followup,
     _safe_technical_failure,
     contextual_grounding_query,
+    history_recap_decision,
 )
 from app.services.handoff_service import EscalationReason, HandoffService, HandoffTrigger
+from app.services.ip_geolocation import lookup_location
 from app.services.kb_embedder import default_embedder
 from app.services.kb_hybrid import HybridKbSearch
-from app.services.pii_redactor import redact_for_log
+from app.services.pii_redactor import redact_for_log, redact_for_model
 from app.services.rate_limit import RateLimiter, RateLimitExceeded, RateLimitUnavailable
 from app.services.refusal_library import fallback_refusal_body, lookup_refusal
+from app.services.response_cache import load_response, response_cache_key, store_response
 from app.services.route_decision import live_snapshots_for_site
 from app.settings import get_settings
 
@@ -724,6 +730,14 @@ class ConversationService:
             return None
         conversation.intent = classify_intent(text)
         category = classify_sensitive(text)
+        record_trace(
+            "classification",
+            intent=conversation.intent,
+            sensitive_category=category.value,
+            chitchat=is_chitchat(text),
+            contact=is_contact_request(text),
+            explicit_human_request=is_escalate_request(text),
+        )
         if category is not SensitiveCategory.NONE:
             log.info(
                 "sensitive_intent",
@@ -789,7 +803,9 @@ class ConversationService:
             return False
         from app.chat.outcome_copy import INSUFFICIENT_HUMAN, TECH_FAIL_HUMAN
 
-        if prior.body in {INSUFFICIENT_HUMAN, TECH_FAIL_HUMAN}:
+        if prior.body in {INSUFFICIENT_HUMAN, TECH_FAIL_HUMAN} or is_transfer_offer_body(
+            prior.body
+        ):
             return True
         lowered = (prior.body or "").casefold()
         return "specialist" in lowered and (
@@ -897,8 +913,6 @@ class ConversationService:
         site: Site,
         visitor_text: str,
     ) -> CommandResult | None:
-        from app.services.full_context import prior_provider_messages
-
         stage_timings: dict[str, int] = {
             "history_load": 0,
             "lexical_retrieve": 0,
@@ -915,21 +929,146 @@ class ConversationService:
         window = await self._messages.list_recent_roles(
             conversation_id,
             {"visitor", "bot"},
-            get_settings().conversation_window_size,
+            get_settings().conversation_window_size + 1,
         )
         prior_messages = tuple(prior_provider_messages(window, visitor_text))
         stage_timings["history_load"] = (time.perf_counter_ns() - started) // 1_000_000
-        if _is_source_followup(visitor_text) and _has_prior_assistant(prior_messages):
+        recap = history_recap_decision(visitor_text, prior_messages)
+        if recap is not None:
             return await self._finalize_grounded_decision(
                 conversation_id,
                 generation_id,
                 site.id,
-                _safe_source_followup(site.name),
+                recap,
                 visitor_text=visitor_text,
                 stage_timings=stage_timings,
             )
-        retrieval_text = contextual_grounding_query(visitor_text, prior_messages)
+        if _is_source_followup(visitor_text) and _has_prior_assistant(prior_messages):
+            from app.services.grounded_response import source_followup_decision
+
+            previous = next((row for row in reversed(window) if row.role == "bot"), None)
+            citations = [
+                Citation(
+                    c.chunk_id,
+                    c.snapshot_id,
+                    c.response_start,
+                    c.response_end,
+                    c.source_start,
+                    c.source_end,
+                    c.cited_text,
+                    c.source_title,
+                    c.source_url,
+                )
+                for c in (previous.citations if previous else [])
+            ]
+            return await self._finalize_grounded_decision(
+                conversation_id,
+                generation_id,
+                site.id,
+                source_followup_decision(citations),
+                visitor_text=visitor_text,
+                stage_timings=stage_timings,
+            )
+        record_trace("history", prior_messages=prior_messages)
+        snapshots = await live_snapshots_for_site(self._session, site.id)
+        cache_key, cached = await self._load_cached_first_turn(
+            site, snapshots, visitor_text, prior_messages
+        )
+        if cached is not None:
+            for stage in (
+                "lexical_retrieve",
+                "trigram_retrieve",
+                "embed",
+                "dense_retrieve",
+                "provider",
+                "citation_parse",
+                "validate",
+            ):
+                stage_timings[stage] = 0
+            return await self._finalize_grounded_decision(
+                conversation_id,
+                generation_id,
+                site.id,
+                cached,
+                visitor_text=visitor_text,
+                stage_timings=stage_timings,
+            )
+        retrieval_text = await self._contextual_retrieval_query(
+            site.id, visitor_text, prior_messages, window
+        )
+        record_trace("retrieval", query=redact_for_model(retrieval_text))
         evidence = await self._retrieve_evidence(site.id, retrieval_text, stage_timings)
+        record_trace("retrieval", evidence=evidence)
+        record_trace(
+            "classification",
+            evidence_topics=list(dict.fromkeys(unit.topic_label for unit in evidence)),
+            intent_role="diagnostic_only",
+        )
+        handoff_declined = any(
+            row.role == "visitor" and is_handoff_declined(row.body or "") for row in window
+        )
+        record_trace("classification", handoff_declined=handoff_declined)
+        decision = await self._grounded_response_engine(site, stage_timings).respond(
+            TurnContext(
+                visitor_text=visitor_text,
+                evidence=evidence,
+                site_name=site.name,
+                prior_messages=prior_messages,
+                prior_miss_count=0 if handoff_declined else conversation.fallback_count,
+                prior_miss_reason=self._last_bot_reason(window, conversation.fallback_count),
+                off_brand_blocklist=tuple(getattr(site, "off_brand_blocklist", None) or ()),
+            ),
+            stage_timings=stage_timings,
+        )
+        return await self._finalize_grounded_decision(
+            conversation_id,
+            generation_id,
+            site.id,
+            decision,
+            visitor_text=visitor_text,
+            stage_timings=stage_timings,
+            response_cache_key=cache_key,
+        )
+
+    async def _contextual_retrieval_query(
+        self,
+        site_id: UUID,
+        visitor_text: str,
+        prior_messages: tuple[dict[str, str], ...],
+        window: list[Message],
+    ) -> str:
+        query = contextual_grounding_query(visitor_text, prior_messages)
+        if query == visitor_text:
+            return query
+        previous = next(
+            (row for row in reversed(window) if row.role == "bot" and row.citations), None
+        )
+        if previous is None:
+            return query
+        ids = list(dict.fromkeys(c.chunk_id for c in previous.citations))[:2]
+        rows = await self._session.execute(
+            select(KbChunk.id, KbChunk.heading)
+            .join(KbPage, KbPage.id == KbChunk.page_id)
+            .join(KbSnapshot, KbSnapshot.id == KbChunk.snapshot_id)
+            .join(KbSource, KbSource.id == KbPage.source_id)
+            .where(
+                KbChunk.id.in_(ids),
+                KbChunk.site_id == site_id,
+                KbChunk.enabled.is_(True),
+                KbPage.enabled.is_(True),
+                KbSource.enabled.is_(True),
+                KbSnapshot.state == "live",
+            )
+        )
+        headings = dict(rows.all())
+        subject = " ".join(
+            dict.fromkeys(headings[chunk_id] for chunk_id in ids if headings.get(chunk_id))
+        )
+        return contextual_grounding_query(visitor_text, prior_messages, source_subject=subject)
+
+    def _grounded_response_engine(
+        self, site: Site, stage_timings: dict[str, int]
+    ) -> GroundedResponseEngine:
         complete = getattr(self._responder, "generate_grounded_draft", None)
         # BotResponder(complete=...) test doubles still use the legacy adapter.
         if complete is not None and getattr(self._responder, "_complete", None) is not None:
@@ -948,26 +1087,38 @@ class ConversationService:
                 except TypeError:
                     return await original_complete(turn, units)
 
-        decision = await GroundedResponseEngine(complete=complete).respond(
-            TurnContext(
-                visitor_text=visitor_text,
-                evidence=evidence,
-                site_name=site.name,
-                prior_messages=prior_messages,
-                prior_miss_count=conversation.fallback_count,
-                prior_miss_reason=self._last_bot_reason(window, conversation.fallback_count),
-                off_brand_blocklist=tuple(getattr(site, "off_brand_blocklist", None) or ()),
-            ),
-            stage_timings=stage_timings,
-        )
-        return await self._finalize_grounded_decision(
-            conversation_id,
-            generation_id,
+        repair_draft = getattr(self._responder, "repair_grounded_draft", None)
+        repair = None
+        if repair_draft is not None and getattr(self._responder, "_complete", None) is None:
+            provider_deadline = time.monotonic() + get_settings().anthropic_timeout
+
+            async def repair(turn, units, draft):
+                remaining = provider_deadline - time.monotonic()
+                if remaining <= 0:
+                    record_trace("citation_repair", budget_exhausted=True)
+                    return None
+                async with asyncio.timeout(remaining):
+                    return await repair_draft(turn, units, draft, stage_timings=stage_timings)
+
+        return GroundedResponseEngine(complete=complete, repair=repair)
+
+    async def _load_cached_first_turn(
+        self,
+        site: Site,
+        snapshots: list[KbSnapshot],
+        visitor_text: str,
+        prior_messages: tuple[dict[str, str], ...],
+    ) -> tuple[str | None, ResponseDecision | None]:
+        if prior_messages or not snapshots:
+            return None, None
+        key = response_cache_key(
             site.id,
-            decision,
-            visitor_text=visitor_text,
-            stage_timings=stage_timings,
+            site.name,
+            [item.id for item in snapshots],
+            visitor_text,
+            off_brand_blocklist=site.off_brand_blocklist,
         )
+        return key, await load_response(key)
 
     async def _retrieve_evidence(
         self,
@@ -1077,8 +1228,10 @@ class ConversationService:
         *,
         visitor_text: str = "",
         stage_timings: dict[str, int] | None = None,
+        response_cache_key: str | None = None,
     ) -> CommandResult | None:
         timings = stage_timings if stage_timings is not None else {}
+        record_trace("decision", decision=decision, stage_timings=timings)
         conversation, site, site_key = await self._lock_finalize_context(
             conversation_id, generation_id, site_id
         )
@@ -1126,6 +1279,9 @@ class ConversationService:
         started = time.perf_counter_ns()
         inserted = await self._persist_grounded_reply(conversation, decision)
         await self._session.commit()
+        record_trace("decision", decision=decision, persisted=True)
+        if response_cache_key is not None and decision.reason_code is None:
+            await store_response(response_cache_key, decision)
         timings["commit"] = (time.perf_counter_ns() - started) // 1_000_000
         snapshot_id = None
         if decision.citations and decision.citations[0].snapshot_id is not None:
@@ -1179,31 +1335,23 @@ class ConversationService:
                         source_url=citation.source_url,
                     )
                 )
-            conversation.fallback_count = 0
         else:
-            prior_bot = None
-            if decision.reason_code == "source_followup":
-                prior_bot = await self._previous_cited_bot(conversation.id)
             inserted = await self._insert_message(
                 conversation,
                 "bot",
                 decision.body,
                 system_reason=system_reason,
-                source_chunk_ids=(
-                    list(prior_bot.source_chunk_ids)
-                    if prior_bot and prior_bot.source_chunk_ids
-                    else None
-                ),
-                snapshot_id=prior_bot.snapshot_id if prior_bot else None,
-                source_urls=(
-                    list(prior_bot.source_urls) if prior_bot and prior_bot.source_urls else None
-                ),
-                source_title=prior_bot.source_title if prior_bot else None,
                 response_outcome=decision.outcome.value if decision.outcome is not None else None,
                 response_reason_code=decision.reason_code,
             )
-            if decision.outcome is ResponseOutcome.CLARIFICATION:
-                conversation.fallback_count += 1
+        if decision.outcome is ResponseOutcome.SYNTHESIZED_ANSWER:
+            conversation.fallback_count = 0
+        elif decision.reason_code in {"no_evidence", "grounding_reject", "needs_confirmation"}:
+            conversation.fallback_count += 1
+        elif decision.outcome is ResponseOutcome.CLARIFICATION:
+            conversation.fallback_count += 1
+        elif decision.reason_code == "off_topic":
+            conversation.fallback_count = 0
         if decision.offer_handoff and decision.outcome in {
             ResponseOutcome.KNOWLEDGE_GAP,
             ResponseOutcome.PARTIAL_ANSWER,
@@ -1217,7 +1365,9 @@ class ConversationService:
 
     @staticmethod
     def _is_repeated_miss(_conversation: Conversation, decision: ResponseDecision) -> bool:
-        return decision.reason_code == "repeated_miss"
+        # Repeated misses ask for transfer consent; only an affirmative visitor
+        # reply enters the queue in _handle_transfer_consent_reply.
+        return False
 
     @staticmethod
     def _last_bot_reason(window: list[Message], fallback_count: int) -> str | None:
@@ -1226,13 +1376,6 @@ class ConversationService:
         for row in reversed(window):
             if row.role == "bot" and row.response_reason_code:
                 return row.response_reason_code
-        return None
-
-    async def _previous_cited_bot(self, conversation_id: UUID) -> Message | None:
-        recent = await self._messages.list_recent_roles(conversation_id, {"bot"}, 8)
-        for row in reversed(recent):
-            if row.source_urls:
-                return row
         return None
 
     @staticmethod
@@ -1246,6 +1389,8 @@ class ConversationService:
         ):
             return "tech_fail"
         if decision.reason_code == "grounding_reject":
+            return "insufficient"
+        if decision.outcome is ResponseOutcome.PARTIAL_ANSWER:
             return "insufficient"
         if decision.citations:
             return "answer"
@@ -1527,6 +1672,7 @@ class ConversationService:
                 "phone": visitor.phone,
                 "ip": str(visitor.ip) if visitor.ip is not None else None,
                 "user_agent": visitor.user_agent,
+                "location": visitor.location,
             },
             "page": {
                 "title": conversation.page_title,
@@ -1596,13 +1742,26 @@ class ConversationService:
                 site_id, hash_resume_token(resume_token)
             )
             if found is not None:
+                location = found.location
+                if str(found.ip) != ip or found.location_checked_at is None:
+                    location = await lookup_location(ip)
+                    found.location_checked_at = datetime.now(UTC)
                 found.ip = ip
                 found.user_agent = user_agent
+                found.location = location
                 await self._session.flush()
                 return found, None
         token, token_hash = _issue_resume_token()
         await self._rate_limit_create(ip, site_id)
-        visitor = await self._visitors.create(site_id, token_hash, ip=ip, user_agent=user_agent)
+        location = await lookup_location(ip)
+        visitor = await self._visitors.create(
+            site_id,
+            token_hash,
+            ip=ip,
+            user_agent=user_agent,
+            location=location,
+        )
+        visitor.location_checked_at = datetime.now(UTC)
         return visitor, token
 
     async def _open_or_create_conversation(self, site_id: UUID, visitor_id: UUID) -> Conversation:
@@ -1840,6 +1999,7 @@ def _submission_item(
             "user_agent": visitor.user_agent,
             "geo_country": visitor.geo_country,
             "geo_region": visitor.geo_region,
+            "location": visitor.location,
             "created_at": visitor.created_at,
         },
         "page": {

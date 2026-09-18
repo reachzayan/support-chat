@@ -2,7 +2,6 @@ import uuid
 
 import pytest
 
-from app.chat.outcome_copy import PRODUCTS_CLARIFY_LINE as PRODUCTS_CLARIFY
 from app.services.grounded_response import (
     EvidenceUnit,
     GroundedResponseEngine,
@@ -51,9 +50,12 @@ async def test_source_copy_without_citations_still_rejects() -> None:
         TurnContext(visitor_text="How fast are results?", evidence=[TIMING])
     )
 
-    assert decision.outcome is ResponseOutcome.CLARIFICATION
+    assert decision.outcome is ResponseOutcome.KNOWLEDGE_GAP
     assert decision.reason_code == "grounding_reject"
-    assert decision.body == PRODUCTS_CLARIFY
+    assert (
+        decision.body
+        == "I couldn't verify an accurate answer to that question. A specialist can help."
+    )
     assert decision.offer_handoff is False
     assert decision.provider_status is ProviderStatus.OK
 
@@ -69,8 +71,11 @@ async def test_paraphrased_uncited_claim_is_rejected() -> None:
         TurnContext(visitor_text="How fast are results?", evidence=[TIMING])
     )
 
-    assert decision.outcome is ResponseOutcome.CLARIFICATION
+    assert decision.outcome is ResponseOutcome.KNOWLEDGE_GAP
     assert decision.reason_code == "grounding_reject"
-    assert decision.body == PRODUCTS_CLARIFY
+    assert (
+        decision.body
+        == "I couldn't verify an accurate answer to that question. A specialist can help."
+    )
     assert decision.offer_handoff is False
     assert decision.provider_status is ProviderStatus.OK

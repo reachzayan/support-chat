@@ -57,6 +57,7 @@ def evaluate(  # noqa: C901
     off_brand_blocklist: list[str] | None = None,
     curated_refusal: bool = False,
     max_chars: int | None = None,
+    public_contact_text: str = "",
 ) -> ValidationOutcome:
     text = (body or "").strip()
     citations = list(cited or [])
@@ -82,8 +83,13 @@ def evaluate(  # noqa: C901
     if any(marker in lowered for marker in OUTPUT_LEAK_MARKERS):
         return _reject("injection_leak", citations)
 
-    for pattern in OUTPUT_PII_PATTERNS:
-        if pattern.search(text):
+    for index, pattern in enumerate(OUTPUT_PII_PATTERNS):
+        approved = (
+            set(pattern.findall(public_contact_text))
+            if index >= len(OUTPUT_PII_PATTERNS) - 2
+            else set()
+        )
+        if any(match.group() not in approved for match in pattern.finditer(text)):
             return _reject("pii_leak", citations)
 
     if _HTML_TAG_RE.search(text):

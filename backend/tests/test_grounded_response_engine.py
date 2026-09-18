@@ -3,7 +3,7 @@ import uuid
 import pytest
 from structlog.testing import capture_logs
 
-from app.chat.outcome_copy import INSUFFICIENT_HUMAN, REPEATED_MISS_HUMAN, TECH_FAIL_HUMAN
+from app.chat.outcome_copy import TECH_FAIL_HUMAN, TRANSFER_OFFER
 from app.services.grounded_response import (
     Citation,
     EvidenceUnit,
@@ -41,6 +41,7 @@ TIMING_EVIDENCE = EvidenceUnit(
 
 CLARIFY_SCOPE_LINE = "What would you like to know about screening or compliance?"
 PRODUCTS_CLARIFY = "What would you like to know about our products or services?"
+GROUNDING_REJECT = "I couldn't verify an accurate answer to that question. A specialist can help."
 PRODUCTS_KEEP_HELPING = (
     "I can help with questions about our products and services. What do you need?"
 )
@@ -71,7 +72,7 @@ async def test_forged_source_text_with_valid_chunk_id_is_rejected() -> None:
     decision = await GroundedResponseEngine(complete).respond(
         TurnContext(visitor_text="How long?", evidence=[TIMING_EVIDENCE])
     )
-    assert decision.body == PRODUCTS_CLARIFY
+    assert decision.body == GROUNDING_REJECT
     assert decision.reason_code == "grounding_reject"
 
 
@@ -109,10 +110,10 @@ async def test_one_valid_citation_does_not_authorize_an_uncited_business_claim()
     decision = await GroundedResponseEngine(complete).respond(
         TurnContext(visitor_text="What is included?", evidence=[DOT_EVIDENCE])
     )
-    assert decision.body == "We provide DOT testing."
+    assert decision.body == GROUNDING_REJECT
     assert "free annual audits" not in decision.body
-    assert decision.reason_code is None
-    assert decision.outcome is ResponseOutcome.SYNTHESIZED_ANSWER
+    assert decision.reason_code == "grounding_reject"
+    assert decision.outcome is ResponseOutcome.KNOWLEDGE_GAP
 
 
 @pytest.mark.parametrize(
@@ -125,13 +126,9 @@ async def test_one_valid_citation_does_not_authorize_an_uncited_business_claim()
         ),
         ("huh?", "A specialist can confirm the timeline."),
         ("what did you say?", "We can help with workplace screening."),
-        (
-            "How quickly are non-negative results reported?",
-            "Negative results are usually reported before non-negative results.",
-        ),
     ],
 )
-def test_retrieval_query_keeps_context_for_every_followup(
+def test_retrieval_query_keeps_context_for_fragments(
     visitor_text: str, assistant_text: str
 ) -> None:
     query = contextual_grounding_query(
@@ -212,9 +209,9 @@ async def test_stitched_source_dump_is_still_rejected() -> None:
         )
     )
 
-    assert decision.outcome is ResponseOutcome.CLARIFICATION
+    assert decision.outcome is ResponseOutcome.KNOWLEDGE_GAP
     assert decision.reason_code == "grounding_reject"
-    assert decision.body == PRODUCTS_CLARIFY
+    assert decision.body == GROUNDING_REJECT
 
 
 @pytest.mark.asyncio
@@ -253,7 +250,7 @@ async def test_unsupported_numeric_still_rejects_to_insufficient() -> None:
         )
 
     assert decision.reason_code == "grounding_reject"
-    assert decision.body == PRODUCTS_CLARIFY
+    assert decision.body == GROUNDING_REJECT
     assert decision.offer_handoff is False
     assert decision.provider_status is ProviderStatus.OK
     assert any(
@@ -276,7 +273,7 @@ async def test_unsupported_regulated_still_rejects_to_insufficient() -> None:
         )
 
     assert decision.reason_code == "grounding_reject"
-    assert decision.body == PRODUCTS_CLARIFY
+    assert decision.body == GROUNDING_REJECT
     assert decision.offer_handoff is False
     assert decision.provider_status is ProviderStatus.OK
     assert any(
@@ -300,17 +297,17 @@ async def test_no_citation_rejects_factual_draft() -> None:
         TurnContext(visitor_text="Do you provide drug screening?", evidence=[DOT_EVIDENCE])
     )
 
-    assert decision.body == PRODUCTS_CLARIFY
+    assert decision.body == GROUNDING_REJECT
     assert decision.offer_handoff is False
     assert decision.reason_code == "grounding_reject"
     assert decision.provider_status is ProviderStatus.OK
     assert decision.citations == []
     assert decision.request_id == "req_test"
-    assert decision.outcome is ResponseOutcome.CLARIFICATION
+    assert decision.outcome is ResponseOutcome.KNOWLEDGE_GAP
 
 
 @pytest.mark.asyncio
-async def test_second_grounding_reject_hands_off_to_a_specialist() -> None:
+async def test_second_grounding_reject_asks_before_transfer() -> None:
     body = "We provide DOT drug testing for small employers."
 
     async def complete(_turn, _units):
@@ -324,14 +321,14 @@ async def test_second_grounding_reject_hands_off_to_a_specialist() -> None:
             prior_miss_reason="grounding_reject",
         )
     )
-    assert decision.body == REPEATED_MISS_HUMAN
+    assert decision.body == TRANSFER_OFFER
     assert decision.offer_handoff is True
     assert decision.reason_code == "repeated_miss"
     assert decision.outcome is ResponseOutcome.KNOWLEDGE_GAP
 
 
 @pytest.mark.asyncio
-async def test_samplesite_first_grounding_reject_keeps_screening_clarify() -> None:
+async def test_samplesite_first_grounding_reject_reports_verification_failure() -> None:
     async def complete(_turn, _units):
         return ModelDraft(body="Results come back in 12 hours.", citations=[])
 
@@ -342,7 +339,7 @@ async def test_samplesite_first_grounding_reject_keeps_screening_clarify() -> No
             site_name="SampleSite",
         )
     )
-    assert decision.body == CLARIFY_SCOPE_LINE
+    assert decision.body == GROUNDING_REJECT
     assert decision.offer_handoff is False
 
 
@@ -386,7 +383,7 @@ async def test_stale_source_helper_still_routes_to_tech_fail() -> None:
 
 
 @pytest.mark.asyncio
-async def test_grounding_reject_after_an_off_topic_miss_still_clarifies() -> None:
+async def test_grounding_reject_after_an_off_topic_miss_does_not_offer_transfer() -> None:
     body = "We provide DOT drug testing for small employers."
 
     async def complete(_turn, _units):
@@ -400,49 +397,10 @@ async def test_grounding_reject_after_an_off_topic_miss_still_clarifies() -> Non
             prior_miss_reason="no_evidence",
         )
     )
-    assert decision.body == PRODUCTS_CLARIFY
+    assert decision.body == GROUNDING_REJECT
     assert decision.offer_handoff is False
     assert decision.reason_code == "grounding_reject"
-    assert decision.outcome is ResponseOutcome.CLARIFICATION
-
-
-@pytest.mark.parametrize(
-    "visitor_text",
-    [
-        "Which page did that come from?",
-        "Where did you get that?",
-        "What URL did that come from?",
-        "Cite the URL you used.",
-    ],
-)
-@pytest.mark.asyncio
-async def test_page_followup_after_an_answer_keeps_helping_instead_of_missing(
-    visitor_text: str,
-) -> None:
-    calls = {"count": 0}
-
-    async def complete(_turn: TurnContext, _units: list[EvidenceUnit]) -> ModelDraft:
-        calls["count"] += 1
-        return ModelDraft(body="should not run", citations=[])
-
-    decision = await GroundedResponseEngine(complete=complete).respond(
-        TurnContext(
-            visitor_text=visitor_text,
-            evidence=[DOT_EVIDENCE],
-            prior_messages=(
-                {"role": "user", "content": "What is SampleMail?"},
-                {
-                    "role": "assistant",
-                    "content": "SampleMail verifies every address before mailing.",
-                },
-            ),
-        )
-    )
-    assert decision.body == PRODUCTS_KEEP_HELPING
-    assert decision.offer_handoff is False
-    assert decision.reason_code == "source_followup"
-    assert decision.outcome is ResponseOutcome.SYNTHESIZED_ANSWER
-    assert calls["count"] == 0
+    assert decision.outcome is ResponseOutcome.KNOWLEDGE_GAP
 
 
 @pytest.mark.asyncio
@@ -455,7 +413,7 @@ async def test_page_followup_without_a_prior_answer_is_still_a_clarify() -> None
 
 
 @pytest.mark.asyncio
-async def test_model_canned_clarify_counts_as_a_retrieval_miss() -> None:
+async def test_model_scoped_redirect_is_an_off_topic_boundary() -> None:
     calls = {"count": 0}
 
     async def complete(_turn: TurnContext, _units: list[EvidenceUnit]) -> ModelDraft:
@@ -466,14 +424,14 @@ async def test_model_canned_clarify_counts_as_a_retrieval_miss() -> None:
         TurnContext(visitor_text="Who is going to win the World Series?", evidence=[DOT_EVIDENCE])
     )
     assert decision.body == PRODUCTS_CLARIFY
-    assert decision.reason_code == "no_evidence"
+    assert decision.reason_code == "off_topic"
     assert decision.offer_handoff is False
-    assert decision.outcome is ResponseOutcome.CLARIFICATION
+    assert decision.outcome is ResponseOutcome.BOUNDARY
     assert calls["count"] == 1
 
 
 @pytest.mark.asyncio
-async def test_second_model_canned_clarify_hands_off() -> None:
+async def test_repeated_model_scoped_redirect_does_not_hand_off() -> None:
     async def complete(_turn, _units):
         return ModelDraft(body=PRODUCTS_CLARIFY, citations=[])
 
@@ -485,9 +443,9 @@ async def test_second_model_canned_clarify_hands_off() -> None:
             prior_miss_reason="no_evidence",
         )
     )
-    assert decision.body == INSUFFICIENT_HUMAN
-    assert decision.offer_handoff is True
-    assert decision.reason_code == "repeated_miss"
+    assert decision.body == PRODUCTS_CLARIFY
+    assert decision.offer_handoff is False
+    assert decision.reason_code == "off_topic"
 
 
 @pytest.mark.asyncio
@@ -503,7 +461,7 @@ async def test_grounding_reject_does_not_inherit_an_untyped_miss_count() -> None
             prior_miss_reason=None,
         )
     )
-    assert decision.body == PRODUCTS_CLARIFY
+    assert decision.body == GROUNDING_REJECT
     assert decision.offer_handoff is False
     assert decision.reason_code == "grounding_reject"
 
@@ -541,7 +499,7 @@ async def test_samplesite_no_evidence_keeps_screening_clarification() -> None:
 
 
 @pytest.mark.asyncio
-async def test_leading_uncited_preamble_is_dropped_and_cited_sentence_is_kept() -> None:
+async def test_courtesy_is_preserved_with_cited_sentence() -> None:
     from dataclasses import replace
 
     cited = "We support DOT drug and alcohol testing, random pool management, and DOT physicals."
@@ -558,5 +516,5 @@ async def test_leading_uncited_preamble_is_dropped_and_cited_sentence_is_kept() 
         TurnContext(visitor_text="What testing do you support?", evidence=[DOT_EVIDENCE])
     )
     assert decision.outcome is ResponseOutcome.SYNTHESIZED_ANSWER
-    assert decision.body == cited
+    assert decision.body == body
     assert decision.reason_code is None

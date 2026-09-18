@@ -102,7 +102,7 @@ async def test_bot_responder_sends_redacted_prior_turns(migrated_db, monkeypatch
 
 
 @pytest.mark.asyncio
-async def test_bot_responder_redacts_kb_document_fields_before_provider(
+async def test_bot_responder_retains_public_kb_contacts_before_provider(
     migrated_db, monkeypatch
 ) -> None:
     captured: dict = {}
@@ -125,9 +125,8 @@ async def test_bot_responder_redacts_kb_document_fields_before_provider(
     )
 
     serialized = str(captured.get("messages") or [])
-    assert "support@sample-site.example.com" not in serialized
-    assert "800-555-0199" not in serialized
-    assert REDACTED in serialized
+    assert "support@sample-site.example.com" in serialized
+    assert "800-555-0199" in serialized
 
 
 @pytest.mark.asyncio

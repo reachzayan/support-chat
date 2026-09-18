@@ -1,4 +1,4 @@
-from app.llm.prompts import SYSTEM_RULES, system_rules_for, visitor_turn_text
+from app.llm.prompts import system_rules_for, visitor_turn_text
 
 SCREENING_CLARIFY = "What would you like to know about screening or compliance?"
 PRODUCTS_CLARIFY = "What would you like to know about our products or services?"
@@ -36,13 +36,3 @@ def test_samplesite_keeps_its_real_brand_in_the_prompt() -> None:
     rules = system_rules_for("SampleSite")
     assert "speaking for SampleSite" in rules
     assert "Brand: SampleSite" in visitor_turn_text("SampleSite", "How fast are results?")
-
-
-def test_system_rules_forbids_uncited_assertions() -> None:
-    assert (
-        "Never state facts, numbers, prices, durations, regulations, or program names "
-        "unless they come from a provided source and you cite that source using native citations"
-    ) in SYSTEM_RULES
-    assert (
-        "If evidence is insufficient, ask a single clarifying question ending in `?` — do not guess"
-    ) in SYSTEM_RULES

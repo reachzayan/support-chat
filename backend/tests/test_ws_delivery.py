@@ -195,9 +195,9 @@ def test_reconnect_after_cursor_11_replays_only_later_ids_then_state(
             )
 
     total_messages = message_count(uuid.UUID(conversation_id))
-    assert total_messages == 16
+    assert total_messages == 26
     assert message_count(uuid.UUID(conversation_id), role="bot") >= 1
-    assert conversation_state(uuid.UUID(conversation_id)) == "queued"
+    assert conversation_state(uuid.UUID(conversation_id)) == "bot"
 
     with client.websocket_connect("/ws/visitor", headers={"Origin": WIDGET_ORIGIN}) as visitor:
         auth_visitor(visitor, ctx["bootstrap_token"])
@@ -218,6 +218,6 @@ def test_reconnect_after_cursor_11_replays_only_later_ids_then_state(
     ids = [frame["id"] for frame in messages]
     assert ids == list(range(12, total_messages + 1))
     assert all(message_id > 11 for message_id in ids)
-    assert frames_of_type(replayed, "state")[-1]["state"] == "queued"
+    assert frames_of_type(replayed, "state")[-1]["state"] == "bot"
     assert message_count(uuid.UUID(conversation_id), body=STILL_THERE) == 0
     assert message_count(uuid.UUID(conversation_id), body=DOT_QUESTION) == 1
