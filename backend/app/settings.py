@@ -36,7 +36,6 @@ class Settings(BaseSettings):
     widget_csp_service_secret: str = ""
     trusted_proxy_cidrs: str = ""
     app_env: str = "local"
-    internal_eval_enabled: bool = False
     chat_retention_days: int = 30
     rate_bootstrap: int = 60
     rate_bootstrap_window: int = 600

@@ -11,7 +11,6 @@ from app.api.auth import router as auth_router
 from app.api.canned_replies import router as canned_replies_router
 from app.api.conversations import router as conversations_router
 from app.api.health import router as health_router
-from app.api.internal_eval import router as internal_eval_router
 from app.api.kb_sources import router as kb_sources_router
 from app.api.logs import router as logs_router
 from app.api.sites import router as sites_router
@@ -99,7 +98,6 @@ def create_app() -> FastAPI:
     configure_logging()
     application = FastAPI(title="SupportChat", lifespan=lifespan)
     application.include_router(health_router)
-    application.include_router(internal_eval_router)
     application.include_router(auth_router, prefix="/auth")
     application.include_router(widget_bootstrap_router)
     application.include_router(conversations_router)
