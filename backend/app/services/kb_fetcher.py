@@ -30,6 +30,15 @@ _BROWSER_UNAVAILABLE_MARKERS = (
     "playwright install",
     "browser executable",
 )
+_ERROR_HEADINGS = {
+    "404",
+    "404 not found",
+    "page not found",
+    "this page didn't load",
+    "access denied",
+    "something went wrong",
+    "internal server error",
+}
 
 
 @dataclass(frozen=True)
@@ -109,19 +118,41 @@ def _browser_error_code(exc: BaseException) -> str:
 
 def crawler_run_config() -> Any:
     from crawl4ai import CacheMode, CrawlerRunConfig, DefaultMarkdownGenerator
+    from crawl4ai.config import IMPORTANT_ATTRS
+    from crawl4ai.content_scraping_strategy import LXMLWebScrapingStrategy
+
+    from app.services.kb_content import knowledge_html, protect_code_punctuation
+
+    class KnowledgeScrapingStrategy(LXMLWebScrapingStrategy):
+        def scrap(self, url, input_html, **kwargs):
+            return super().scrap(url, protect_code_punctuation(input_html), **kwargs)
+
+        def remove_unwanted_attributes_fast(
+            self, root, important_attrs=None, keep_data_attributes=False
+        ):
+            # The installed LXML strategy ignores keep_attrs. Preserve only
+            # structural attributes needed to pair accordion questions/answers.
+            attrs = set(IMPORTANT_ATTRS if important_attrs is None else important_attrs)
+            attrs.update({"id", "class", "role", "aria-controls", "aria-labelledby"})
+            return super().remove_unwanted_attributes_fast(root, attrs, keep_data_attributes)
+
+    class KnowledgeMarkdownGenerator(DefaultMarkdownGenerator):
+        def generate_markdown(self, input_html, base_url="", **kwargs):
+            return super().generate_markdown(knowledge_html(input_html), base_url, **kwargs)
 
     return CrawlerRunConfig(
         cache_mode=CacheMode.BYPASS,
         check_robots_txt=False,
         verbose=False,
         word_count_threshold=1,
+        scraping_strategy=KnowledgeScrapingStrategy(),
         page_timeout=30_000,
         wait_until="load",
         scan_full_page=True,
         scroll_delay=0.2,
         max_scroll_steps=20,
         delay_before_return_html=1.5,
-        exclude_external_links=True,
+        exclude_external_links=False,
         exclude_social_media_links=True,
         remove_overlay_elements=True,
         remove_consent_popups=True,
@@ -134,12 +165,15 @@ def crawler_run_config() -> Any:
             "noscript",
             "iframe",
             "nav",
-            "button",
+            "form",
+            "svg",
         ],
-        markdown_generator=DefaultMarkdownGenerator(
-            content_source="raw_html",
+        excluded_selector='[role="navigation"], [role="dialog"], [aria-hidden="true"], [hidden]',
+        markdown_generator=KnowledgeMarkdownGenerator(
+            content_source="cleaned_html",
             options={
-                "ignore_links": False,
+                "ignore_links": True,
+                "ignore_images": True,
                 "ignore_mailto_links": False,
                 "body_width": 0,
                 "escape_html": False,
@@ -158,7 +192,16 @@ def _markdown_from_result(result: Any) -> str:
         fit = str(markdown_obj.fit_markdown or "").strip()
         if fit:
             return fit
+    if hasattr(markdown_obj, "raw_markdown"):
+        return ""
     return str(markdown_obj)
+
+
+def _is_error_shell(markdown: str) -> bool:
+    heading = next(
+        (line.lstrip("#").strip() for line in markdown.splitlines() if line.startswith("#")), ""
+    )
+    return len(markdown.split()) < 50 and heading.casefold() in _ERROR_HEADINGS
 
 
 def _from_crawler_result(requested: str, allowed_hosts: set[str], result: Any) -> FetchResult:
@@ -195,6 +238,12 @@ def _from_crawler_result(requested: str, allowed_hosts: set[str], result: Any) -
         and "application/xhtml+xml" not in content_type
     ):
         raise FetchError("non_html")
+    if not markdown.strip():
+        # Do not turn an empty content selection back into whole-page noise.
+        raise FetchError("extract")
+    if _is_error_shell(markdown):
+        # Some rendered applications return HTTP 200 for a transient error view.
+        raise FetchError("http")
     title, metadata = _crawler_title_and_meta(result)
     return FetchResult(
         url=final_url,
@@ -249,6 +298,7 @@ def _allow_browser_request(url: str, is_navigation: bool, allowed_hosts: set[str
 async def page_crawler(allowed_hosts: set[str]) -> AsyncIterator[CrawlerFn]:
     try:
         from crawl4ai import AsyncWebCrawler, BrowserConfig
+        from playwright.async_api import Error as PlaywrightError
     except ImportError:
 
         async def missing(_url: str) -> Any:
@@ -265,6 +315,12 @@ async def page_crawler(allowed_hosts: set[str]) -> AsyncIterator[CrawlerFn]:
         async def guard_page(page, **_kwargs):
             async def guard_route(route, request):
                 nonlocal blocked_navigation
+                main_navigation = request.is_navigation_request()
+                if main_navigation:
+                    try:
+                        main_navigation = request.frame == page.main_frame
+                    except PlaywrightError:
+                        pass  # Treat navigation without an available frame conservatively.
                 try:
                     await asyncio.to_thread(
                         _allow_browser_request,
@@ -273,7 +329,7 @@ async def page_crawler(allowed_hosts: set[str]) -> AsyncIterator[CrawlerFn]:
                         allowed_hosts,
                     )
                 except FetchError:
-                    blocked_navigation = blocked_navigation or request.is_navigation_request()
+                    blocked_navigation = blocked_navigation or main_navigation
                     await route.abort("blockedbyclient")
                     return
                 await route.continue_()

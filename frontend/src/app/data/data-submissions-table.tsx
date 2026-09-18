@@ -107,6 +107,7 @@ const SubmissionRowView = ({
       <Cell>{blank(row.page.url)}</Cell>
       <Cell>{blank(row.page.referrer)}</Cell>
       <Cell mono>{blank(row.visitor.ip)}</Cell>
+      <Cell>{blank(row.visitor.location)}</Cell>
       <Cell>{blank(row.visitor.user_agent)}</Cell>
       <Cell>{blank(row.visitor.geo_country)}</Cell>
       <Cell>{blank(row.visitor.geo_region)}</Cell>

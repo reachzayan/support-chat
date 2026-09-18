@@ -21,6 +21,7 @@ from app.repositories.handoff_repo import HandoffRepository
 from app.repositories.message_repo import MessageRepository
 from app.repositories.site_repo import SiteRepository
 from app.services import handoff_summary
+from app.services.bot_trace import record_trace, register_trace_task
 
 log = structlog.get_logger("handoff")
 
@@ -141,9 +142,18 @@ class HandoffService:
             stage_timings=dict(trigger.stage_timings or {}),
             provider_status=trigger.provider_status,
         )
+        record_trace(
+            "handoff",
+            handoff_id=row.id,
+            reason=trigger.reason,
+            route=route,
+            state=conversation.state,
+            promised_response_by=promised,
+        )
         return row
 
     def schedule_summary(self, row: HandoffContext) -> None:
+        record_trace("handoff_summary", status="pending", handoff_id=row.id, persisted=False)
         task = asyncio.create_task(
             handoff_summary.generate_in_background(
                 row.id,
@@ -152,6 +162,7 @@ class HandoffService:
                 row.escalation_reason,
             )
         )
+        register_trace_task(task)
         task.add_done_callback(lambda _: None)
 
     async def close_handoff(

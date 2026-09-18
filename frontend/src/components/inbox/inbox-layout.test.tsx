@@ -64,6 +64,7 @@ describe("inbox layout", () => {
     expect(screen.getByRole("complementary", { name: "Visitor facts" })).toBeInTheDocument()
     expect(screen.getByText("Chrome")).toBeInTheDocument()
     expect(screen.getByText("macOS")).toBeInTheDocument()
+    expect(screen.getByText("New York, New York, United States")).toBeInTheDocument()
     expect(screen.getByRole("link", { name: "https://sample-site.example.com/dot" })).toHaveAttribute(
       "rel",
       "noreferrer noopener",

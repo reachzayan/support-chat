@@ -17,6 +17,7 @@ from app.models.kb_chunk import KbChunk
 from app.models.kb_page import KbPage
 from app.models.kb_snapshot import KbSnapshot
 from app.models.kb_source import KbSource
+from app.services.bot_trace import record_trace
 from app.services.faq_fastpath import is_marketing_cta
 from app.services.kb_embedder import rrf_merge
 from app.services.kb_tokens import is_overview_query, search_tokens, tokenize
@@ -26,7 +27,6 @@ log = structlog.get_logger("kb_hybrid")
 COSINE_FLOOR = 0.35
 FTS_LIMIT = 20
 DENSE_LIMIT = 20
-PER_PAGE = 4
 KEEP = 8
 TRGM_SKIP_EMBED_FLOOR = 0.60
 
@@ -103,6 +103,7 @@ class HybridKbSearch:
     ) -> list[ChunkHit]:
         exact = await self._exact_match(site_id, visitor_text)
         if exact is not None:
+            record_trace("retrieval", mode="exact", hits=[exact])
             log.info(
                 "grounded_retrieve",
                 hit_ids=[str(exact.id)],
@@ -115,6 +116,7 @@ class HybridKbSearch:
         if is_overview_query(visitor_text):
             overview = await self._overview(site_id, visitor_text)
             if overview:
+                record_trace("retrieval", mode="overview", hits=overview)
                 return overview
 
         retrieval_text = _retrieval_text(visitor_text)
@@ -127,6 +129,7 @@ class HybridKbSearch:
             return []
         hits = await self._load(site_id, [chunk_id for chunk_id, _score in ranked])
         diversified = self._diversify(ranked, hits, fts_ids, cosine_by_id, retrieval_text)
+        record_trace("retrieval", mode="hybrid", hits=diversified)
         if diversified:
             log.info(
                 "grounded_retrieve",
@@ -148,6 +151,7 @@ class HybridKbSearch:
         timings = stage_timings if stage_timings is not None else {}
         exact = await self._exact_match(site_id, visitor_text)
         if exact is not None:
+            record_trace("retrieval", mode="exact", hits=[exact])
             timings.setdefault("lexical_retrieve", 0)
             timings.setdefault("trigram_retrieve", 0)
             timings.setdefault("embed", 0)
@@ -164,6 +168,7 @@ class HybridKbSearch:
         if is_overview_query(visitor_text):
             overview = await self._overview(site_id, visitor_text)
             if overview:
+                record_trace("retrieval", mode="overview", hits=overview)
                 timings.setdefault("embed", 0)
                 timings.setdefault("dense_retrieve", 0)
                 return overview
@@ -208,12 +213,21 @@ class HybridKbSearch:
             else:
                 timings["dense_retrieve"] = 0
 
+        record_trace(
+            "retrieval",
+            fts_scores=fts_scored,
+            trigram_scores=trgm_scored,
+            dense_cosines=cosine_by_id,
+            embed_skipped=skip_embed,
+        )
         ranked = rrf_merge(fts_ids, trgm_ids, dense_ids)
         if not ranked:
             return []
         hits = await self._load(site_id, [chunk_id for chunk_id, _score in ranked])
+        record_trace("retrieval", fused_ranking=ranked)
         lexical_ids = list(dict.fromkeys([*fts_ids, *trgm_ids]))
         diversified = self._diversify(ranked, hits, lexical_ids, cosine_by_id, retrieval_text)
+        record_trace("retrieval", mode="hybrid", hits=diversified)
         if diversified:
             log.info(
                 "grounded_retrieve",
@@ -291,25 +305,18 @@ class HybridKbSearch:
         visitor_text: str = "",
     ) -> list[ChunkHit]:
         diversified: list[ChunkHit] = []
-        per_page: dict[UUID, int] = {}
         by_id = {hit.id: hit for hit in hits}
-        # OR-based FTS and rank-only fusion can favor a generic word over the
-        # specific subject. Prefer coverage of rarer query terms in candidates.
+        # Reward coverage of distinctive query terms, not an absolute heading
+        # match. Keep heading context: a section's subject may occur only there.
         query_terms = set(tokenize(visitor_text))
         terms_by_id = {
-            hit.id: set(
-                tokenize(f"{hit.heading} {hit.canonical_question or ''} {hit.answer_verbatim}")
-            )
-            for hit in hits
+            hit.id: set(tokenize(f"{hit.heading} {hit.answer_verbatim}")) for hit in hits
         }
         counts = Counter(term for terms in terms_by_id.values() for term in terms & query_terms)
         if len(query_terms) > 1:
             ranked = sorted(
                 ranked,
                 key=lambda item: (
-                    -min(2, len(set(tokenize(by_id[item[0]].heading)) & query_terms))
-                    if item[0] in by_id
-                    else 0,
                     -sum(
                         1 / counts[term] for term in terms_by_id.get(item[0], set()) & query_terms
                     ),
@@ -317,17 +324,33 @@ class HybridKbSearch:
                     str(item[0]),
                 ),
             )
+        # Fusion and lexical heading boosts can bury the best semantic answer
+        # when only the dense arm understands the wording. Reserve two slots
+        # and fill the remaining budget with the hybrid ranking. Do not impose
+        # a per-page quota: one product page may contain all relevant facts.
+        dense_first = [
+            chunk_id
+            for chunk_id, cosine in sorted(
+                cosine_by_id.items(), key=lambda item: (-item[1], str(item[0]))
+            )
+            if cosine >= COSINE_FLOOR and chunk_id in by_id
+        ][:2]
+        scores = dict(ranked)
+        ranked = [(chunk_id, scores[chunk_id]) for chunk_id in dense_first] + [
+            item for item in ranked if item[0] not in dense_first
+        ]
+        skipped: list[dict] = []
         for chunk_id, score in ranked:
             hit = by_id.get(chunk_id)
             if hit is None:
                 continue
             cosine = cosine_by_id.get(chunk_id)
             if cosine is not None and cosine < COSINE_FLOOR and chunk_id not in fts_ids:
+                skipped.append({"id": chunk_id, "reason": "below_cosine_floor"})
                 continue
-            taken = per_page.get(hit.page_id, 0)
-            if taken >= PER_PAGE:
+            if len(diversified) >= KEEP:
+                skipped.append({"id": chunk_id, "reason": "document_budget"})
                 continue
-            per_page[hit.page_id] = taken + 1
             diversified.append(
                 ChunkHit(
                     id=hit.id,
@@ -349,10 +372,15 @@ class HybridKbSearch:
                     risk_class=hit.risk_class,
                     answer_mode=hit.answer_mode,
                     enabled=hit.enabled,
+                    structured=hit.structured,
                 )
             )
-            if len(diversified) >= KEEP:
-                break
+        record_trace(
+            "retrieval",
+            selection_ranking=ranked,
+            selection_skipped=skipped,
+            candidates=hits,
+        )
         return diversified
 
     async def _fts(self, site_id: UUID, visitor_text: str) -> list[tuple[UUID, float]]:

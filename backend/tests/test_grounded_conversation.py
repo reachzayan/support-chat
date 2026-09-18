@@ -2,7 +2,6 @@ import uuid
 
 from sqlalchemy import select
 
-from app.chat.outcome_copy import PRODUCTS_CLARIFY_LINE as PRODUCTS_CLARIFY
 from app.chat.outcome_copy import TECH_FAIL_HUMAN
 from app.db import session_maker
 from app.models.kb_page import KbPage
@@ -509,9 +508,12 @@ async def test_no_citation_never_persists_provider_claim(migrated_db) -> None:
         )
 
     assert message is not None
-    assert message.body == PRODUCTS_CLARIFY
+    assert (
+        message.body
+        == "I couldn't verify an accurate answer to that question. A specialist can help."
+    )
     assert uncited_body not in message.body
-    assert message.system_reason == "clarify"
+    assert message.system_reason == "insufficient"
     assert message.response_reason_code == "grounding_reject"
-    assert message.response_outcome == "clarification"
+    assert message.response_outcome == "knowledge_gap"
     assert citations == []

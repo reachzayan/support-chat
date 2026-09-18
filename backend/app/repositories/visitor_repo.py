@@ -16,12 +16,14 @@ class VisitorRepository:
         resume_token_hash: str,
         ip: str | None = None,
         user_agent: str | None = None,
+        location: str | None = None,
     ) -> Visitor:
         visitor = Visitor(
             site_id=site_id,
             resume_token_hash=resume_token_hash,
             ip=ip,
             user_agent=user_agent,
+            location=location,
         )
         self._session.add(visitor)
         await self._session.flush()

@@ -236,6 +236,7 @@ def test_detail_returns_ada_lopez_facts_and_hello_does_not_add_a_row(
         visitor.phone = None
         visitor.ip = IPv4Address(ADA_IP)
         visitor.user_agent = ADA_UA
+        visitor.location = "New York, New York, United States"
         conversation = session.get(Conversation, conversation_id)
         assert conversation is not None
         conversation.state = "queued"
@@ -264,6 +265,7 @@ def test_detail_returns_ada_lopez_facts_and_hello_does_not_add_a_row(
     assert body["visitor"]["phone"] is None
     assert body["visitor"]["ip"] == ADA_IP
     assert body["visitor"]["user_agent"] == ADA_UA
+    assert body["visitor"]["location"] == "New York, New York, United States"
     assert body["site_name"] == EASY_NAME
     assert body["page"]["title"] == PAGE_TITLE
     assert body["page"]["url"] == PAGE_URL

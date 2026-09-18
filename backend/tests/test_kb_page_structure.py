@@ -1,5 +1,3 @@
-from unittest.mock import AsyncMock
-
 from app.services.kb_chunk import pack_chunks
 from app.services.kb_extract.types import EvidenceUnit
 from app.services.kb_page_structure import (
@@ -17,7 +15,7 @@ PROPOSAL = {
     "blocks": [
         {
             "heading": "Pricing",
-            "text": "Pricing requires a quote for the requested service. No flat rate is published.",
+            "text": "Prices depend on the requested service. A quote is required; no flat rate is published.",
             "tags": ["pricing"],
         }
     ]
@@ -33,35 +31,6 @@ def test_heading_sections_are_not_packed_into_one_window() -> None:
     assert len(windows) >= 2
     assert any("Skip tracing" in window and "VPOE" not in window for window in windows)
     assert any("VPOE" in window and "Skip tracing" not in window for window in windows)
-
-
-async def test_headed_page_sends_each_section_window_to_haiku(monkeypatch) -> None:
-    skip = "## Skip tracing\n\n" + ("nationwide addresses scored phones. " * 80)
-    vpoe = "## VPOE\n\n" + ("payroll source employment dates. " * 80)
-    text = f"{skip}\n\n{vpoe}"
-    monkeypatch.setattr(get_settings(), "anthropic_api_key", "test-key")
-    client = HaikuPageStructurer()
-    captured: list[str] = []
-
-    async def _call(_client, _system, _name, _schema, data, _usage):
-        captured.append(data["text"])
-        return {
-            "blocks": [
-                {
-                    "heading": "Kept",
-                    "text": "nationwide addresses scored phones.",
-                    "tags": [],
-                }
-            ]
-        }
-
-    client._call = _call
-    structured = await client.structure_page("https://example.com", "Source", text)
-    assert len(captured) >= 2
-    assert any("Skip tracing" in window and "VPOE" not in window for window in captured)
-    assert any("VPOE" in window and "Skip tracing" not in window for window in captured)
-    assert structured.units
-    assert all(unit.enabled for unit in structured.units)
 
 
 def test_long_structured_block_fits_embed_size_without_dropping_facts() -> None:
@@ -95,13 +64,13 @@ def test_information_block_keeps_a_full_section() -> None:
     assert payload.blocks[0].text == text
 
 
-def test_rephrased_block_is_the_citable_answer() -> None:
+def test_source_passage_is_the_citable_answer() -> None:
     units = evidence_from_blocks(PageBlocks.model_validate(PROPOSAL), SOURCE, "https://example.com")
     chunk = pack_chunks(units[0])[0]
     assert chunk.answer_verbatim == (
-        "Pricing requires a quote for the requested service. No flat rate is published."
+        "Prices depend on the requested service. A quote is required; no flat rate is published."
     )
-    assert "Pricing requires a quote" in chunk.body
+    assert "Prices depend on the requested service." in chunk.body
     assert units[0].enabled is True
 
 
@@ -125,7 +94,7 @@ def test_invented_number_disables_only_that_block() -> None:
     assert by_heading["Fee"].review_note == "unsupported_numeric_literal"
 
 
-def test_numeric_formatting_can_change_without_changing_source_values() -> None:
+def test_rephrased_numeric_formatting_is_not_verbatim_source_evidence() -> None:
     payload = PageBlocks.model_validate(
         {
             "blocks": [
@@ -140,17 +109,9 @@ def test_numeric_formatting_can_change_without_changing_source_values() -> None:
     units = evidence_from_blocks(
         payload, "Steps 01, 02 and 03 process 1,000 records at 1.50 each.", ""
     )
-    assert units[0].enabled is True
+    assert units[0].enabled is False
+    assert units[0].review_note == "unsupported_source_text"
     assert units[0].answer_verbatim == "Steps 1, 2 and 3 process 1000 records at 1.5 each."
-
-
-async def test_checker_loop_is_not_part_of_structuring(monkeypatch) -> None:
-    monkeypatch.setattr(get_settings(), "anthropic_api_key", "test-key")
-    client = HaikuPageStructurer()
-    client._call = AsyncMock(return_value=PROPOSAL)
-    structured = await client.structure_page("https://example.com", "Source", SOURCE)
-    assert client._call.await_count == 1
-    assert structured.units[0].enabled is True
 
 
 async def test_text_structuring_does_not_send_a_crawl_url(monkeypatch) -> None:
@@ -227,7 +188,7 @@ async def test_page_pipeline_embeds_clean_text_from_crawl_markdown(
             .where(KbSnapshot.source_id == source.id, KbSnapshot.state == "live")
         )
         assert chunk.answer_verbatim == PROPOSAL["blocks"][0]["text"]
-        assert "Pricing requires a quote" in chunk.body
+        assert "Prices depend on the requested service." in chunk.body
         assert page.content_text == chunk.body
         assert page.markdown == crawl_text
 
@@ -333,36 +294,8 @@ def test_oversized_heading_and_tags_still_become_a_block() -> None:
     assert block.tags == ["GLBA", "DPPA", "FCRA", "KYC/AML", "compliance"]
     units = evidence_from_blocks(payload, source, "https://sample-data.example.com/terms")
     assert [unit.heading for unit in units] == [block.heading]
-    assert units[0].aliases == ("GLBA", "DPPA", "FCRA", "KYC/AML", "compliance")
+    assert units[0].aliases == ("GLBA", "DPPA", "compliance")
     assert units[0].enabled is True
-
-
-async def test_haiku_schema_overflow_does_not_fail_the_page(monkeypatch) -> None:
-    monkeypatch.setattr(get_settings(), "anthropic_api_key", "test-key")
-    client = HaikuPageStructurer()
-
-    async def _call(_client, _system, _name, _schema, _data, _usage):
-        return {
-            "blocks": [
-                {
-                    "heading": "KYC and AML identity for Web3 solution overview page",
-                    "text": "KYC and AML identity checks are available for Web3 onboarding.",
-                    "tags": ["KYC", "AML", "identity", "Web3", "solution"],
-                }
-            ]
-        }
-
-    client._call = _call
-    structured = await client.structure_page(
-        "https://sample-data.example.com/",
-        "Home",
-        "KYC and AML identity checks are available for Web3 onboarding.",
-    )
-    assert [unit.answer_verbatim for unit in structured.units] == [
-        "KYC and AML identity checks are available for Web3 onboarding."
-    ]
-    assert structured.units[0].aliases == ("KYC", "AML", "identity", "Web3", "solution")
-    assert structured.units[0].enabled is True
 
 
 def test_restated_blocks_on_one_page_keep_the_fuller_copy() -> None:
@@ -409,30 +342,3 @@ def test_distinct_product_blocks_on_one_page_are_kept() -> None:
         ]
     )
     assert [unit.answer_verbatim for unit in units] == [skip, vpoe]
-
-
-async def test_structure_page_drops_repeated_window_blocks(monkeypatch) -> None:
-    monkeypatch.setattr(get_settings(), "anthropic_api_key", "test-key")
-    client = HaikuPageStructurer()
-    skip = "## Skip tracing\n\n" + ("nationwide addresses scored phones. " * 80)
-    vpoe = "## VPOE\n\n" + ("payroll source employment dates. " * 80)
-
-    async def _call(_client, _system, _name, _schema, data, _usage):
-        del data
-        return {
-            "blocks": [
-                {
-                    "heading": "Contact Information",
-                    "text": "Phone: 202-555-0101. Email: inquiries@sample-data.example.com",
-                    "tags": [],
-                }
-            ]
-        }
-
-    client._call = _call
-    structured = await client.structure_page(
-        "https://sample-data.example.com/samplemail",
-        "SampleMail",
-        f"{skip}\n\n{vpoe}",
-    )
-    assert [unit.heading for unit in structured.units] == ["Contact Information"]

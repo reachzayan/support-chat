@@ -51,6 +51,7 @@ describe("data console", () => {
         user_agent: "Chrome",
         geo_country: "US",
         geo_region: "NY",
+        location: "New York, New York, United States",
         created_at: "2026-04-12T12:00:00Z",
       },
       page: {
@@ -74,7 +75,9 @@ describe("data console", () => {
     renderWithProviders(<DataConsole />)
 
     const table = await screen.findByRole("table", { name: "Form submissions" })
-    expect(within(table).getAllByRole("columnheader")).toHaveLength(23)
+    expect(within(table).getAllByRole("columnheader")).toHaveLength(24)
+    expect(within(table).getByRole("columnheader", { name: /Location/ })).toBeInTheDocument()
+    expect(within(table).getAllByText("New York, New York, United States")).toHaveLength(10)
     expect(within(table).getByText("Visitor 1")).toBeInTheDocument()
     expect(within(table).getAllByText("Needs Attention").length).toBeGreaterThan(0)
     expect(within(table).queryByText("Visitor 11")).not.toBeInTheDocument()

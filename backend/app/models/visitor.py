@@ -28,6 +28,10 @@ class Visitor(Base):
     user_agent: Mapped[str | None] = mapped_column(String, nullable=True)
     geo_country: Mapped[str | None] = mapped_column(String, nullable=True)
     geo_region: Mapped[str | None] = mapped_column(String, nullable=True)
+    location: Mapped[str | None] = mapped_column(String, nullable=True)
+    location_checked_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),

@@ -39,7 +39,7 @@ from app.services.kb_validate import PageEvidence, ValidationResult
 from app.settings import get_settings
 
 log = structlog.get_logger("kb_pipeline")
-CONTENT_FINGERPRINT_VERSION = "haiku-page-v5"
+CONTENT_FINGERPRINT_VERSION = "source-passages-v14"
 
 
 def _content_fingerprint(raw_digest: str) -> str:

@@ -27,7 +27,7 @@ def pack_chunks(unit: EvidenceUnit, target: int = 900, overlap: int = 150) -> li
     prefix = _embed_prefix(unit)
     source = tidy_text(unit.structured_text) if unit.structured_text is not None else answer
     room = max(32, target - len(prefix) - (1 if prefix else 0))
-    pieces = _split_text(source, room, overlap)
+    pieces = _hard_split(source, room, overlap)
     chunks: list[TextChunk] = []
     for piece in pieces:
         body = f"{prefix}\n{piece}" if prefix else piece
@@ -83,7 +83,7 @@ def split_chunks_for_embed(chunks: list[TextChunk], max_tokens: int) -> list[Tex
             if room < 1:
                 prefix, room = "", max_tokens
             expanded.extend(
-                replace(chunk, body=f"{prefix}{piece}")
+                replace(chunk, body=f"{prefix}{piece}", answer_verbatim=piece)
                 for piece in split_text_to_token_limit(clean, room)
             )
             continue
@@ -95,37 +95,6 @@ def split_chunks_for_embed(chunks: list[TextChunk], max_tokens: int) -> list[Tex
         for answer in split_text_to_token_limit(chunk.answer_verbatim, room):
             expanded.append(replace(chunk, body=f"{prefix}{answer}", answer_verbatim=answer))
     return expanded
-
-
-def _split_text(text: str, target: int, overlap: int) -> list[str]:
-    if len(text) <= target:
-        return [text] if text else []
-    paragraphs = [part for part in text.split("\n\n") if part.strip()]
-    if not paragraphs:
-        paragraphs = [text]
-    packed: list[str] = []
-    current = ""
-    for paragraph in paragraphs:
-        if len(paragraph) > target:
-            if current:
-                packed.append(current)
-                current = ""
-            packed.extend(_split_sentences(paragraph, target, overlap))
-            continue
-        candidate = f"{current}\n\n{paragraph}" if current else paragraph
-        if len(candidate) <= target:
-            current = candidate
-            continue
-        if current:
-            packed.append(current)
-        current = paragraph
-    if current:
-        packed.append(current)
-    return _apply_overlap(packed, overlap, target) if packed else []
-
-
-def _split_sentences(text: str, target: int, overlap: int) -> list[str]:
-    return _hard_split(text, target, overlap)
 
 
 def _hard_split(text: str, target: int, overlap: int) -> list[str]:
@@ -152,27 +121,3 @@ def _hard_split(text: str, target: int, overlap: int) -> list[str]:
                 next_start = boundary + 1
         start = next_start
     return pieces
-
-
-def _apply_overlap(pieces: list[str], overlap: int, target: int) -> list[str]:
-    if overlap <= 0 or len(pieces) < 2:
-        return pieces
-    overlapped = [pieces[0]]
-    for piece in pieces[1:]:
-        prev = overlapped[-1]
-        prefix_len = min(overlap, len(prev))
-        prefix = prev[-prefix_len:] if prefix_len else ""
-        if prefix and piece.startswith(prefix):
-            overlapped.append(piece)
-            continue
-        room = target - len(piece)
-        if room <= 0 or not prefix:
-            overlapped.append(piece)
-            continue
-        separator = " " if not piece[:1].isspace() else ""
-        take = min(prefix_len, max(0, room - len(separator)))
-        prefix = prev[-take:] if take else ""
-        if prefix and take < len(prev) and not prev[-take - 1].isspace():
-            prefix = prefix.partition(" ")[2]
-        overlapped.append(prefix + separator + piece if prefix else piece)
-    return overlapped

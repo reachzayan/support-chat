@@ -133,10 +133,33 @@ def normalize_text(value: str) -> str:
 
 def is_escalate_request(value: str) -> bool:
     text = normalize_text(value)
-    if any(phrase in text for phrase in ESCALATE_PHRASES):
-        return True
-    tokens = set(WORD_RE.findall(text))
-    return any(word in tokens for word in ESCALATE_WORDS)
+    target = r"(?:human(?: agent)?|agent|specialist|(?:real )?person|representative)"
+    for clause in re.split(r"[.!?;]|\b(?:but|instead)\b", text):
+        clause = clause.strip()
+        if re.fullmatch(rf"(?:please )?(?:a )?{target}(?: please)?", clause):
+            return True
+        request = re.search(
+            rf"\b(?:i (?:want|need|would like)|i['\u2019]d like|"
+            rf"connect(?: me)?(?: (?:to|with))?|transfer(?: me)?(?: (?:to|with))?|"
+            rf"speak (?:to|with)|talk (?:to|with)|get me|give me)"
+            rf"\s+(?:(?:a|an|the|your|our|live|real)\s+){{0,2}}{target}\b",
+            clause,
+        )
+        if request and not re.search(
+            r"\b(?:not|never|don't|dont|no)\b[^.!?;]*$", clause[: request.start()]
+        ):
+            return True
+    return False
+
+
+def is_handoff_declined(value: str) -> bool:
+    return bool(
+        re.search(
+            r"\b(?:don't|do not|dont|not|no|never)\b[^.!?;]{0,45}"
+            r"\b(?:human|agent|specialist|person|representative)\b",
+            normalize_text(value),
+        )
+    ) and not is_escalate_request(value)
 
 
 def is_contact_request(value: str) -> bool:
@@ -180,10 +203,7 @@ def is_disengage_request(value: str) -> bool:
     text = normalize_text(value)
     if not text:
         return False
-    if any(phrase in text for phrase in DISENGAGE_PHRASES):
-        return True
-    tokens = set(WORD_RE.findall(text))
-    return bool(tokens & ABUSE_TOKENS)
+    return any(phrase in text for phrase in DISENGAGE_PHRASES)
 
 
 def classify_sensitive(text: str) -> SensitiveCategory:  # noqa: C901

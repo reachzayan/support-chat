@@ -41,6 +41,7 @@ class VisitorFactsOut(BaseModel):
     phone: str | None
     ip: str | None
     user_agent: str | None
+    location: str | None
 
 
 class PageFactsOut(BaseModel):
@@ -88,6 +89,7 @@ class SubmissionVisitorOut(BaseModel):
     user_agent: str | None
     geo_country: str | None
     geo_region: str | None
+    location: str | None
     created_at: datetime
 
 

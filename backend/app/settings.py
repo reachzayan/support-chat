@@ -36,6 +36,7 @@ class Settings(BaseSettings):
     widget_csp_service_secret: str = ""
     trusted_proxy_cidrs: str = ""
     app_env: str = "local"
+    internal_eval_enabled: bool = False
     chat_retention_days: int = 30
     rate_bootstrap: int = 60
     rate_bootstrap_window: int = 600
@@ -72,8 +73,9 @@ class Settings(BaseSettings):
     full_context_max_tokens: int = 50_000
     fast_path_min_score: float = 0.15
     fast_path_margin_ratio: float = 1.5
-    conversation_window_size: int = 6
-    query_vector_cache_ttl: int = 300
+    conversation_window_size: int = 24
+    query_vector_cache_ttl: int = 24 * 60 * 60
+    grounded_response_cache_ttl: int = 24 * 60 * 60
     kb_ingest_page_concurrency: int = 4
     kb_ingest_source_concurrency: int = 2
     kb_ingest_host_delay_ms: int = 500

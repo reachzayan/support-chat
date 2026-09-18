@@ -20,15 +20,16 @@ from app.chat.outcome_copy import (
     TECH_FAIL_HUMAN,
     abuse_boundary_line,
     clarify_scope_line,
-    handoff_copy,
     injection_boundary_line,
-    keep_helping_line,
+    transfer_offer_line,
 )
-from app.llm.intent import is_disengage_request
+from app.llm.intent import ABUSE_TOKENS, is_disengage_request
 from app.llm.prompts import document_body
 from app.llm.safety_markers import contains_injection_marker
 from app.services import output_validator
-from app.services.pii_redactor import redact_for_model
+from app.services.bot_trace import record_trace
+from app.services.kb_tokens import tokenize
+from app.services.pii_redactor import redact_evidence
 
 log = structlog.get_logger("grounded_response")
 
@@ -37,7 +38,7 @@ class ResponseOutcome(StrEnum):
     EXACT_ANSWER = "exact_answer"  # Deprecated: no longer produced by respond().
     SYNTHESIZED_ANSWER = "synthesized_answer"
     CLARIFICATION = "clarification"
-    PARTIAL_ANSWER = "partial_answer"  # Schema constant; retained for migration 20 check.
+    PARTIAL_ANSWER = "partial_answer"
     KNOWLEDGE_GAP = "knowledge_gap"
     BOUNDARY = "boundary"
 
@@ -117,18 +118,25 @@ class DraftValidation:
 
 
 Provider = Callable[[TurnContext, list[EvidenceUnit]], Awaitable[ModelDraft | None]]
+RepairProvider = Callable[
+    [TurnContext, list[EvidenceUnit], ModelDraft], Awaitable[ModelDraft | None]
+]
 
 _FRUSTRATION_RE = re.compile(r"\b(dumb|useless|stupid|idiot|not helpful|waste of time)\b", re.I)
 _SOURCE_FOLLOWUP_RE = re.compile(
     r"which page|what page|which source|"
     r"where did (?:that|this) come from|"
     r"where did you get (?:that|this|those)|"
-    r"quote the source|cite (?:your|the) source|"
+    r"quote (?:the source|the exact sentence|that sentence|the sentence)|cite (?:your|the) source|"
     r"cite the url|"
     r"list (?:every|all) pages?|which url|what url",
     re.I,
 )
-_ABUSE_RE = re.compile(r"\b(fuck|shit|bitch|asshole)\b", re.I)
+_SUBSTANTIVE_REQUEST_RE = re.compile(
+    r"[?¿]|\b(?:what|how|why|when|where|which|explain|describe|compare|"
+    r"tell me|help me|can i|can you|could you|do you|does|is there)\b",
+    re.I,
+)
 _NUMERIC_CLAIM_RE = re.compile(
     r"\$\d+(?:\.\d{1,2})?|\b\d+(?:[-–]\d+)?\s*"
     r"(?:hours?|days?|minutes?|business days?)|\b\d+(?:\.\d+)?%",
@@ -139,12 +147,19 @@ _MAX_CHARS = 1500
 _KEEPABLE_GAPS = frozenset(
     {
         "yes",
+        "sí",
         "no",
         "and",
         "also",
         "including",
         "these include",
         "our services include",
+        "specifically",
+        "in particular",
+        "here is how it works",
+        "here's how it works",
+        "you can also",
+        "and we also work with",
     }
 )
 _SOFT_WORD_CAP = 120
@@ -168,18 +183,87 @@ _COURTESY_EDGE_RE = re.compile(
     r")[.!]*$",
     re.I,
 )
+_LIMITATION_RE = re.compile(
+    r"^(?:(?:however|but|unfortunately),?\s+|to (?:discuss|confirm|understand) [^.!?]{1,140},\s+)?(?:"
+    r"(?:i|we) (?:cannot|can't|can not|don't|do not|am unable to|are unable to) "
+    r"(?:confirm|guarantee|verify|promise|provide|access|retrieve|determine|estimate)\b"
+    r"|(?:a|our) specialist (?:can|needs to|must|would need to|will need to|should) "
+    r"(?:confirm|verify|help|review|discuss|provide)\b"
+    r"|(?:no puedo|no podemos) (?:confirmar|garantizar|verificar|determinar|proporcionar)\b"
+    r"|(?:un|nuestro) especialista (?:debe|necesita|tiene que) "
+    r"(?:confirmar|verificar|revisar|proporcionar)\b)",
+    re.I,
+)
+_FOLLOWUP_RE = re.compile(r"\b(?:it|its|that|those|these|both|either|they|them)\b", re.I)
+_GENERIC_FOLLOWUP_TERMS = frozenset(
+    {
+        "pricing",
+        "price",
+        "cost",
+        "costs",
+        "about",
+        "turnaround",
+        "timing",
+        "result",
+        "available",
+        "availability",
+        "standard",
+        "setup",
+        "start",
+        "getting",
+        "started",
+        "yes",
+        "no",
+        "huh",
+        "say",
+        "said",
+        "again",
+        "mean",
+        "means",
+        "more",
+        "details",
+    }
+)
+_UNRELATED_TASK_RE = re.compile(
+    r"\b(?:malware|ransomware|steal (?:passwords|credentials)|weather forecast|"
+    r"write (?:a poem|a song)|recipe for|cook (?:pasta|a meal))\b",
+    re.I,
+)
 
 
 def contextual_grounding_query(
-    visitor_text: str, prior_messages: tuple[dict[str, str], ...]
+    visitor_text: str,
+    prior_messages: tuple[dict[str, str], ...],
+    *,
+    source_subject: str = "",
 ) -> str:
-    """Ground retrieval in the latest exchange instead of isolated fragments."""
+    """Add a bounded subject only for fragments or explicit references.
+
+    Full, self-contained questions must not inherit an unrelated old answer.
+    The provider receives the conversation separately from this search query.
+    """
+    if len(visitor_text.split()) > 6 and not _FOLLOWUP_RE.search(visitor_text):
+        return visitor_text
+    if (
+        not _FOLLOWUP_RE.search(visitor_text)
+        and set(tokenize(visitor_text)) - _GENERIC_FOLLOWUP_TERMS
+    ):
+        return visitor_text
+    if source_subject:
+        return f"{source_subject[:200]} {visitor_text}"
     for message in reversed(prior_messages):
         if message.get("role") != "assistant":
             continue
         body = (message.get("content") or "").strip()
         if body:
-            return f"{body} {visitor_text}"
+            # A missing-information reply is not a new product subject, though
+            # a request to restate that reply still needs its actual wording.
+            if _LIMITATION_RE.search(body) and visitor_text.strip().casefold() not in {
+                "huh?",
+                "huh",
+            }:
+                continue
+            return f"{body[:160]} {visitor_text}"
     return visitor_text
 
 
@@ -214,6 +298,20 @@ def _is_clarifying_only(body: str) -> bool:
     if _NUMERIC_CLAIM_RE.search(text) or _REGULATED_RE.search(text):
         return False
     return True
+
+
+def _is_visitor_recap(body: str, prior_messages: tuple[dict[str, str], ...]) -> bool:
+    match = re.fullmatch(
+        r'You (?:said|told me|originally said):\s*["“](.+)["”][.!]?', body.strip(), re.S | re.I
+    )
+    if not match:
+        return False
+    quote = " ".join(match.group(1).split())
+    return any(
+        quote in " ".join((message.get("content") or "").split())
+        for message in prior_messages
+        if message.get("role") == "user"
+    )
 
 
 def _normalize_copy(value: str) -> str:
@@ -267,79 +365,31 @@ def _is_courtesy_edge(text: str) -> bool:
     return bool(_COURTESY_EDGE_RE.fullmatch(compact))
 
 
-def _trim_uncited_edges(body: str, citations: list[Citation]) -> tuple[str, list[Citation]]:
-    if not body or not citations:
-        return body, citations
-    start = min(item.response_start for item in citations)
-    end = max(item.response_end for item in citations)
-    start = max(0, min(start, len(body)))
-    end = max(start, min(end, len(body)))
-    if start == 0 and end == len(body):
-        return body, citations
-    if not _is_courtesy_edge(body[:start]):
-        start = 0
-    if not _is_courtesy_edge(body[end:]):
-        end = len(body)
-    if start == 0 and end == len(body):
-        return body, citations
-
-    trimmed = body[start:end]
-    shifted = [
-        replace(
-            item,
-            response_start=item.response_start - start,
-            response_end=item.response_end - start,
-        )
-        for item in citations
-    ]
-    return trimmed, shifted
-
-
 def _is_keepable_gap(text: str) -> bool:
-    stripped = (text or "").strip()
+    stripped = (text or "").strip().lstrip(".!:;, ")
     if not re.search(r"\w", stripped):
         return True
     connective = " ".join(stripped.casefold().split()).strip(".!:;, ")
-    return connective in _KEEPABLE_GAPS or _is_clarifying_only(stripped)
+    if connective in _KEEPABLE_GAPS:
+        return True
+    return bool(
+        _is_courtesy_edge(stripped)
+        or _is_clarifying_only(stripped)
+        or _LIMITATION_RE.search(stripped)
+    )
 
 
-def _citation_spans(body: str, citations: list[Citation]) -> list[tuple[int, int, Citation | None]]:
-    pieces: list[tuple[int, int, Citation | None]] = []
-    cursor = 0
-    ordered = sorted(citations, key=lambda item: (item.response_start, item.response_end))
-    for citation in ordered:
-        start = max(0, min(citation.response_start, len(body)))
-        end = max(start, min(citation.response_end, len(body)))
-        if end <= cursor:
-            continue
-        start = max(start, cursor)
-        if start > cursor:
-            pieces.append((cursor, start, None))
-        pieces.append((start, end, citation))
-        cursor = end
-    if cursor < len(body):
-        pieces.append((cursor, len(body), None))
-    return pieces
-
-
-def _drop_uncited_spans(body: str, citations: list[Citation]) -> tuple[str, list[Citation]]:
-    if not body or not citations:
-        return body, citations
-    parts: list[str] = []
-    shifted: list[Citation] = []
-    pos = 0
-    for start, end, citation in _citation_spans(body, citations):
-        segment = body[start:end]
-        if citation is None and not _is_keepable_gap(segment):
-            continue
-        if parts and not parts[-1][-1:].isspace() and segment and not segment[0].isspace():
-            parts.append(" ")
-            pos += 1
-        if citation is not None:
-            shifted.append(replace(citation, response_start=pos, response_end=pos + len(segment)))
-        parts.append(segment)
-        pos += len(segment)
-    return "".join(parts), shifted
+def uncited_factual_sentences(draft: ModelDraft) -> list[str]:
+    """The same sentence coverage used for validation and actionable repair feedback."""
+    return [
+        sentence.group().strip()
+        for sentence in re.finditer(r"\S.*?(?:[.!?](?=\s|$)|$)", draft.body.strip(), re.S)
+        if not _is_keepable_gap(sentence.group())
+        and not any(
+            citation.response_start < sentence.end() and citation.response_end > sentence.start()
+            for citation in draft.citations
+        )
+    ]
 
 
 def _has_prior_assistant(prior_messages: tuple[dict[str, str], ...]) -> bool:
@@ -353,13 +403,40 @@ def _is_source_followup(text: str) -> bool:
     return bool(_SOURCE_FOLLOWUP_RE.search(" ".join((text or "").split())))
 
 
+def history_recap_decision(
+    visitor_text: str, prior_messages: tuple[dict[str, str], ...]
+) -> ResponseDecision | None:
+    request = " ".join((visitor_text or "").casefold().split())
+    if not re.search(
+        r"(?:remind me|what did i (?:say|tell you)|what .*i originally (?:said|described))",
+        request,
+    ):
+        return None
+    first = next(
+        (
+            " ".join((message.get("content") or "").split())
+            for message in prior_messages
+            if message.get("role") == "user" and (message.get("content") or "").strip()
+        ),
+        "",
+    )
+    if not first:
+        return None
+    return ResponseDecision(
+        ResponseOutcome.SYNTHESIZED_ANSWER,
+        "conversation_recap",
+        f'You said: "{first[:800]}"',
+    )
+
+
 def _same_kind_miss_count(turn: TurnContext, reason: str) -> int:
     if turn.prior_miss_count <= 0:
         return 0
     prior = turn.prior_miss_reason
     if prior is None:
         return 0
-    if prior == reason:
+    knowledge_misses = {"grounding_reject", "needs_confirmation"}
+    if prior == reason or (prior in knowledge_misses and reason in knowledge_misses):
         return turn.prior_miss_count
     return 0
 
@@ -368,16 +445,30 @@ def _is_canned_clarify(body: str, site_name: str) -> bool:
     return _normalize_copy(body) == _normalize_copy(clarify_scope_line(site_name))
 
 
-def _safe_source_followup(site_name: str = "") -> ResponseDecision:
+def source_followup_decision(citations: list[Citation]) -> ResponseDecision:
+    if not citations:
+        return ResponseDecision(
+            ResponseOutcome.CLARIFICATION,
+            "source_followup",
+            "Which detail would you like me to confirm?",
+        )
+    first = citations[0]
+    prefix = f"Source: {first.source_url}\n\n"
+    # Preserve one complete evidence passage, never clip its qualifiers.
+    body = prefix + first.cited_text
+    verified = [replace(first, response_start=len(prefix), response_end=len(body))]
     return ResponseDecision(
         ResponseOutcome.SYNTHESIZED_ANSWER,
         "source_followup",
-        keep_helping_line(site_name),
+        body,
+        citations=verified,
     )
 
 
 def _safe_no_evidence(prior_miss_count: int, site_name: str = "") -> ResponseDecision:
     if prior_miss_count <= 0:
+        # Without any qualifying passage we cannot establish business scope.
+        # Do not assert a product knowledge gap for an unrelated question.
         return ResponseDecision(
             ResponseOutcome.CLARIFICATION,
             "no_evidence",
@@ -386,7 +477,7 @@ def _safe_no_evidence(prior_miss_count: int, site_name: str = "") -> ResponseDec
     return ResponseDecision(
         ResponseOutcome.KNOWLEDGE_GAP,
         "repeated_miss",
-        handoff_copy("retrieval_miss", human_enabled=True),
+        transfer_offer_line(human_enabled=True),
         offer_handoff=True,
     )
 
@@ -416,12 +507,12 @@ def _safe_grounding_reject(
 
     Specific reject reason is already on the grounded_draft_reject log line.
     """
-    del reason
+    del reason, site_name
     if prior_miss_count <= 0:
         return ResponseDecision(
-            ResponseOutcome.CLARIFICATION,
+            ResponseOutcome.KNOWLEDGE_GAP,
             "grounding_reject",
-            clarify_scope_line(site_name),
+            "I couldn't verify an accurate answer to that question. A specialist can help.",
             offer_handoff=False,
             provider_status=ProviderStatus.OK,
             request_id=request_id,
@@ -429,7 +520,7 @@ def _safe_grounding_reject(
     return ResponseDecision(
         ResponseOutcome.KNOWLEDGE_GAP,
         "repeated_miss",
-        handoff_copy("repeated_miss", human_enabled=True),
+        transfer_offer_line(human_enabled=True),
         offer_handoff=True,
         provider_status=ProviderStatus.OK,
         request_id=request_id,
@@ -441,8 +532,11 @@ def _elapsed_ms(started_ns: int) -> int:
 
 
 class GroundedResponseEngine:
-    def __init__(self, complete: Provider | None = None) -> None:
+    def __init__(
+        self, complete: Provider | None = None, repair: RepairProvider | None = None
+    ) -> None:
         self._complete = complete
+        self._repair = repair
 
     async def respond(  # noqa: C901
         self,
@@ -455,15 +549,19 @@ class GroundedResponseEngine:
             return _safe_sensitive_handoff()
         if turn.explicit_human_request:
             return _direct_handoff()
-        if _ABUSE_RE.search(question):
-            return self._boundary("abuse", turn.site_name)
         if contains_injection_marker(question) or is_disengage_request(question):
             return self._boundary("prompt_injection", turn.site_name)
-        if _FRUSTRATION_RE.search(question):
-            return self._boundary("frustration", turn.site_name)
-        if _is_source_followup(question) and _has_prior_assistant(turn.prior_messages):
-            return _safe_source_followup(turn.site_name)
-
+        # Profanity is tone, not an instruction override. Keep the cheap boundary
+        # for insult-only turns; let the provider answer an actual request.
+        if not _SUBSTANTIVE_REQUEST_RE.search(question):
+            if set(tokenize(question)) & ABUSE_TOKENS:
+                return self._boundary("abuse", turn.site_name)
+            if _FRUSTRATION_RE.search(question):
+                return self._boundary("frustration", turn.site_name)
+        if _UNRELATED_TASK_RE.search(question):
+            return ResponseDecision(
+                ResponseOutcome.BOUNDARY, "off_topic", clarify_scope_line(turn.site_name)
+            )
         evidence = _eligible(turn.evidence)
         if not evidence:
             return _safe_no_evidence(_same_kind_miss_count(turn, "no_evidence"), turn.site_name)
@@ -478,8 +576,45 @@ class GroundedResponseEngine:
             return _safe_technical_failure(reason="empty_draft")
 
         started = time.perf_counter_ns()
+        record_trace("draft", draft=draft)
         validation = self._validate_draft(draft, evidence, turn)
+        record_trace(
+            "validation",
+            accepted=validation.accepted,
+            reason=validation.reason,
+            validated_draft=validation.draft,
+        )
         timings["validate"] = _elapsed_ms(started)
+        if validation.reason == "uncited_response_text" and self._repair is not None:
+            record_trace(
+                "citation_repair",
+                attempted=True,
+                original_draft=draft,
+                uncited_sentences=uncited_factual_sentences(draft),
+            )
+            started = time.perf_counter_ns()
+            try:
+                repaired = await self._repair(turn, evidence, draft)
+            except Exception:
+                repaired = None
+            timings["citation_repair"] = _elapsed_ms(started)
+            if repaired is not None and repaired.body.strip():
+                draft = repaired
+                started = time.perf_counter_ns()
+                validation = self._validate_draft(draft, evidence, turn)
+                timings["validate"] += _elapsed_ms(started)
+            record_trace(
+                "citation_repair",
+                accepted=validation.accepted,
+                reason=validation.reason,
+                repaired_draft=repaired,
+            )
+            record_trace(
+                "validation",
+                accepted=validation.accepted,
+                reason=validation.reason,
+                validated_draft=validation.draft,
+            )
         if not validation.accepted or validation.draft is None:
             return _safe_grounding_reject(
                 reason=validation.reason,
@@ -488,7 +623,50 @@ class GroundedResponseEngine:
                 request_id=draft.request_id,
             )
         if _is_canned_clarify(validation.draft.body, turn.site_name):
-            return _safe_no_evidence(_same_kind_miss_count(turn, "no_evidence"), turn.site_name)
+            return ResponseDecision(
+                ResponseOutcome.BOUNDARY,
+                "off_topic",
+                validation.draft.body,
+                provider_status=ProviderStatus.OK,
+                request_id=draft.request_id,
+            )
+
+        unresolved = any(
+            _LIMITATION_RE.search(sentence.group().strip())
+            and not (
+                validation.draft.citations
+                and re.match(
+                    r"^(?:a|our) specialist can (?:help|review|discuss)\b",
+                    sentence.group().strip(),
+                    re.I,
+                )
+            )
+            for sentence in re.finditer(r"\S.*?(?:[.!?](?=\s|$)|$)", validation.draft.body, re.S)
+        )
+        record_trace(
+            "answer_quality",
+            grounding_accepted=True,
+            explicit_unresolved_detail=unresolved,
+            resolution="unresolved" if unresolved else "no_explicit_gap",
+        )
+        if unresolved:
+            body = validation.draft.body
+            asked_transfer = bool(re.search(r"would you like (?:me to )?connect you\b", body, re.I))
+            repeated = _same_kind_miss_count(turn, "needs_confirmation") > 0
+            offer = asked_transfer or repeated
+            if repeated and not asked_transfer:
+                body += "\n\n" + transfer_offer_line(human_enabled=True)
+            return ResponseDecision(
+                ResponseOutcome.PARTIAL_ANSWER
+                if validation.draft.citations
+                else ResponseOutcome.KNOWLEDGE_GAP,
+                "needs_confirmation",
+                body,
+                citations=validation.draft.citations,
+                offer_handoff=offer,
+                provider_status=ProviderStatus.OK,
+                request_id=draft.request_id,
+            )
 
         outcome = (
             ResponseOutcome.CLARIFICATION
@@ -530,8 +708,8 @@ class GroundedResponseEngine:
             # Native documents include the source heading. Legacy providers may
             # cite the original answer body; both must quote actual source text.
             sources = [
-                redact_for_model(document_body(unit)),
-                redact_for_model(unit.answer_verbatim),
+                redact_evidence(document_body(unit)),
+                redact_evidence(unit.answer_verbatim),
             ]
             if not any(
                 0 <= citation.source_start < citation.source_end <= len(source)
@@ -547,8 +725,6 @@ class GroundedResponseEngine:
                 return self._reject("source_metadata_mismatch", draft)
             cited_parts.append(citation.cited_text)
 
-        body, citations = _trim_uncited_edges(body, citations)
-        body, citations = _drop_uncited_spans(body, citations)
         if not body:
             return self._reject("empty", draft)
         if len(body) > _MAX_CHARS:
@@ -558,28 +734,44 @@ class GroundedResponseEngine:
         if _is_disallowed_source_copy(body, units, citations):
             return self._reject("source_copy", draft)
         clarifying = _is_clarifying_only(body)
+        visitor_recap = _is_visitor_recap(body, turn.prior_messages)
 
         cited_text = "\n".join(cited_parts)
 
-        if not clarifying:
-            covered = 0
-            gaps: list[str] = []
-            for citation in sorted(citations, key=lambda item: item.response_start):
-                if citation.response_start > covered:
-                    gaps.append(body[covered : citation.response_start])
-                covered = max(covered, citation.response_end)
-            gaps.append(body[covered:])
-            for gap in gaps:
-                text = gap.strip()
-                if not re.search(r"\w", text):
-                    continue
+        if not clarifying and not visitor_recap:
+            if uncited_factual_sentences(draft):
+                return self._reject("uncited_response_text", draft)
+            for sentence in re.finditer(r"\S.*?(?:[.!?](?=\s|$)|$)", body, re.S):
+                text = sentence.group().strip()
                 if _is_keepable_gap(text):
                     continue
-                return self._reject("uncited_response_text", draft)
+                attached = [
+                    item
+                    for item in citations
+                    if item.response_start < sentence.end() and item.response_end > sentence.start()
+                ]
+                # Citation text blocks may cover a clause, but attribution is
+                # at the sentence level. Commitments still need literal backing.
+                proof = " ".join(item.cited_text.casefold() for item in attached)
+                for term in re.findall(
+                    r"\b(?:free|guarantee(?:d)?|unlimited|certified|accredited|licensed)\b",
+                    text,
+                    re.I,
+                ):
+                    if not re.search(rf"\b{re.escape(term.casefold())}\b", proof):
+                        return self._reject("unsupported_commitment", draft)
 
-        if not _numbers_are_verbatim(body, cited_text):
+        # Inability to confirm a requested percentage or regulation is not a
+        # numeric promise or regulatory claim. Apply literal backing to the
+        # same factual sentences that require citations, not to gap guidance.
+        factual_text = "\n".join(
+            sentence.group()
+            for sentence in re.finditer(r"\S.*?(?:[.!?](?=\s|$)|$)", body, re.S)
+            if not _is_keepable_gap(sentence.group())
+        )
+        if not _numbers_are_verbatim(factual_text, cited_text):
             return self._reject("unsupported_numeric", draft)
-        if not _regulated_literals_are_verbatim(body, cited_text):
+        if not _regulated_literals_are_verbatim(factual_text, cited_text):
             return self._reject("unsupported_regulated", draft)
 
         safety = output_validator.evaluate(
@@ -591,7 +783,10 @@ class GroundedResponseEngine:
             cited_answer_text=cited_text,
             off_brand_blocklist=list(turn.off_brand_blocklist),
             max_chars=_MAX_CHARS,
-            curated_refusal=clarifying,
+            curated_refusal=clarifying
+            or visitor_recap
+            or (not citations and bool(_LIMITATION_RE.search(body))),
+            public_contact_text=cited_text,
         )
         if not safety.accepted:
             return self._reject(safety.reason, draft)

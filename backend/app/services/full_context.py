@@ -16,6 +16,7 @@ from app.services.kb_tokens import GENERIC_NOISE, WEAK_OVERLAP, is_overview_quer
 from app.settings import get_settings
 
 _UNITS_CACHE: dict[tuple[UUID, ...], list[EvidenceDoc]] = {}
+CONVERSATION_CHAR_BUDGET = 12_000
 
 
 @dataclass(frozen=True)
@@ -54,11 +55,14 @@ def conversation_window_messages(rows: list[Message], *, limit: int | None = Non
         if not text:
             continue
         messages.append({"role": role, "content": text})
+    total = sum(len(message["content"]) for message in messages)
+    while messages and total > CONVERSATION_CHAR_BUDGET:
+        total -= len(messages.pop(0)["content"])
     return messages
 
 
 def prior_provider_messages(rows: list[Message], visitor_text: str) -> list[dict]:
-    messages = conversation_window_messages(rows)
+    messages = conversation_window_messages(rows, limit=get_settings().conversation_window_size + 1)
     current = redact_window_body(visitor_text)
     if messages and messages[-1]["role"] == "user" and messages[-1]["content"] == current:
         return messages[:-1]
