@@ -98,6 +98,7 @@ const ContactSection = ({ detail }: { detail: ConversationDetail }) => (
     <Fact label="IP">
       <span className="font-mono text-xs">{orNone(detail.visitor.ip)}</span>
     </Fact>
+    <Fact label="Location">{orNone(detail.visitor.location)}</Fact>
   </RailSection>
 )
 

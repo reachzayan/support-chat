@@ -83,6 +83,7 @@ export const adaDetail: ConversationDetail = {
     phone: null,
     ip: "203.0.113.40",
     user_agent: CHROME_MAC,
+    location: "New York, New York, United States",
   },
   page: {
     title: "DOT screening",

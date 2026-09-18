@@ -8,6 +8,7 @@ export type SubmissionVisitor = {
   user_agent: string | null
   geo_country: string | null
   geo_region: string | null
+  location: string | null
   created_at: string
 }
 
@@ -55,6 +56,7 @@ export const COLUMNS = [
   "Page URL",
   "Referrer",
   "IP",
+  "Location",
   "User agent",
   "Country",
   "Region",
@@ -83,6 +85,7 @@ export const DEFAULT_WIDTHS: Record<ColumnLabel, number> = {
   "Page URL": 220,
   Referrer: 180,
   IP: 132,
+  Location: 220,
   "User agent": 220,
   Country: 96,
   Region: 96,

@@ -56,6 +56,7 @@ export type ConversationDetail = {
     phone: string | null
     ip: string | null
     user_agent: string | null
+    location: string | null
   }
   page: {
     title: string | null
