@@ -20,6 +20,7 @@ LEGAL = [
     ("queued", "end", "closed"),
     ("human", "end", "closed"),
     ("prechat", "end", "closed"),
+    ("closed", "resume", "bot"),
 ]
 
 
@@ -73,3 +74,9 @@ def test_no_event_after_closed() -> None:
     ):
         with pytest.raises(IllegalTransition):
             apply_event("closed", event)
+
+
+def test_resume_is_legal_only_after_closed() -> None:
+    for state in (None, "prechat", "bot", "queued", "human"):
+        with pytest.raises(IllegalTransition):
+            apply_event(state, "resume")

@@ -72,7 +72,10 @@ def test_new_bootstrap_snapshot_is_empty_prechat(client: TestClient) -> None:
 
     body = post_bootstrap(client).json()
 
+    claims = decode_widget_token(body["bootstrap_token"])
+    assert body["mode"] == "conversation"
     assert body["conversation"] == {
+        "id": claims["conversation_id"],
         "state": "prechat",
         "assigned_agent": None,
         "messages": [],
@@ -84,6 +87,7 @@ def test_resume_bootstrap_snapshot_includes_the_visitor_line(client: TestClient)
     first = post_bootstrap(client)
     resume = first.json()["resume_token"]
     token = first.json()["bootstrap_token"]
+    conversation_id = decode_widget_token(token)["conversation_id"]
 
     with client.websocket_connect("/ws/visitor", headers={"Origin": WIDGET_ORIGIN}) as visitor:
         auth_visitor(visitor, token)
@@ -105,7 +109,14 @@ def test_resume_bootstrap_snapshot_includes_the_visitor_line(client: TestClient)
             lambda frames: any(frame.get("type") == "prechat_accepted" for frame in frames),
         )
 
-    body = post_bootstrap(client, bootstrap_payload(resume_token=resume)).json()
+    body = post_bootstrap(
+        client,
+        {
+            **bootstrap_payload(resume_token=resume),
+            "action": "open",
+            "conversation_id": conversation_id,
+        },
+    ).json()
     conversation = body["conversation"]
     bodies = [
         frame["body"]

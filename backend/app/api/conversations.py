@@ -7,7 +7,8 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from app.db import SessionDep
 from app.security.deps import CurrentAdmin, CurrentUser
-from app.services.conversation_service import CommandError, ConversationService
+from app.services.conversation_queries import ConversationQueries
+from app.services.conversation_types import CommandError
 from app.services.handoff_service import HandoffError, HandoffService
 from app.services.rate_limit import RateLimiter, RateLimitExceeded, RateLimitUnavailable
 
@@ -128,7 +129,7 @@ async def list_conversations(
     state: Annotated[str | None, Query()] = None,
     cursor: Annotated[str | None, Query()] = None,
 ) -> ConversationListOut:
-    service = ConversationService(session)
+    service = ConversationQueries(session)
     try:
         items, next_cursor, counts = await service.list_inbox(state, cursor)
     except CommandError as exc:
@@ -143,7 +144,7 @@ async def list_submissions(
     session: SessionDep,
     _staff: CurrentUser,
 ) -> SubmissionListOut:
-    service = ConversationService(session)
+    service = ConversationQueries(session)
     items = await service.list_submissions()
     return SubmissionListOut.model_validate({"items": items})
 
@@ -154,7 +155,7 @@ async def get_conversation(
     session: SessionDep,
     _staff: CurrentUser,
 ) -> ConversationDetailOut:
-    service = ConversationService(session)
+    service = ConversationQueries(session)
     try:
         detail = await service.get_inbox_detail(conversation_id)
     except CommandError as exc:

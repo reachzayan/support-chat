@@ -78,6 +78,9 @@ class Conversation(Base):
         ),
         Index("ix_conversations_site_last_message", "site_id", "last_message_at"),
         Index("ix_conversations_state_last_message", "state", "last_message_at"),
+        Index(
+            "ix_conversations_visitor_site_last_message", "visitor_id", "site_id", "last_message_at"
+        ),
     )
 
     id: Mapped[UUID] = mapped_column(
