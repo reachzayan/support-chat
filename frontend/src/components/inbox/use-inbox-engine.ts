@@ -76,6 +76,9 @@ export const useInboxSyncRefs = (
     userRef.current = userId
   }, [userId])
   useEffect(() => {
+    if (live.detail === null && liveRef.current.detail !== null) {
+      return
+    }
     liveRef.current = live
   }, [live])
   return refs
@@ -152,23 +155,26 @@ const applyFetchedDetail = (
   next: DetailBundle,
   userId: string,
   lastIdRef: { current: number },
+  liveRef: { current: InboxLive },
   socketRef: { current: SocketApi | null },
   setCanned: (canned: CannedReply[]) => void,
   setLive: (live: InboxLive) => void,
 ) => {
   const assigned = next.detail.assigned_agent
   const winner = assigned && assigned.id !== userId ? assigned.display_name : null
-  setCanned(next.canned)
-  lastIdRef.current = maxMessageId(next.detail.messages)
-  socketRef.current?.subscribe(conversationId, lastIdRef.current)
-  setLive({
+  const nextLive: InboxLive = {
     chatState: next.detail.state,
     assigned,
     joinPending: false,
     winnerName: winner,
     detail: next.detail,
     lines: next.detail.messages,
-  })
+  }
+  liveRef.current = nextLive
+  setCanned(next.canned)
+  lastIdRef.current = maxMessageId(next.detail.messages)
+  setLive(nextLive)
+  socketRef.current?.subscribe(conversationId, lastIdRef.current)
 }
 
 const mergeInboxPages = async (filter: InboxFilter, extraCursors: string[]) => {
@@ -269,6 +275,7 @@ const loadInboxDetail = async (
     next,
     refs.userRef.current,
     refs.lastIdRef,
+    refs.liveRef,
     socketRef,
     setCanned,
     setLive,
