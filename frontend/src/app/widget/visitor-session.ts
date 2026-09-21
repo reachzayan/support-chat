@@ -4,6 +4,7 @@ import type { TranscriptLine } from "./transcript"
 export type ConversationState = "prechat" | "bot" | "queued" | "human" | "closed"
 
 export type ChatView = {
+  conversationId: string | null
   conversation: ConversationState | null
   assignedName: string | null
   lines: TranscriptLine[]
@@ -12,6 +13,7 @@ export type ChatView = {
 }
 
 export const emptyChat = (): ChatView => ({
+  conversationId: null,
   conversation: null,
   assignedName: null,
   lines: [],
@@ -22,6 +24,7 @@ export const emptyChat = (): ChatView => ({
 export const applyConversationSnapshot = (
   view: ChatView,
   snapshot: {
+    id?: string
     state: ConversationState
     assigned_agent: { id: string; display_name: string } | null
     messages: unknown[]
@@ -31,11 +34,12 @@ export const applyConversationSnapshot = (
   for (const message of snapshot.messages) {
     next = applyVisitorFrame(next, message)
   }
-  return applyVisitorFrame(next, {
+  const updated = applyVisitorFrame(next, {
     type: "state",
     state: snapshot.state,
     assigned_agent: snapshot.assigned_agent,
   })
+  return { ...updated, conversationId: snapshot.id ?? null }
 }
 
 const isRecord = (value: unknown): value is Record<string, unknown> => {
@@ -76,8 +80,11 @@ const applyState = (view: ChatView, frame: Record<string, unknown>): ChatView =>
   if (typeof frame.state !== "string" || !STATES.has(frame.state as ConversationState)) {
     return view
   }
+  const conversationId =
+    typeof frame.conversation_id === "string" ? frame.conversation_id : view.conversationId
   if (frame.state === "prechat") {
     return {
+      conversationId,
       conversation: "prechat",
       assignedName: null,
       lines: [],
@@ -92,7 +99,7 @@ const applyState = (view: ChatView, frame: Record<string, unknown>): ChatView =>
   if (frame.assigned_agent === null) {
     assignedName = null
   }
-  return { ...view, conversation: frame.state as ConversationState, assignedName }
+  return { ...view, conversationId, conversation: frame.state as ConversationState, assignedName }
 }
 
 const applyMessage = (view: ChatView, frame: Record<string, unknown>): ChatView => {

@@ -5,6 +5,18 @@ import { applyConversationSnapshot, applyVisitorFrame, emptyChat } from "./visit
 const VISITOR_LINE = "How fast are results?"
 
 describe("visitor session view", () => {
+  test("state frames keep the conversation id for token refresh", () => {
+    let view = emptyChat()
+    view = applyVisitorFrame(view, {
+      type: "state",
+      state: "bot",
+      conversation_id: "10000000-0000-4000-8000-000000000011",
+      assigned_agent: null,
+    })
+
+    expect(view.conversationId).toBe("10000000-0000-4000-8000-000000000011")
+  })
+
   test("prechat state drops prior canonical lines and assignment", () => {
     let view = emptyChat()
     view = applyVisitorFrame(view, {

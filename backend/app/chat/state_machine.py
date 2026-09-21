@@ -20,6 +20,7 @@ _TRANSITIONS: dict[tuple[str | None, str], str] = {
     ("queued", "end"): "closed",
     ("human", "end"): "closed",
     ("prechat", "end"): "closed",
+    ("closed", "resume"): "bot",
 }
 
 

@@ -1,5 +1,5 @@
 import { waitFor } from "@testing-library/react"
-import { beforeEach, describe, expect, test, vi } from "vitest"
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest"
 
 import { renderWithProviders } from "@/test/render"
 
@@ -29,7 +29,15 @@ class FakeSocket {
   }
 }
 
-const dispatchBootstrap = (token: string) => {
+const dispatchBootstrap = (
+  token: string,
+  conversation?: {
+    id?: string
+    state: string
+    assigned_agent: null
+    messages: unknown[]
+  },
+) => {
   window.dispatchEvent(
     new MessageEvent("message", {
       origin: PARENT,
@@ -45,6 +53,7 @@ const dispatchBootstrap = (token: string) => {
         page_url: "http://localhost:3000/demo",
         page_title: "Testing LiveChat inhouse",
         referrer: "",
+        ...(conversation === undefined ? {} : { conversation }),
       },
     }),
   )
@@ -60,18 +69,55 @@ const sentFrames = (socket: FakeSocket | undefined) => {
   )
 }
 
+/* oxlint-disable max-lines-per-function -- shared socket harness for rebootstrap cases */
 describe("widget socket expiry", () => {
   beforeEach(() => {
     FakeSocket.instances = []
     vi.stubGlobal("WebSocket", FakeSocket)
   })
 
-  test("close 4401 asks the host to rebootstrap once", async () => {
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  test("4401 rebootstrap posts refresh with the current conversation id", async () => {
     const posted: unknown[] = []
-    const original = window.parent.postMessage.bind(window.parent)
     vi.spyOn(window.parent, "postMessage").mockImplementation((data, origin) => {
       posted.push({ data, origin })
-      original(data, origin as string)
+    })
+
+    renderWithProviders(<WidgetApp />)
+    dispatchBootstrap("boot", {
+      id: "10000000-0000-4000-8000-000000000011",
+      state: "bot",
+      assigned_agent: null,
+      messages: [{ type: "message", id: 11, role: "visitor", body: "How fast are results?" }],
+    })
+    await waitFor(() => expect(FakeSocket.instances.length).toBe(1))
+    emitJson(FakeSocket.instances[0], {
+      v: 1,
+      type: "state",
+      state: "closed",
+      conversation_id: "10000000-0000-4000-8000-000000000011",
+      assigned_agent: null,
+    })
+    FakeSocket.instances[0]?.close(4401)
+
+    await waitFor(() => {
+      const rebootstraps = posted.filter(
+        (frame) => (frame as { data: { type: string } }).data?.type === "widget.rebootstrap",
+      )
+      expect(rebootstraps).toHaveLength(1)
+      expect(
+        (rebootstraps[0] as { data: { conversation_id?: string } }).data?.conversation_id,
+      ).toBe("10000000-0000-4000-8000-000000000011")
+    })
+  })
+
+  test("close 4401 asks the host to rebootstrap once", async () => {
+    const posted: unknown[] = []
+    vi.spyOn(window.parent, "postMessage").mockImplementation((data, origin) => {
+      posted.push({ data, origin })
     })
 
     renderWithProviders(<WidgetApp />)

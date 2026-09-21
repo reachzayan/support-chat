@@ -1,16 +1,18 @@
 import json
 from hmac import compare_digest
-from typing import Any
+from typing import Any, Literal
+from uuid import UUID
 
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, ValidationError
 
-from app.chat.connection_manager import message_frame
+from app.chat.connection_manager import connection_manager, message_frame
 from app.db import SessionDep
 from app.security.client_ip import resolve_client_ip
 from app.security.widget_tokens import create_widget_token
 from app.services.conversation_service import CommandError, ConversationService
+from app.services.conversation_types import BootstrapResult
 from app.services.rate_limit import RateLimiter, RateLimitExceeded, RateLimitUnavailable
 from app.services.site_admin import SiteAdminService
 from app.settings import get_settings
@@ -26,6 +28,9 @@ class BootstrapBody(BaseModel):
     site_key: str
     public_key: str
     resume_token: str | None = None
+    action: Literal["identify", "history", "open", "refresh", "reset", "forget"] = "identify"
+    conversation_id: UUID | None = None
+    replace_current: bool = False
 
 
 class FrameAncestorsBody(BaseModel):
@@ -53,6 +58,8 @@ def _command_error_response(exc: CommandError) -> JSONResponse:
         return JSONResponse({"detail": "Too many requests"}, status_code=429)
     if exc.code == "unavailable":
         return JSONResponse({"detail": "Unavailable"}, status_code=503)
+    if exc.code == "active_chat_exists":
+        return JSONResponse({"detail": "Active chat exists"}, status_code=409)
     return JSONResponse({"detail": "Invalid request"}, status_code=400)
 
 
@@ -69,6 +76,60 @@ def _service_secret_matches(request: Request, configured_secret: str) -> bool:
     return bool(configured_secret) and compare_digest(
         configured_secret.encode("utf-8"), supplied_secret.encode("utf-8")
     )
+
+
+def _bootstrap_response_body(result: BootstrapResult) -> dict[str, Any]:
+    body: dict[str, Any] = {
+        "mode": result.mode,
+        "widget": {
+            "name": result.site_name,
+            "greeting": result.greeting,
+            "privacy_url": result.privacy_url,
+            "contact_info": result.contact_info,
+            "bot_enabled": result.bot_enabled,
+            "human_enabled": result.human_enabled,
+        },
+    }
+    if result.mode == "conversation":
+        assert result.visitor_id is not None
+        assert result.conversation_id is not None
+        assert result.conversation_state is not None
+        body["bootstrap_token"] = create_widget_token(
+            result.site_id,
+            result.visitor_id,
+            result.conversation_id,
+            result.parent_origin,
+            get_settings(),
+        )
+        body["conversation"] = {
+            "id": str(result.conversation_id),
+            "state": result.conversation_state,
+            "assigned_agent": result.assigned_agent,
+            "messages": [message_frame(message) for message in (result.messages or [])],
+        }
+    if result.identity is not None:
+        body["identity"] = {
+            "display_name": result.identity.display_name,
+            "email_hint": result.identity.email_hint,
+            "phone_hint": result.identity.phone_hint,
+            "chat_count": result.identity.chat_count,
+        }
+    if result.conversations is not None:
+        body["conversations"] = [
+            {
+                "id": str(conversation.id),
+                "state": conversation.state,
+                "inquiry_type": conversation.inquiry_type,
+                "created_at": conversation.created_at.isoformat(),
+                "last_message_at": conversation.last_message_at.isoformat(),
+                "assigned_agent": conversation.assigned_agent,
+                "is_current": conversation.is_current,
+            }
+            for conversation in result.conversations
+        ]
+    if result.resume_token is not None:
+        body["resume_token"] = result.resume_token
+    return body
 
 
 async def _frame_ancestors_body(request: Request) -> FrameAncestorsBody | JSONResponse:
@@ -161,34 +222,15 @@ async def widget_bootstrap(request: Request, session: SessionDep) -> JSONRespons
             resume_token=payload.resume_token,
             client_host=client_ip,
             user_agent=request.headers.get("user-agent"),
+            action=payload.action,
+            conversation_id=payload.conversation_id,
+            replace_current=payload.replace_current,
         )
     except CommandError as exc:
         return _command_error_response(exc)
 
-    settings = get_settings()
-    token = create_widget_token(
-        result.site_id,
-        result.visitor_id,
-        result.conversation_id,
-        result.parent_origin,
-        settings,
+    for conversation in result.changed_conversations:
+        await connection_manager.after_commit(conversation, result.site_key, None)
+    return JSONResponse(
+        _bootstrap_response_body(result), headers=_cors_headers(result.parent_origin)
     )
-    body: dict[str, Any] = {
-        "widget": {
-            "name": result.site_name,
-            "greeting": result.greeting,
-            "privacy_url": result.privacy_url,
-            "contact_info": result.contact_info,
-            "bot_enabled": result.bot_enabled,
-            "human_enabled": result.human_enabled,
-        },
-        "bootstrap_token": token,
-        "conversation": {
-            "state": result.conversation_state,
-            "assigned_agent": result.assigned_agent,
-            "messages": [message_frame(message) for message in result.messages],
-        },
-    }
-    if result.resume_token is not None:
-        body["resume_token"] = result.resume_token
-    return JSONResponse(body, headers=_cors_headers(result.parent_origin))

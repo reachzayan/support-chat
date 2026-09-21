@@ -42,6 +42,10 @@ const AGENT_REPLY_LINES = [
   { id: 7, role: "agent", body: "Drug and alcohol testing.\n\nRandom programs nationwide." },
 ]
 const FOLLOW_UP_LINES = [...VISITOR_LINES, { id: 41, role: "agent", body: "Your result is ready." }]
+const RESET_RESUME_LINES = [
+  { id: 8, role: "system", body: "This chat was reset by the visitor." },
+  { id: 9, role: "system", body: "This chat has been resumed." },
+]
 
 describe("transcript typing indicator", () => {
   beforeEach(() => {
@@ -62,6 +66,19 @@ describe("transcript typing indicator", () => {
 
     expect(screen.getByText(VISITOR_LINE)).toBeInTheDocument()
     expect(screen.queryByText("Assistant is typing…")).not.toBeInTheDocument()
+  })
+
+  test("reset and resume notes sit in the middle without an agent label", () => {
+    renderWithProviders(<Transcript selfRole="agent" lines={RESET_RESUME_LINES} />)
+
+    expect(screen.queryByText("Agent")).not.toBeInTheDocument()
+    expect(
+      screen.getByText("This chat was reset by the visitor.").closest(".widget-bubble"),
+    ).toHaveClass("mx-auto", "rounded-full")
+    expect(screen.getByText("This chat has been resumed.").closest(".widget-bubble")).toHaveClass(
+      "mx-auto",
+      "rounded-full",
+    )
   })
 
   test("keeps lifecycle notices centered while treating other system copy as an agent message", () => {

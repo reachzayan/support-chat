@@ -1,4 +1,5 @@
 import { describe, expect, test } from "vitest"
+/* oxlint-disable max-lines-per-function -- protocol cases stay grouped as one contract */
 
 import {
   parseHostToWidget,
@@ -86,6 +87,50 @@ describe("host to widget frames", () => {
   test("rejects unknown host types", () => {
     expect(parseHostToWidget({ type: "host.hack" })).toBeNull()
   })
+
+  test("accepts masked identity and metadata-only history frames", () => {
+    const widget = {
+      name: "SupportChat demo",
+      greeting: "Talk to a specialist about screening.",
+      privacy_url: "http://localhost:3000/privacy",
+    }
+    expect(
+      parseHostToWidget({
+        type: "host.identity",
+        widget,
+        identity: {
+          display_name: "Ada L.",
+          email_hint: "a•••@example.com",
+          phone_hint: "••• ••• 0198",
+          chat_count: 2,
+        },
+      }),
+    ).toMatchObject({ type: "host.identity", identity: { display_name: "Ada L.", chat_count: 2 } })
+
+    expect(
+      parseHostToWidget({
+        type: "host.history",
+        widget,
+        identity: {
+          display_name: "Ada L.",
+          email_hint: "a•••@example.com",
+          phone_hint: null,
+          chat_count: 1,
+        },
+        conversations: [
+          {
+            id: "10000000-0000-4000-8000-000000000001",
+            state: "closed",
+            inquiry_type: "results",
+            created_at: "2026-09-20T12:00:00Z",
+            last_message_at: "2026-09-20T12:10:00Z",
+            assigned_agent: null,
+            is_current: false,
+          },
+        ],
+      }),
+    ).toMatchObject({ type: "host.history", conversations: [{ state: "closed" }] })
+  })
 })
 
 describe("widget to host frames", () => {
@@ -102,6 +147,33 @@ describe("widget to host frames", () => {
 
   test("accepts widget.painted", () => {
     expect(parseWidgetToHost({ type: "widget.painted" })).toEqual({ type: "widget.painted" })
+  })
+
+  test("accepts only closed resume actions with bounded identifiers", () => {
+    const conversationId = "10000000-0000-4000-8000-000000000001"
+    expect(parseWidgetToHost({ type: "widget.show_history" })).toEqual({
+      type: "widget.show_history",
+    })
+    expect(parseWidgetToHost({ type: "widget.reset_current" })).toEqual({
+      type: "widget.reset_current",
+    })
+    expect(parseWidgetToHost({ type: "widget.delete_all" })).toEqual({
+      type: "widget.delete_all",
+    })
+    expect(
+      parseWidgetToHost({
+        type: "widget.open_conversation",
+        conversation_id: conversationId,
+        replace_current: true,
+      }),
+    ).toEqual({
+      type: "widget.open_conversation",
+      conversation_id: conversationId,
+      replace_current: true,
+    })
+    expect(
+      parseWidgetToHost({ type: "widget.open_conversation", conversation_id: "../other" }),
+    ).toBeNull()
   })
 
   test("rejects unknown widget types", () => {

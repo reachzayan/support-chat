@@ -60,6 +60,44 @@ describe("inbox conversation isolation", () => {
   })
 })
 
+describe("inbox conversation open", () => {
+  beforeEach(() => {
+    resetInboxHarness()
+  })
+
+  test("the first opened conversation stays open when the socket replays its state", async () => {
+    const originalSend = FakeSocket.prototype.send
+    FakeSocket.prototype.send = function send(data: string) {
+      originalSend.call(this, data)
+      const frame = JSON.parse(data) as { type?: string; conversation_id?: string }
+      if (frame.type !== "subscribe" || frame.conversation_id !== CONVO_ID) {
+        return
+      }
+      queueMicrotask(() => {
+        emit(this, {
+          v: 1,
+          type: "state",
+          conversation_id: CONVO_ID,
+          state: "queued",
+          assigned_agent: null,
+        })
+      })
+    }
+    try {
+      await openQueuedAda()
+      expect(
+        screen.queryByRole("heading", { name: "Opening conversation…" }),
+      ).not.toBeInTheDocument()
+      expect(screen.getByText("ada@example.com")).toBeInTheDocument()
+      expect(screen.getByRole("log", { name: "Transcript" })).toHaveTextContent(
+        "How fast are DOT results?",
+      )
+    } finally {
+      FakeSocket.prototype.send = originalSend
+    }
+  })
+})
+
 describe("inbox subscribe replace", () => {
   beforeEach(() => {
     resetInboxHarness()

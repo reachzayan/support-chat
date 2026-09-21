@@ -169,7 +169,15 @@ const handleSocketClose = (
   schedulerRef: SchedulerRef,
 ) => {
   if (code === 4401) {
-    postToParent({ type: "widget.rebootstrap" }, origin)
+    postToParent(
+      {
+        type: "widget.rebootstrap",
+        ...(viewRef.current.conversationId
+          ? { conversation_id: viewRef.current.conversationId }
+          : {}),
+      },
+      origin,
+    )
     return
   }
   if (code === 1000 || code === 4403) {

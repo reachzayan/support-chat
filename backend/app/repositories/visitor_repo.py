@@ -46,3 +46,14 @@ class VisitorRepository:
             )
         )
         return result.scalar_one_or_none()
+
+    async def lock_by_resume_hash(self, site_id: UUID, resume_token_hash: str) -> Visitor | None:
+        result = await self._session.execute(
+            select(Visitor)
+            .where(
+                Visitor.site_id == site_id,
+                Visitor.resume_token_hash == resume_token_hash,
+            )
+            .with_for_update()
+        )
+        return result.scalar_one_or_none()

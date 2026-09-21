@@ -8,10 +8,16 @@ export const applyHostFrame = (
   setConfig: (config: PublicWidgetConfig) => void,
   setPage: (page: { page_url: string; page_title: string; referrer: string }) => void,
 ) => {
-  if (frame.type === "host.bootstrap") {
+  if (
+    frame.type === "host.bootstrap" ||
+    frame.type === "host.identity" ||
+    frame.type === "host.history"
+  ) {
     setParentOrigin(origin)
     setConfig(frame.widget)
-    setPage({ page_url: frame.page_url, page_title: frame.page_title, referrer: frame.referrer })
+    if (frame.type === "host.bootstrap") {
+      setPage({ page_url: frame.page_url, page_title: frame.page_title, referrer: frame.referrer })
+    }
     return
   }
   if (knownParent === "" || origin !== knownParent) {

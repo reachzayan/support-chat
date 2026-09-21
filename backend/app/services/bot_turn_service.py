@@ -1,0 +1,325 @@
+"""Prepare a grounded reply from history, cached answers, evidence and provider output.
+
+ConversationService alone owns generation leases, transitions and persistence.
+"""
+
+import asyncio
+import time
+from dataclasses import dataclass
+from uuid import UUID
+
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.llm.bot_responder import BotResponder
+from app.llm.intent import (
+    is_handoff_declined,
+)
+from app.llm.prompts import document_body
+from app.models.conversation import Conversation
+from app.models.kb_chunk import KbChunk
+from app.models.kb_snapshot import KbSnapshot
+from app.models.message import Message
+from app.models.site import Site
+from app.repositories.kb_chunk_repo import live_chunks_query
+from app.repositories.message_repo import MessageRepository
+from app.services.bot_trace import record_trace
+from app.services.full_context import prior_provider_messages
+from app.services.grounded_response import (
+    Citation,
+    EvidenceUnit,
+    GroundedResponseEngine,
+    ModelDraft,
+    ResponseDecision,
+    TurnContext,
+    _has_prior_assistant,
+    _is_source_followup,
+    contextual_grounding_query,
+    history_recap_decision,
+)
+from app.services.kb_embedder import default_embedder
+from app.services.kb_hybrid import HybridKbSearch
+from app.services.pii_redactor import redact_for_model
+from app.services.response_cache import load_response, response_cache_key
+from app.services.route_decision import live_snapshots_for_site
+from app.settings import get_settings
+
+
+@dataclass
+class PreparedBotReply:
+    decision: ResponseDecision
+    stage_timings: dict[str, int]
+    cache_key: str | None = None
+
+
+class BotTurnService:
+    def __init__(
+        self, session: AsyncSession, responder=None, embedder=None, *, evidence_loader=None
+    ) -> None:
+        self._session = session
+        self._messages = MessageRepository(session)
+        self._responder = responder if responder is not None else BotResponder()
+        self._embedder = embedder if embedder is not None else default_embedder()
+        self._evidence_loader = evidence_loader or self.retrieve_evidence
+
+    async def prepare(
+        self,
+        conversation: Conversation,
+        site: Site,
+        visitor_text: str,
+    ) -> PreparedBotReply:
+        conversation_id = conversation.id
+        stage_timings: dict[str, int] = {
+            "history_load": 0,
+            "lexical_retrieve": 0,
+            "trigram_retrieve": 0,
+            "dense_retrieve": 0,
+            "embed": 0,
+            "provider": 0,
+            "citation_parse": 0,
+            "validate": 0,
+            "liveness_check": 0,
+            "commit": 0,
+        }
+        started = time.perf_counter_ns()
+        window = await self._messages.list_recent_roles(
+            conversation_id,
+            {"visitor", "bot"},
+            get_settings().conversation_window_size + 1,
+        )
+        prior_messages = tuple(prior_provider_messages(window, visitor_text))
+        stage_timings["history_load"] = (time.perf_counter_ns() - started) // 1_000_000
+        recap = history_recap_decision(visitor_text, prior_messages)
+        if recap is not None:
+            return PreparedBotReply(recap, stage_timings)
+        if _is_source_followup(visitor_text) and _has_prior_assistant(prior_messages):
+            from app.services.grounded_response import source_followup_decision
+
+            previous = next((row for row in reversed(window) if row.role == "bot"), None)
+            citations = [
+                Citation(
+                    c.chunk_id,
+                    c.snapshot_id,
+                    c.response_start,
+                    c.response_end,
+                    c.source_start,
+                    c.source_end,
+                    c.cited_text,
+                    c.source_title,
+                    c.source_url,
+                )
+                for c in (previous.citations if previous else [])
+            ]
+            return PreparedBotReply(source_followup_decision(citations), stage_timings)
+        record_trace("history", prior_messages=prior_messages)
+        snapshots = await live_snapshots_for_site(self._session, site.id)
+        cache_key, cached = await self._load_cached_first_turn(
+            site, snapshots, visitor_text, prior_messages
+        )
+        if cached is not None:
+            return PreparedBotReply(cached, stage_timings)
+        retrieval_text = await self._contextual_retrieval_query(
+            site.id, visitor_text, prior_messages, window
+        )
+        record_trace("retrieval", query=redact_for_model(retrieval_text))
+        evidence = await self._evidence_loader(site.id, retrieval_text, stage_timings)
+        record_trace("retrieval", evidence=evidence)
+        record_trace(
+            "classification",
+            evidence_topics=list(dict.fromkeys(unit.topic_label for unit in evidence)),
+            intent_role="diagnostic_only",
+        )
+        handoff_declined = any(
+            row.role == "visitor" and is_handoff_declined(row.body or "") for row in window
+        )
+        record_trace("classification", handoff_declined=handoff_declined)
+        decision = await self._grounded_response_engine(site, stage_timings).respond(
+            TurnContext(
+                visitor_text=visitor_text,
+                evidence=evidence,
+                site_name=site.name,
+                prior_messages=prior_messages,
+                prior_miss_count=0 if handoff_declined else conversation.fallback_count,
+                prior_miss_reason=self._last_bot_reason(window, conversation.fallback_count),
+                off_brand_blocklist=tuple(getattr(site, "off_brand_blocklist", None) or ()),
+            ),
+            stage_timings=stage_timings,
+        )
+        return PreparedBotReply(decision, stage_timings, cache_key)
+
+    async def _contextual_retrieval_query(
+        self,
+        site_id: UUID,
+        visitor_text: str,
+        prior_messages: tuple[dict[str, str], ...],
+        window: list[Message],
+    ) -> str:
+        query = contextual_grounding_query(visitor_text, prior_messages)
+        if query == visitor_text:
+            return query
+        previous = next(
+            (row for row in reversed(window) if row.role == "bot" and row.citations), None
+        )
+        if previous is None:
+            return query
+        ids = list(dict.fromkeys(c.chunk_id for c in previous.citations))[:2]
+        rows = await self._session.execute(
+            live_chunks_query(site_id)
+            .with_only_columns(KbChunk.id, KbChunk.heading)
+            .where(KbChunk.id.in_(ids))
+        )
+        headings = dict(rows.all())
+        subject = " ".join(
+            dict.fromkeys(headings[chunk_id] for chunk_id in ids if headings.get(chunk_id))
+        )
+        return contextual_grounding_query(visitor_text, prior_messages, source_subject=subject)
+
+    def _grounded_response_engine(
+        self, site: Site, stage_timings: dict[str, int]
+    ) -> GroundedResponseEngine:
+        complete = getattr(self._responder, "generate_grounded_draft", None)
+        # BotResponder(complete=...) test doubles still use the legacy adapter.
+        if complete is not None and getattr(self._responder, "_complete", None) is not None:
+            complete = None
+        if complete is None:
+
+            async def complete(turn, units):
+                return await self._legacy_grounded_draft(site, turn, units)
+
+        else:
+            original_complete = complete
+
+            async def complete(turn, units):
+                try:
+                    return await original_complete(turn, units, stage_timings=stage_timings)
+                except TypeError:
+                    return await original_complete(turn, units)
+
+        repair_draft = getattr(self._responder, "repair_grounded_draft", None)
+        repair = None
+        if repair_draft is not None and getattr(self._responder, "_complete", None) is None:
+            provider_deadline = time.monotonic() + get_settings().anthropic_timeout
+
+            async def repair(turn, units, draft):
+                remaining = provider_deadline - time.monotonic()
+                if remaining <= 0:
+                    record_trace("citation_repair", budget_exhausted=True)
+                    return None
+                async with asyncio.timeout(remaining):
+                    return await repair_draft(turn, units, draft, stage_timings=stage_timings)
+
+        return GroundedResponseEngine(complete=complete, repair=repair)
+
+    async def _load_cached_first_turn(
+        self,
+        site: Site,
+        snapshots: list[KbSnapshot],
+        visitor_text: str,
+        prior_messages: tuple[dict[str, str], ...],
+    ) -> tuple[str | None, ResponseDecision | None]:
+        if prior_messages or not snapshots:
+            return None, None
+        key = response_cache_key(
+            site.id,
+            site.name,
+            [item.id for item in snapshots],
+            visitor_text,
+            off_brand_blocklist=site.off_brand_blocklist,
+        )
+        return key, await load_response(key)
+
+    async def retrieve_evidence(
+        self,
+        site_id: UUID,
+        visitor_text: str,
+        stage_timings: dict[str, int] | None = None,
+    ) -> list[EvidenceUnit]:
+        snapshots = await live_snapshots_for_site(self._session, site_id)
+        if not snapshots:
+            return []
+        hits = await HybridKbSearch(self._session).search_with_deferred_embed(
+            self._embedder,
+            site_id,
+            visitor_text,
+            stage_timings=stage_timings,
+        )
+        return [
+            EvidenceUnit(
+                id=hit.id,
+                canonical_question=hit.canonical_question,
+                aliases=tuple(hit.aliases or ()),
+                topic_label=hit.topic_label or hit.heading,
+                answer_verbatim=hit.answer_verbatim or hit.body,
+                source_title=hit.title,
+                source_url=hit.url,
+                snapshot_id=hit.snapshot_id,
+                risk_class=hit.risk_class,
+                answer_mode=hit.answer_mode,
+                enabled=hit.enabled,
+                live=True,
+                source_heading="" if hit.structured else hit.heading,
+            )
+            for hit in hits
+        ]
+
+    async def _legacy_grounded_draft(
+        self, site: Site, turn: TurnContext, units: list[EvidenceUnit]
+    ):
+        """Adapt test/custom responders to the typed grounded provider contract."""
+        chunk_ids = [unit.id for unit in units]
+        result = await self._session.execute(
+            live_chunks_query(site.id).where(KbChunk.id.in_(chunk_ids))
+        )
+        by_id = {chunk.id: (chunk, page) for chunk, page in result.all()}
+        documents = [by_id[unit.id][0] for unit in units if unit.id in by_id]
+        generate_from_documents = getattr(self._responder, "generate_from_documents", None)
+        if generate_from_documents is not None:
+            answer = await generate_from_documents(
+                site=site,
+                visitor_text=turn.visitor_text,
+                documents=documents,
+                prior_messages=list(turn.prior_messages),
+            )
+        else:
+            generate = getattr(self._responder, "generate", None)
+            if generate is None:
+                return None
+            answer = await generate(site, turn.visitor_text, documents)
+        if answer is None:
+            return None
+        body = str(getattr(answer, "body", "") or "").strip()
+        cited_ids = list(getattr(answer, "source_chunk_ids", None) or [])
+        if not getattr(answer, "accepted", False) or not body:
+            return ModelDraft(body=body, citations=[])
+        citations: list[Citation] = []
+        for unit in units:
+            if unit.id not in cited_ids:
+                continue
+            start = body.find(unit.answer_verbatim)
+            if start < 0:
+                start = 0
+                end = len(body)
+            else:
+                end = start + len(unit.answer_verbatim)
+            citations.append(
+                Citation(
+                    chunk_id=unit.id,
+                    snapshot_id=unit.snapshot_id,
+                    response_start=start,
+                    response_end=end,
+                    source_start=0,
+                    source_end=len(document_body(unit)),
+                    cited_text=document_body(unit),
+                    source_title=unit.source_title,
+                    source_url=unit.source_url,
+                )
+            )
+        return ModelDraft(body=body, citations=citations)
+
+    @staticmethod
+    def _last_bot_reason(window: list[Message], fallback_count: int) -> str | None:
+        if fallback_count <= 0:
+            return None
+        for row in reversed(window):
+            if row.role == "bot" and row.response_reason_code:
+                return row.response_reason_code
+        return None

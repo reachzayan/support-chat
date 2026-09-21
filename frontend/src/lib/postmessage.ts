@@ -17,9 +17,27 @@ export type PublicWidgetConfig = {
 }
 
 export type ConversationSnapshot = {
+  id?: string
   state: "prechat" | "bot" | "queued" | "human" | "closed"
   assigned_agent: { id: string; display_name: string } | null
   messages: Record<string, unknown>[]
+}
+
+export type ReturningIdentity = {
+  display_name: string
+  email_hint: string
+  phone_hint: string | null
+  chat_count: number
+}
+
+export type ConversationHistoryItem = {
+  id: string
+  state: ConversationSnapshot["state"]
+  inquiry_type: string | null
+  created_at: string
+  last_message_at: string
+  assigned_agent: ConversationSnapshot["assigned_agent"]
+  is_current: boolean
 }
 
 export type HostToWidget =
@@ -32,15 +50,29 @@ export type HostToWidget =
       referrer: string
       conversation?: ConversationSnapshot
     }
+  | { type: "host.identity"; widget: PublicWidgetConfig; identity: ReturningIdentity }
+  | {
+      type: "host.history"
+      widget: PublicWidgetConfig
+      identity: ReturningIdentity
+      conversations: ConversationHistoryItem[]
+    }
   | { type: "host.context"; page_url: string; page_title: string; referrer: string }
 
 export type WidgetToHost =
   | { type: "widget.ready" }
   | { type: "widget.painted" }
-  | { type: "widget.rebootstrap" }
+  | { type: "widget.rebootstrap"; conversation_id?: string }
   | { type: "widget.activated" }
   | { type: "widget.close" }
-  | { type: "widget.reset" }
+  | { type: "widget.show_history" }
+  | { type: "widget.reset_current" }
+  | { type: "widget.delete_all" }
+  | {
+      type: "widget.open_conversation"
+      conversation_id: string
+      replace_current: boolean
+    }
   | { type: "widget.resize"; height: number; width?: number }
   | { type: "widget.open_url"; url: string }
 
@@ -75,6 +107,7 @@ const parseWidgetConfig = (value: unknown): PublicWidgetConfig | null => {
 }
 
 const SNAPSHOT_STATES = new Set(["prechat", "bot", "queued", "human", "closed"])
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 
 const parseAssignedAgent = (value: unknown): ConversationSnapshot["assigned_agent"] | undefined => {
   if (value === null) {
@@ -99,9 +132,89 @@ export const parseConversationSnapshot = (value: unknown): ConversationSnapshot 
     return undefined
   }
   return {
+    ...(typeof value.id === "string" && UUID_PATTERN.test(value.id) ? { id: value.id } : {}),
     state: value.state as ConversationSnapshot["state"],
     assigned_agent: assigned,
     messages: value.messages.filter(isRecord),
+  }
+}
+
+const parseIdentity = (value: unknown): ReturningIdentity | null => {
+  if (
+    !isRecord(value) ||
+    typeof value.display_name !== "string" ||
+    typeof value.email_hint !== "string" ||
+    (value.phone_hint !== null && typeof value.phone_hint !== "string") ||
+    typeof value.chat_count !== "number" ||
+    !Number.isInteger(value.chat_count) ||
+    value.chat_count < 0
+  ) {
+    return null
+  }
+  return {
+    display_name: value.display_name,
+    email_hint: value.email_hint,
+    phone_hint: value.phone_hint,
+    chat_count: value.chat_count,
+  }
+}
+
+// History metadata crosses a trust boundary and every field is validated here.
+// oxlint-disable-next-line complexity
+const parseHistoryItem = (value: unknown): ConversationHistoryItem | null => {
+  if (
+    !isRecord(value) ||
+    typeof value.id !== "string" ||
+    !UUID_PATTERN.test(value.id) ||
+    typeof value.state !== "string" ||
+    !SNAPSHOT_STATES.has(value.state) ||
+    (value.inquiry_type !== null && typeof value.inquiry_type !== "string") ||
+    typeof value.created_at !== "string" ||
+    !Number.isFinite(Date.parse(value.created_at)) ||
+    typeof value.last_message_at !== "string" ||
+    !Number.isFinite(Date.parse(value.last_message_at)) ||
+    typeof value.is_current !== "boolean"
+  ) {
+    return null
+  }
+  const assigned = parseAssignedAgent(value.assigned_agent)
+  if (assigned === undefined) {
+    return null
+  }
+  return {
+    id: value.id,
+    state: value.state as ConversationHistoryItem["state"],
+    inquiry_type: value.inquiry_type,
+    created_at: value.created_at,
+    last_message_at: value.last_message_at,
+    assigned_agent: assigned,
+    is_current: value.is_current,
+  }
+}
+
+const parseReturningFrame = (
+  value: Record<string, unknown>,
+): Extract<HostToWidget, { type: "host.identity" | "host.history" }> | null => {
+  const widget = parseWidgetConfig(value.widget)
+  const identity = parseIdentity(value.identity)
+  if (widget === null || identity === null) {
+    return null
+  }
+  if (value.type === "host.identity") {
+    return { type: "host.identity", widget, identity }
+  }
+  if (value.type !== "host.history" || !Array.isArray(value.conversations)) {
+    return null
+  }
+  const conversations = value.conversations.map(parseHistoryItem)
+  if (conversations.some((item) => item === null)) {
+    return null
+  }
+  return {
+    type: "host.history",
+    widget,
+    identity,
+    conversations: conversations as ConversationHistoryItem[],
   }
 }
 
@@ -152,6 +265,9 @@ export const parseHostToWidget = (value: unknown): HostToWidget | null => {
   if (value.type === "host.bootstrap") {
     return parseBootstrap(value)
   }
+  if (value.type === "host.identity" || value.type === "host.history") {
+    return parseReturningFrame(value)
+  }
   if (value.type === "host.context") {
     return parseContext(value)
   }
@@ -180,10 +296,11 @@ const parseResize = (value: Record<string, unknown>): WidgetToHost | null => {
 const SIMPLE_WIDGET_TYPES = new Set([
   "widget.ready",
   "widget.painted",
-  "widget.rebootstrap",
   "widget.activated",
   "widget.close",
-  "widget.reset",
+  "widget.show_history",
+  "widget.reset_current",
+  "widget.delete_all",
 ])
 
 type SimpleWidgetType = Extract<
@@ -192,10 +309,11 @@ type SimpleWidgetType = Extract<
     type:
       | "widget.ready"
       | "widget.painted"
-      | "widget.rebootstrap"
       | "widget.activated"
       | "widget.close"
-      | "widget.reset"
+      | "widget.show_history"
+      | "widget.reset_current"
+      | "widget.delete_all"
   }
 >
 
@@ -221,6 +339,8 @@ const parseOpenUrl = (value: Record<string, unknown>): WidgetToHost | null => {
   return { type: "widget.open_url", url: value.url }
 }
 
+// The widget protocol is intentionally closed; explicit branches reject extra action shapes.
+// oxlint-disable-next-line complexity
 export const parseWidgetToHost = (value: unknown): WidgetToHost | null => {
   if (!isRecord(value) || typeof value.type !== "string") {
     return null
@@ -231,6 +351,29 @@ export const parseWidgetToHost = (value: unknown): WidgetToHost | null => {
   }
   if (value.type === "widget.resize") {
     return parseResize(value)
+  }
+  if (value.type === "widget.rebootstrap") {
+    if (value.conversation_id === undefined) {
+      return { type: "widget.rebootstrap" }
+    }
+    if (typeof value.conversation_id !== "string" || !UUID_PATTERN.test(value.conversation_id)) {
+      return null
+    }
+    return { type: "widget.rebootstrap", conversation_id: value.conversation_id }
+  }
+  if (value.type === "widget.open_conversation") {
+    if (
+      typeof value.conversation_id !== "string" ||
+      !UUID_PATTERN.test(value.conversation_id) ||
+      typeof value.replace_current !== "boolean"
+    ) {
+      return null
+    }
+    return {
+      type: "widget.open_conversation",
+      conversation_id: value.conversation_id,
+      replace_current: value.replace_current,
+    }
   }
   if (value.type === "widget.open_url") {
     return parseOpenUrl(value)

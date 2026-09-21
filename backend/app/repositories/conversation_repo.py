@@ -49,9 +49,10 @@ class ConversationRepository:
         return list(result.scalars().all())
 
     async def get_open_for_visitor(
-        self, visitor_id: UUID, *, for_update: bool = False
+        self, site_id: UUID, visitor_id: UUID, *, for_update: bool = False
     ) -> Conversation | None:
         query = select(Conversation).where(
+            Conversation.site_id == site_id,
             Conversation.visitor_id == visitor_id,
             Conversation.state != "closed",
         )
@@ -59,6 +60,54 @@ class ConversationRepository:
             query = query.with_for_update()
         result = await self._session.execute(query)
         return result.scalar_one_or_none()
+
+    async def lock_for_visitor(
+        self, site_id: UUID, visitor_id: UUID, conversation_id: UUID
+    ) -> Conversation | None:
+        result = await self._session.execute(
+            select(Conversation)
+            .where(
+                Conversation.id == conversation_id,
+                Conversation.site_id == site_id,
+                Conversation.visitor_id == visitor_id,
+                Conversation.prechat_submission_id.is_not(None),
+            )
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+        return result.scalar_one_or_none()
+
+    async def list_for_visitor_history(
+        self, site_id: UUID, visitor_id: UUID, *, limit: int
+    ) -> list[tuple[Conversation, User | None]]:
+        result = await self._session.execute(
+            select(Conversation, User)
+            .outerjoin(User, User.id == Conversation.assigned_agent_id)
+            .where(
+                Conversation.site_id == site_id,
+                Conversation.visitor_id == visitor_id,
+                Conversation.prechat_submission_id.is_not(None),
+            )
+            .order_by(
+                (Conversation.state != "closed").desc(),
+                Conversation.last_message_at.desc(),
+                Conversation.id.desc(),
+            )
+            .limit(limit)
+        )
+        return [(conversation, agent) for conversation, agent in result.all()]
+
+    async def count_for_visitor_history(self, site_id: UUID, visitor_id: UUID) -> int:
+        result = await self._session.execute(
+            select(func.count())
+            .select_from(Conversation)
+            .where(
+                Conversation.site_id == site_id,
+                Conversation.visitor_id == visitor_id,
+                Conversation.prechat_submission_id.is_not(None),
+            )
+        )
+        return int(result.scalar_one())
 
     async def list_inbox(
         self,
