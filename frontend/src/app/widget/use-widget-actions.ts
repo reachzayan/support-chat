@@ -1,5 +1,7 @@
 "use client"
 
+/* oxlint-disable max-lines-per-function -- one hook owns the widget's outbound action contract */
+
 import { useCallback, type RefObject } from "react"
 
 import { guessParentOrigin, postToParent } from "./host-bridge"
@@ -16,14 +18,35 @@ export const useWidgetActions = (
   const handleClose = useCallback(() => {
     postToParent({ type: "widget.close" }, parentRef.current || guessParentOrigin())
   }, [parentRef])
-  const handleReset = useCallback(() => {
+  const handleResetCurrent = useCallback(() => {
     socketRef.current?.close()
     socketRef.current = null
-    postToParent({ type: "widget.reset" }, parentRef.current || guessParentOrigin())
+    postToParent({ type: "widget.reset_current" }, parentRef.current || guessParentOrigin())
   }, [parentRef, socketRef])
-  const handleRestart = useCallback(() => {
-    postToParent({ type: "widget.rebootstrap" }, parentRef.current)
+  const handleDeleteAll = useCallback(() => {
+    socketRef.current?.close()
+    socketRef.current = null
+    postToParent({ type: "widget.delete_all" }, parentRef.current || guessParentOrigin())
+  }, [parentRef, socketRef])
+  const handleRestart = handleResetCurrent
+  const handleShowHistory = useCallback(() => {
+    postToParent({ type: "widget.show_history" }, parentRef.current || guessParentOrigin())
   }, [parentRef])
+  const handleOpenConversation = useCallback(
+    (conversationId: string, replaceCurrent: boolean) => {
+      socketRef.current?.close()
+      socketRef.current = null
+      postToParent(
+        {
+          type: "widget.open_conversation",
+          conversation_id: conversationId,
+          replace_current: replaceCurrent,
+        },
+        parentRef.current || guessParentOrigin(),
+      )
+    },
+    [parentRef, socketRef],
+  )
   const handlePrechat = useCallback(
     (fields: PrechatFields) => {
       socketRef.current?.sendPrechat({
@@ -56,8 +79,11 @@ export const useWidgetActions = (
   )
   return {
     handleClose,
-    handleReset,
+    handleResetCurrent,
+    handleDeleteAll,
     handleRestart,
+    handleShowHistory,
+    handleOpenConversation,
     handlePrechat,
     handleSend,
     handleDismissPrivacy,

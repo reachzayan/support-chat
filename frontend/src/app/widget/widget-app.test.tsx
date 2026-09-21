@@ -33,6 +33,7 @@ class FakeSocket {
 }
 
 const dispatchBootstrap = (conversation?: {
+  id?: string
   state: string
   assigned_agent: { id: string; display_name: string } | null
   messages: unknown[]
@@ -53,6 +54,72 @@ const dispatchBootstrap = (conversation?: {
         page_title: "Testing LiveChat inhouse",
         referrer: "",
         ...(conversation === undefined ? {} : { conversation }),
+      },
+    }),
+  )
+}
+
+const dispatchIdentity = () => {
+  window.dispatchEvent(
+    new MessageEvent("message", {
+      origin: PARENT,
+      source: window.parent,
+      data: {
+        type: "host.identity",
+        widget: {
+          name: "SupportChat demo",
+          greeting: "Talk to a specialist about screening.",
+          privacy_url: "http://localhost:3000/privacy",
+        },
+        identity: {
+          display_name: "Ada L.",
+          email_hint: "a•••@example.com",
+          phone_hint: "••• ••• 0198",
+          chat_count: 2,
+        },
+      },
+    }),
+  )
+}
+
+const dispatchHistory = () => {
+  window.dispatchEvent(
+    new MessageEvent("message", {
+      origin: PARENT,
+      source: window.parent,
+      data: {
+        type: "host.history",
+        widget: {
+          name: "SupportChat demo",
+          greeting: "Talk to a specialist about screening.",
+          privacy_url: "http://localhost:3000/privacy",
+        },
+        identity: {
+          display_name: "Ada L.",
+          email_hint: "a•••@example.com",
+          phone_hint: null,
+          chat_count: 2,
+        },
+        conversations: [
+          {
+            id: "10000000-0000-4000-8000-000000000001",
+            state: "bot",
+            inquiry_type: "results",
+            created_at: "2026-09-20T12:00:00Z",
+            last_message_at: "2026-09-20T12:10:00Z",
+            assigned_agent: null,
+            is_current: true,
+          },
+          {
+            id: "10000000-0000-4000-8000-000000000002",
+            state: "closed",
+            inquiry_type: "compliance",
+            created_at: "2026-09-18T12:00:00Z",
+            last_message_at: "2026-09-18T12:10:00Z",
+            assigned_agent: { id: "agent-1", display_name: "Alex Morgan" },
+            is_current: false,
+          },
+        ],
       },
     }),
   )
@@ -106,6 +173,62 @@ describe("widget first paint", () => {
     renderWithProviders(<WidgetApp />)
     expect(document.documentElement.style.backgroundColor).toBe("transparent")
     expect(document.body.style.backgroundColor).toBe("transparent")
+  })
+})
+
+describe("returning visitor flow", () => {
+  beforeEach(() => {
+    FakeSocket.instances = []
+    vi.stubGlobal("WebSocket", FakeSocket)
+    vi.stubGlobal("fetch", vi.fn())
+  })
+
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  test("shows masked identity before requesting any conversation history", async () => {
+    const user = userEvent.setup()
+    const postMessage = vi.spyOn(window.parent, "postMessage")
+    renderWithProviders(<WidgetApp />)
+    dispatchIdentity()
+
+    await waitFor(() => expect(screen.getByRole("heading", { name: "Is this you?" })).toBeVisible())
+    expect(screen.getByText("Ada L.")).toBeVisible()
+    expect(screen.getByText("a•••@example.com")).toBeVisible()
+    expect(screen.getByText("••• ••• 0198")).toBeVisible()
+    expect(screen.queryByText(VISITOR_LINE)).not.toBeInTheDocument()
+    expect(FakeSocket.instances).toHaveLength(0)
+
+    await user.click(screen.getByRole("button", { name: "Yes, show my chats" }))
+    expect(postMessage).toHaveBeenCalledWith({ type: "widget.show_history" }, PARENT)
+  })
+
+  test("lists compact chat metadata and confirms replacing an active chat", async () => {
+    const user = userEvent.setup()
+    const postMessage = vi.spyOn(window.parent, "postMessage")
+    renderWithProviders(<WidgetApp />)
+    dispatchHistory()
+
+    await waitFor(() => expect(screen.getByRole("heading", { name: "Your chats" })).toBeVisible())
+    expect(screen.getByRole("button", { name: /Results question.*Current chat/i })).toBeVisible()
+    expect(screen.getByRole("button", { name: /Compliance question.*Past chat/i })).toBeVisible()
+    expect(screen.queryByText(VISITOR_LINE)).not.toBeInTheDocument()
+
+    await user.click(screen.getByRole("button", { name: /Compliance question.*Past chat/i }))
+    await user.click(screen.getByRole("button", { name: "Resume chat" }))
+    expect(
+      screen.getByRole("alertdialog", { name: "Resume this chat instead?" }),
+    ).toBeInTheDocument()
+    await user.click(screen.getByRole("button", { name: "Resume chat" }))
+    expect(postMessage).toHaveBeenCalledWith(
+      {
+        type: "widget.open_conversation",
+        conversation_id: "10000000-0000-4000-8000-000000000002",
+        replace_current: true,
+      },
+      PARENT,
+    )
   })
 })
 
@@ -308,6 +431,61 @@ describe("widget lifecycle", () => {
     await waitFor(() => expect(screen.getByText("This chat is closed")).toBeInTheDocument())
     expect(screen.getByText("This chat is closed").closest("p")).toHaveClass("mx-auto")
     expect(screen.getByRole("button", { name: "Start a new chat" })).toBeInTheDocument()
+  })
+
+  test("stale bootstrap does not replace a closed transcript", async () => {
+    renderWithProviders(<WidgetApp />)
+    dispatchBootstrap({
+      id: "10000000-0000-4000-8000-000000000011",
+      state: "bot",
+      assigned_agent: null,
+      messages: [{ type: "message", id: 11, role: "visitor", body: VISITOR_LINE }],
+    })
+    await waitFor(() => expect(FakeSocket.instances.length).toBe(1))
+    emit(FakeSocket.instances[0], {
+      v: 1,
+      type: "state",
+      state: "closed",
+      conversation_id: "10000000-0000-4000-8000-000000000011",
+      assigned_agent: null,
+    })
+    await waitFor(() => expect(screen.getByText("This chat is closed")).toBeInTheDocument())
+
+    dispatchBootstrap({
+      id: "10000000-0000-4000-8000-000000000011",
+      state: "bot",
+      assigned_agent: null,
+      messages: [{ type: "message", id: 11, role: "visitor", body: VISITOR_LINE }],
+    })
+
+    expect(screen.getByText("This chat is closed")).toBeInTheDocument()
+    expect(screen.getByText(VISITOR_LINE)).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Start a new chat" })).toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "Start the chat" })).not.toBeInTheDocument()
+  })
+
+  test("returning identity bootstrap does not replace a closed transcript", async () => {
+    renderWithProviders(<WidgetApp />)
+    dispatchBootstrap({
+      id: "10000000-0000-4000-8000-000000000011",
+      state: "bot",
+      assigned_agent: null,
+      messages: [{ type: "message", id: 11, role: "visitor", body: VISITOR_LINE }],
+    })
+    await waitFor(() => expect(FakeSocket.instances.length).toBe(1))
+    emit(FakeSocket.instances[0], {
+      v: 1,
+      type: "state",
+      state: "closed",
+      conversation_id: "10000000-0000-4000-8000-000000000011",
+      assigned_agent: null,
+    })
+    await waitFor(() => expect(screen.getByText("This chat is closed")).toBeInTheDocument())
+
+    dispatchIdentity()
+
+    expect(screen.getByText("This chat is closed")).toBeInTheDocument()
+    expect(screen.queryByText("Is this you?")).not.toBeInTheDocument()
   })
 })
 

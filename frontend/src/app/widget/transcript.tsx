@@ -54,7 +54,8 @@ export const isCenteredNotice = (line: TranscriptLine) => {
   return (
     isClosedNotice(line) ||
     /^(a human has joined)\.?$/i.test(line.body.trim()) ||
-    /^you(?:'|’)re now chatting with .+\.?$/i.test(line.body.trim())
+    /^you(?:'|’)re now chatting with .+\.?$/i.test(line.body.trim()) ||
+    /^(this chat was reset by the visitor|this chat has been resumed)\.?$/i.test(line.body.trim())
   )
 }
 
