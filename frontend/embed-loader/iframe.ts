@@ -92,10 +92,14 @@ export const pageContext = (win: Window, doc: Document) => {
 }
 
 export const sendBootstrap = (state: PanelState, win: Window, doc: Document) => {
-  if (state.bootstrap === null || state.bootstrap.type !== "host.bootstrap") {
+  if (state.bootstrap === null) {
     return
   }
-  postToWidget(state, { ...state.bootstrap, ...pageContext(win, doc) })
+  if (state.bootstrap.type === "host.bootstrap") {
+    postToWidget(state, { ...state.bootstrap, ...pageContext(win, doc) })
+    return
+  }
+  postToWidget(state, state.bootstrap)
 }
 
 export const sendContext = (state: PanelState, win: Window, doc: Document) => {
@@ -112,9 +116,12 @@ export const acceptWidgetFrame = (
     onReady: () => void
     onPainted: () => void
     onActivated: () => void
-    onRebootstrap: () => void
+    onRebootstrap: (conversationId?: string) => void
     onClose: () => void
-    onReset: () => void
+    onShowHistory: () => void
+    onOpenConversation: (conversationId: string, replaceCurrent: boolean) => void
+    onResetCurrent: () => void
+    onDeleteAll: () => void
     onOpenUrl: (url: string) => void
   },
 ) => {
@@ -131,6 +138,8 @@ export const acceptWidgetFrame = (
   dispatchWidgetFrame(state, frame, handlers)
 }
 
+// The closed protocol switch is intentionally exhaustive and easier to audit than an action map.
+// oxlint-disable-next-line complexity
 const dispatchWidgetFrame = (
   state: PanelState,
   frame: NonNullable<ReturnType<typeof parseWidgetToHost>>,
@@ -138,9 +147,12 @@ const dispatchWidgetFrame = (
     onReady: () => void
     onPainted: () => void
     onActivated: () => void
-    onRebootstrap: () => void
+    onRebootstrap: (conversationId?: string) => void
     onClose: () => void
-    onReset: () => void
+    onShowHistory: () => void
+    onOpenConversation: (conversationId: string, replaceCurrent: boolean) => void
+    onResetCurrent: () => void
+    onDeleteAll: () => void
     onOpenUrl: (url: string) => void
   },
 ) => {
@@ -155,13 +167,22 @@ const dispatchWidgetFrame = (
       handlers.onActivated()
       return
     case "widget.rebootstrap":
-      handlers.onRebootstrap()
+      handlers.onRebootstrap(frame.conversation_id)
       return
     case "widget.close":
       handlers.onClose()
       return
-    case "widget.reset":
-      handlers.onReset()
+    case "widget.show_history":
+      handlers.onShowHistory()
+      return
+    case "widget.open_conversation":
+      handlers.onOpenConversation(frame.conversation_id, frame.replace_current)
+      return
+    case "widget.reset_current":
+      handlers.onResetCurrent()
+      return
+    case "widget.delete_all":
+      handlers.onDeleteAll()
       return
     case "widget.open_url":
       handlers.onOpenUrl(frame.url)

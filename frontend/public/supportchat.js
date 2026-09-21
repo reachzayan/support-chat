@@ -8,13 +8,27 @@
   var isRecord = (value) => {
     return typeof value === "object" && value !== null;
   };
-  var SNAPSHOT_STATES = /* @__PURE__ */ new Set([
-    "prechat",
-    "bot",
-    "queued",
-    "human",
-    "closed"
-  ]);
+  var parseWidgetConfig = (value) => {
+    if (!isRecord(value)) {
+      return null;
+    }
+    if (typeof value.name !== "string" || typeof value.greeting !== "string" || typeof value.privacy_url !== "string") {
+      return null;
+    }
+    const contactInfo = Array.isArray(value.contact_info) ? value.contact_info.filter(
+      (item) => typeof item === "string" && item.trim() !== ""
+    ) : [];
+    return {
+      name: value.name,
+      greeting: value.greeting,
+      privacy_url: value.privacy_url,
+      contact_info: contactInfo,
+      bot_enabled: value.bot_enabled !== false,
+      human_enabled: value.human_enabled !== false
+    };
+  };
+  var SNAPSHOT_STATES = /* @__PURE__ */ new Set(["prechat", "bot", "queued", "human", "closed"]);
+  var UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
   var parseAssignedAgent = (value) => {
     if (value === null) {
       return null;
@@ -36,10 +50,108 @@
       return void 0;
     }
     return {
+      ...typeof value.id === "string" && UUID_PATTERN.test(value.id) ? { id: value.id } : {},
       state: value.state,
       assigned_agent: assigned,
       messages: value.messages.filter(isRecord)
     };
+  };
+  var parseIdentity = (value) => {
+    if (!isRecord(value) || typeof value.display_name !== "string" || typeof value.email_hint !== "string" || value.phone_hint !== null && typeof value.phone_hint !== "string" || typeof value.chat_count !== "number" || !Number.isInteger(value.chat_count) || value.chat_count < 0) {
+      return null;
+    }
+    return {
+      display_name: value.display_name,
+      email_hint: value.email_hint,
+      phone_hint: value.phone_hint,
+      chat_count: value.chat_count
+    };
+  };
+  var parseHistoryItem = (value) => {
+    if (!isRecord(value) || typeof value.id !== "string" || !UUID_PATTERN.test(value.id) || typeof value.state !== "string" || !SNAPSHOT_STATES.has(value.state) || value.inquiry_type !== null && typeof value.inquiry_type !== "string" || typeof value.created_at !== "string" || !Number.isFinite(Date.parse(value.created_at)) || typeof value.last_message_at !== "string" || !Number.isFinite(Date.parse(value.last_message_at)) || typeof value.is_current !== "boolean") {
+      return null;
+    }
+    const assigned = parseAssignedAgent(value.assigned_agent);
+    if (assigned === void 0) {
+      return null;
+    }
+    return {
+      id: value.id,
+      state: value.state,
+      inquiry_type: value.inquiry_type,
+      created_at: value.created_at,
+      last_message_at: value.last_message_at,
+      assigned_agent: assigned,
+      is_current: value.is_current
+    };
+  };
+  var parseReturningFrame = (value) => {
+    const widget = parseWidgetConfig(value.widget);
+    const identity = parseIdentity(value.identity);
+    if (widget === null || identity === null) {
+      return null;
+    }
+    if (value.type === "host.identity") {
+      return { type: "host.identity", widget, identity };
+    }
+    if (value.type !== "host.history" || !Array.isArray(value.conversations)) {
+      return null;
+    }
+    const conversations = value.conversations.map(parseHistoryItem);
+    if (conversations.some((item) => item === null)) {
+      return null;
+    }
+    return {
+      type: "host.history",
+      widget,
+      identity,
+      conversations
+    };
+  };
+  var parseBootstrap = (value) => {
+    const widget = parseWidgetConfig(value.widget);
+    if (typeof value.bootstrap_token !== "string" || widget === null) {
+      return null;
+    }
+    if (typeof value.page_url !== "string" || typeof value.page_title !== "string" || typeof value.referrer !== "string") {
+      return null;
+    }
+    const conversation = parseConversationSnapshot(value.conversation);
+    return {
+      type: "host.bootstrap",
+      bootstrap_token: value.bootstrap_token,
+      widget,
+      page_url: value.page_url,
+      page_title: value.page_title,
+      referrer: value.referrer,
+      ...conversation === void 0 ? {} : { conversation }
+    };
+  };
+  var parseContext = (value) => {
+    if (typeof value.page_url !== "string" || typeof value.page_title !== "string" || typeof value.referrer !== "string") {
+      return null;
+    }
+    return {
+      type: "host.context",
+      page_url: value.page_url,
+      page_title: value.page_title,
+      referrer: value.referrer
+    };
+  };
+  var parseHostToWidget = (value) => {
+    if (!isRecord(value) || typeof value.type !== "string") {
+      return null;
+    }
+    if (value.type === "host.bootstrap") {
+      return parseBootstrap(value);
+    }
+    if (value.type === "host.identity" || value.type === "host.history") {
+      return parseReturningFrame(value);
+    }
+    if (value.type === "host.context") {
+      return parseContext(value);
+    }
+    return null;
   };
   var parseResize = (value) => {
     if (typeof value.height !== "number" || !Number.isInteger(value.height)) {
@@ -62,10 +174,11 @@
   var SIMPLE_WIDGET_TYPES = /* @__PURE__ */ new Set([
     "widget.ready",
     "widget.painted",
-    "widget.rebootstrap",
     "widget.activated",
     "widget.close",
-    "widget.reset"
+    "widget.show_history",
+    "widget.reset_current",
+    "widget.delete_all"
   ]);
   var parseSimpleWidget = (type) => {
     if (!SIMPLE_WIDGET_TYPES.has(type)) {
@@ -98,6 +211,25 @@
     if (value.type === "widget.resize") {
       return parseResize(value);
     }
+    if (value.type === "widget.rebootstrap") {
+      if (value.conversation_id === void 0) {
+        return { type: "widget.rebootstrap" };
+      }
+      if (typeof value.conversation_id !== "string" || !UUID_PATTERN.test(value.conversation_id)) {
+        return null;
+      }
+      return { type: "widget.rebootstrap", conversation_id: value.conversation_id };
+    }
+    if (value.type === "widget.open_conversation") {
+      if (typeof value.conversation_id !== "string" || !UUID_PATTERN.test(value.conversation_id) || typeof value.replace_current !== "boolean") {
+        return null;
+      }
+      return {
+        type: "widget.open_conversation",
+        conversation_id: value.conversation_id,
+        replace_current: value.replace_current
+      };
+    }
     if (value.type === "widget.open_url") {
       return parseOpenUrl(value);
     }
@@ -128,28 +260,63 @@
     };
   };
   var parseBootstrapResult = (value) => {
-    if (!isRecord2(value) || typeof value.bootstrap_token !== "string") {
+    if (!isRecord2(value)) {
       return null;
     }
     const widget = parseWidget(value.widget);
     if (widget === null) {
       return null;
     }
+    if (value.mode === "identity" || value.mode === "history") {
+      const frame = parseHostToWidget({
+        type: value.mode === "identity" ? "host.identity" : "host.history",
+        widget: value.widget,
+        identity: value.identity,
+        ...value.mode === "history" ? { conversations: value.conversations } : {}
+      });
+      if ((frame == null ? void 0 : frame.type) === "host.identity") {
+        return { mode: "identity", widget, identity: frame.identity };
+      }
+      if ((frame == null ? void 0 : frame.type) === "host.history") {
+        return {
+          mode: "history",
+          widget,
+          identity: frame.identity,
+          conversations: frame.conversations
+        };
+      }
+      return null;
+    }
+    if (value.mode === "forgotten") {
+      return { mode: "forgotten", widget };
+    }
+    if (typeof value.bootstrap_token !== "string") {
+      return null;
+    }
     const resume = typeof value.resume_token === "string" ? { resume_token: value.resume_token } : {};
     const conversation = parseConversationSnapshot(value.conversation);
     return {
+      mode: "conversation",
       widget,
       bootstrap_token: value.bootstrap_token,
       ...resume,
       ...conversation === void 0 ? {} : { conversation }
     };
   };
-  var requestBootstrap = async (widgetOrigin, siteKey, publicKey, resumeToken) => {
+  var requestBootstrap = async (widgetOrigin, siteKey, publicKey, resumeToken, options = {}) => {
+    var _a;
     const body = {
       site_key: siteKey,
       public_key: publicKey,
-      resume_token: resumeToken
+      resume_token: resumeToken,
+      action: (_a = options.action) != null ? _a : "identify"
     };
+    if (options.conversationId !== void 0) {
+      body.conversation_id = options.conversationId;
+    }
+    if (options.replaceCurrent !== void 0) {
+      body.replace_current = options.replaceCurrent;
+    }
     try {
       const response = await fetch(`${widgetOrigin}/api/public/widget-bootstrap`, {
         method: "POST",
@@ -271,10 +438,14 @@
     }
   };
   var sendBootstrap = (state, win, doc) => {
-    if (state.bootstrap === null || state.bootstrap.type !== "host.bootstrap") {
+    if (state.bootstrap === null) {
       return;
     }
-    postToWidget(state, { ...state.bootstrap, ...pageContext(win, doc) });
+    if (state.bootstrap.type === "host.bootstrap") {
+      postToWidget(state, { ...state.bootstrap, ...pageContext(win, doc) });
+      return;
+    }
+    postToWidget(state, state.bootstrap);
   };
   var sendContext = (state, win, doc) => {
     if (state.bootstrap === null) {
@@ -307,13 +478,22 @@
         handlers.onActivated();
         return;
       case "widget.rebootstrap":
-        handlers.onRebootstrap();
+        handlers.onRebootstrap(frame.conversation_id);
         return;
       case "widget.close":
         handlers.onClose();
         return;
-      case "widget.reset":
-        handlers.onReset();
+      case "widget.show_history":
+        handlers.onShowHistory();
+        return;
+      case "widget.open_conversation":
+        handlers.onOpenConversation(frame.conversation_id, frame.replace_current);
+        return;
+      case "widget.reset_current":
+        handlers.onResetCurrent();
+        return;
+      case "widget.delete_all":
+        handlers.onDeleteAll();
         return;
       case "widget.open_url":
         handlers.onOpenUrl(frame.url);
@@ -520,7 +700,7 @@
   };
   var resumeFor = (runtime) => {
     var _a;
-    return (_a = readResumeToken(runtime.config.siteKey)) != null ? _a : runtime.pendingResume;
+    return (_a = runtime.pendingResume) != null ? _a : readResumeToken(runtime.config.siteKey);
   };
   var clearRetryTimer = (runtime) => {
     if (runtime.retryTimer !== null) {
@@ -538,18 +718,7 @@
     runtime.launcher.setAttribute("aria-busy", busy ? "true" : "false");
   };
   var bootstrapFrame = (runtime) => {
-    if (runtime.bootstrapToken === null || runtime.widget === null) {
-      return null;
-    }
-    return {
-      type: "host.bootstrap",
-      bootstrap_token: runtime.bootstrapToken,
-      widget: runtime.widget,
-      page_url: "",
-      page_title: "",
-      referrer: "",
-      ...runtime.conversation === void 0 ? {} : { conversation: runtime.conversation }
-    };
+    return runtime.bootstrap;
   };
   var panelState = (runtime) => {
     return {
@@ -571,7 +740,7 @@
     let attempt = 0;
     const tick = () => {
       runtime.retryTimer = null;
-      if (runtime.bootstrapAcked || runtime.bootstrapToken === null || runtime.widget === null || runtime.iframe === null || !runtime.iframe.isConnected) {
+      if (runtime.bootstrapAcked || runtime.bootstrap === null || runtime.iframe === null || !runtime.iframe.isConnected) {
         return;
       }
       sendCurrentBootstrap(runtime);
@@ -616,25 +785,6 @@
     }
     runtime.launcher.hidden = true;
   };
-  var resetPanel = (runtime) => {
-    clearRetryTimer(runtime);
-    clearHideTimer(runtime);
-    clearResumeToken(runtime.config.siteKey);
-    runtime.pendingResume = null;
-    runtime.bootstrapToken = null;
-    runtime.widget = null;
-    runtime.conversation = void 0;
-    runtime.bootstrapAcked = false;
-    runtime.panelPainted = false;
-    runtime.visitorActivated = false;
-    setLauncherBusy(runtime, false);
-    if (runtime.iframe !== null) {
-      runtime.iframe.remove();
-      runtime.iframe = null;
-    }
-    runtime.launcher.hidden = false;
-    runtime.launcher.focus();
-  };
   var persistResumeIfReady = (runtime) => {
     if (!runtime.visitorActivated || runtime.pendingResume === null) {
       return;
@@ -659,13 +809,30 @@
       originFromHref(runtime.win.location.href)
     );
   };
-  var applyBootstrap = (runtime, token, widget, resume, conversation) => {
-    runtime.bootstrapToken = token;
-    runtime.widget = widget;
-    runtime.conversation = conversation;
+  var applyBootstrap = (runtime, result) => {
+    if (result.mode === "conversation") {
+      runtime.bootstrap = {
+        type: "host.bootstrap",
+        bootstrap_token: result.bootstrap_token,
+        widget: result.widget,
+        page_url: "",
+        page_title: "",
+        referrer: "",
+        ...result.conversation === void 0 ? {} : { conversation: result.conversation }
+      };
+    } else if (result.mode === "identity") {
+      runtime.bootstrap = { type: "host.identity", widget: result.widget, identity: result.identity };
+    } else {
+      runtime.bootstrap = {
+        type: "host.history",
+        widget: result.widget,
+        identity: result.identity,
+        conversations: result.conversations
+      };
+    }
     runtime.bootstrapAcked = false;
-    if (resume !== void 0) {
-      runtime.pendingResume = resume;
+    if (result.mode === "conversation" && result.resume_token !== void 0) {
+      runtime.pendingResume = result.resume_token;
     }
     warmPanel(runtime);
     hideHostError(runtime.doc);
@@ -679,17 +846,27 @@
         showPanel(runtime);
       },
       onActivated: () => persistActivated(runtime),
-      onRebootstrap: () => {
-        void runBootstrap(runtime);
+      onRebootstrap: (conversationId) => {
+        void runBootstrap(runtime, {
+          action: conversationId ? "refresh" : "identify",
+          conversationId
+        });
       },
       onClose: () => hidePanel(runtime),
-      onReset: () => resetPanel(runtime),
+      onShowHistory: () => void runBootstrap(runtime, { action: "history" }),
+      onOpenConversation: (conversationId, replaceCurrent) => void runBootstrap(runtime, {
+        action: "open",
+        conversationId,
+        replaceCurrent
+      }),
+      onResetCurrent: () => void runBootstrap(runtime, { action: "reset" }),
+      onDeleteAll: () => void runBootstrap(runtime, { action: "forget" }),
       onOpenUrl: (url) => {
         runtime.win.open(url, "_blank", "noopener,noreferrer");
       }
     });
   };
-  var runBootstrap = async (runtime) => {
+  var runBootstrap = async (runtime, options = {}) => {
     if (runtime.opening) {
       return;
     }
@@ -698,7 +875,8 @@
       runtime.widgetOrigin,
       runtime.config.siteKey,
       runtime.config.publicKey,
-      resumeFor(runtime)
+      resumeFor(runtime),
+      options
     );
     runtime.opening = false;
     if (result === null) {
@@ -708,13 +886,15 @@
       });
       return;
     }
-    applyBootstrap(
-      runtime,
-      result.bootstrap_token,
-      result.widget,
-      result.resume_token,
-      result.conversation
-    );
+    if (result.mode === "forgotten") {
+      clearResumeToken(runtime.config.siteKey);
+      runtime.pendingResume = null;
+      runtime.bootstrap = null;
+      runtime.visitorActivated = false;
+      void runBootstrap(runtime);
+      return;
+    }
+    applyBootstrap(runtime, result);
     sendBootstrapWithRetry(runtime);
   };
   var handleOpen = (runtime) => {
@@ -756,9 +936,7 @@
       launcher: doc.createElement("button"),
       iframe: null,
       pendingResume: null,
-      bootstrapToken: null,
-      widget: null,
-      conversation: void 0,
+      bootstrap: null,
       opening: false,
       panelPainted: false,
       visitorActivated: false,

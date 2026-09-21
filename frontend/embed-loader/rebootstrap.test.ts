@@ -46,6 +46,35 @@ describe("bootstrap expiry", () => {
     window.__supportchatInstalled = false
   })
 
+  test("4401 rebootstrap posts the same-site resume token with refresh", async () => {
+    const { fetchMock, iframe } = await openActivated()
+    expect(window.localStorage.getItem(`supportchat.visitor.${DEMO_KEY}`)).toBe(RESUME)
+
+    window.dispatchEvent(
+      new MessageEvent("message", {
+        origin: WIDGET_ORIGIN,
+        source: iframe.contentWindow,
+        data: {
+          type: "widget.rebootstrap",
+          conversation_id: "10000000-0000-4000-8000-000000000011",
+        },
+      }),
+    )
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2))
+
+    const body = JSON.parse(String((fetchMock.mock.calls[1] as [string, RequestInit])[1].body)) as {
+      resume_token: string
+      site_key: string
+      action: string
+      conversation_id: string
+    }
+    expect(body.site_key).toBe(DEMO_KEY)
+    expect(body.resume_token).toBe(RESUME)
+    expect(body.action).toBe("refresh")
+    expect(body.conversation_id).toBe("10000000-0000-4000-8000-000000000011")
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+  })
+
   test("4401 rebootstrap posts the same-site resume token once", async () => {
     const { fetchMock, iframe } = await openActivated()
     expect(window.localStorage.getItem(`supportchat.visitor.${DEMO_KEY}`)).toBe(RESUME)

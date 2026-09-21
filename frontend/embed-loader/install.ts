@@ -1,5 +1,5 @@
-import type { ConversationSnapshot } from "../src/lib/postmessage"
-import { requestBootstrap, type PublicWidgetConfig } from "./bootstrap"
+import type { HostToWidget } from "../src/lib/postmessage"
+import { requestBootstrap, type BootstrapAction, type BootstrapResult } from "./bootstrap"
 import { acceptWidgetFrame, createPanel, sendBootstrap, sendContext } from "./iframe"
 import { hideHostError, mountLauncher, showHostError } from "./launcher"
 import { watchNavigation } from "./navigation"
@@ -16,9 +16,7 @@ type Runtime = {
   launcher: HTMLButtonElement
   iframe: HTMLIFrameElement | null
   pendingResume: string | null
-  bootstrapToken: string | null
-  widget: PublicWidgetConfig | null
-  conversation: ConversationSnapshot | undefined
+  bootstrap: HostToWidget | null
   opening: boolean
   panelPainted: boolean
   visitorActivated: boolean
@@ -40,7 +38,7 @@ const reducedMotionDelay = (win: Window) => {
 }
 
 const resumeFor = (runtime: Runtime) => {
-  return readResumeToken(runtime.config.siteKey) ?? runtime.pendingResume
+  return runtime.pendingResume ?? readResumeToken(runtime.config.siteKey)
 }
 
 const clearRetryTimer = (runtime: Runtime) => {
@@ -62,18 +60,7 @@ const setLauncherBusy = (runtime: Runtime, busy: boolean) => {
 }
 
 const bootstrapFrame = (runtime: Runtime) => {
-  if (runtime.bootstrapToken === null || runtime.widget === null) {
-    return null
-  }
-  return {
-    type: "host.bootstrap" as const,
-    bootstrap_token: runtime.bootstrapToken,
-    widget: runtime.widget,
-    page_url: "",
-    page_title: "",
-    referrer: "",
-    ...(runtime.conversation === undefined ? {} : { conversation: runtime.conversation }),
-  }
+  return runtime.bootstrap
 }
 
 const panelState = (runtime: Runtime) => {
@@ -100,8 +87,7 @@ const sendBootstrapWithRetry = (runtime: Runtime) => {
     runtime.retryTimer = null
     if (
       runtime.bootstrapAcked ||
-      runtime.bootstrapToken === null ||
-      runtime.widget === null ||
+      runtime.bootstrap === null ||
       runtime.iframe === null ||
       !runtime.iframe.isConnected
     ) {
@@ -152,26 +138,6 @@ const showPanel = (runtime: Runtime) => {
   runtime.launcher.hidden = true
 }
 
-const resetPanel = (runtime: Runtime) => {
-  clearRetryTimer(runtime)
-  clearHideTimer(runtime)
-  clearResumeToken(runtime.config.siteKey)
-  runtime.pendingResume = null
-  runtime.bootstrapToken = null
-  runtime.widget = null
-  runtime.conversation = undefined
-  runtime.bootstrapAcked = false
-  runtime.panelPainted = false
-  runtime.visitorActivated = false
-  setLauncherBusy(runtime, false)
-  if (runtime.iframe !== null) {
-    runtime.iframe.remove()
-    runtime.iframe = null
-  }
-  runtime.launcher.hidden = false
-  runtime.launcher.focus()
-}
-
 const persistResumeIfReady = (runtime: Runtime) => {
   if (!runtime.visitorActivated || runtime.pendingResume === null) {
     return
@@ -201,17 +167,31 @@ const warmPanel = (runtime: Runtime) => {
 
 const applyBootstrap = (
   runtime: Runtime,
-  token: string,
-  widget: PublicWidgetConfig,
-  resume: string | undefined,
-  conversation: ConversationSnapshot | undefined,
+  result: Exclude<BootstrapResult, { mode: "forgotten" }>,
 ) => {
-  runtime.bootstrapToken = token
-  runtime.widget = widget
-  runtime.conversation = conversation
+  if (result.mode === "conversation") {
+    runtime.bootstrap = {
+      type: "host.bootstrap",
+      bootstrap_token: result.bootstrap_token,
+      widget: result.widget,
+      page_url: "",
+      page_title: "",
+      referrer: "",
+      ...(result.conversation === undefined ? {} : { conversation: result.conversation }),
+    }
+  } else if (result.mode === "identity") {
+    runtime.bootstrap = { type: "host.identity", widget: result.widget, identity: result.identity }
+  } else {
+    runtime.bootstrap = {
+      type: "host.history",
+      widget: result.widget,
+      identity: result.identity,
+      conversations: result.conversations,
+    }
+  }
   runtime.bootstrapAcked = false
-  if (resume !== undefined) {
-    runtime.pendingResume = resume
+  if (result.mode === "conversation" && result.resume_token !== undefined) {
+    runtime.pendingResume = result.resume_token
   }
   warmPanel(runtime)
   hideHostError(runtime.doc)
@@ -226,18 +206,29 @@ const handleHostMessage = (runtime: Runtime, event: MessageEvent) => {
       showPanel(runtime)
     },
     onActivated: () => persistActivated(runtime),
-    onRebootstrap: () => {
-      void runBootstrap(runtime)
+    onRebootstrap: (conversationId) => {
+      void runBootstrap(runtime, {
+        action: conversationId ? "refresh" : "identify",
+        conversationId,
+      })
     },
     onClose: () => hidePanel(runtime),
-    onReset: () => resetPanel(runtime),
+    onShowHistory: () => void runBootstrap(runtime, { action: "history" }),
+    onOpenConversation: (conversationId, replaceCurrent) =>
+      void runBootstrap(runtime, {
+        action: "open",
+        conversationId,
+        replaceCurrent,
+      }),
+    onResetCurrent: () => void runBootstrap(runtime, { action: "reset" }),
+    onDeleteAll: () => void runBootstrap(runtime, { action: "forget" }),
     onOpenUrl: (url) => {
       runtime.win.open(url, "_blank", "noopener,noreferrer")
     },
   })
 }
 
-const runBootstrap = async (runtime: Runtime) => {
+const runBootstrap = async (runtime: Runtime, options: BootstrapAction = {}) => {
   if (runtime.opening) {
     return
   }
@@ -247,6 +238,7 @@ const runBootstrap = async (runtime: Runtime) => {
     runtime.config.siteKey,
     runtime.config.publicKey,
     resumeFor(runtime),
+    options,
   )
   runtime.opening = false
   if (result === null) {
@@ -256,13 +248,15 @@ const runBootstrap = async (runtime: Runtime) => {
     })
     return
   }
-  applyBootstrap(
-    runtime,
-    result.bootstrap_token,
-    result.widget,
-    result.resume_token,
-    result.conversation,
-  )
+  if (result.mode === "forgotten") {
+    clearResumeToken(runtime.config.siteKey)
+    runtime.pendingResume = null
+    runtime.bootstrap = null
+    runtime.visitorActivated = false
+    void runBootstrap(runtime)
+    return
+  }
+  applyBootstrap(runtime, result)
   sendBootstrapWithRetry(runtime)
 }
 
@@ -312,9 +306,7 @@ export const installSupportChat = (win: Window, doc: Document, script: HTMLScrip
     launcher: doc.createElement("button"),
     iframe: null,
     pendingResume: null,
-    bootstrapToken: null,
-    widget: null,
-    conversation: undefined,
+    bootstrap: null,
     opening: false,
     panelPainted: false,
     visitorActivated: false,
