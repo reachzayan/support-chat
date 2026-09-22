@@ -12,6 +12,7 @@ from app.chat.state_machine import IllegalTransition
 from app.db import session_maker
 from app.repositories.user_repo import UserRepository
 from app.security.jwt import decode_access_token
+from app.security.surfaces import websocket_surface_allowed
 from app.services.conversation_service import CommandError, ConversationService
 from app.settings import get_settings
 
@@ -36,7 +37,9 @@ async def _idle_watch(websocket: WebSocket, last_seen: dict[str, float]) -> None
 async def agent_socket(websocket: WebSocket) -> None:
     settings = get_settings()
     origin = websocket.headers.get("origin")
-    if origin != settings.staff_app_origin:
+    if origin != settings.staff_app_origin or not websocket_surface_allowed(
+        websocket.headers.get("host"), settings.staff_app_origin, settings
+    ):
         await websocket.close(code=4403)
         return
     await websocket.accept()

@@ -1,4 +1,6 @@
+from enum import StrEnum
 from ipaddress import ip_network
+from urllib.parse import urlsplit
 
 from pydantic import field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -12,13 +14,35 @@ def _reject_weak_production_secret(name: str, value: str) -> None:
         raise ValueError(f"{name} must not use a documented placeholder in production")
 
 
+def _validate_provider_key(name: str, value: str | None) -> None:
+    key = value.strip() if value else ""
+    if len(key) < 20 or "replace" in key.casefold():
+        raise ValueError(f"{name} must be a real provider credential in production")
+
+
 def _validate_production_origins(origins: tuple[tuple[str, str], ...]) -> None:
     for name, origin in origins:
-        if not origin.startswith("https://"):
+        parsed = urlsplit(origin)
+        if parsed.scheme != "https" or not parsed.hostname:
             raise ValueError(f"{name} must be an https origin in production")
-        host = origin.split("://", 1)[1].split("/", 1)[0].split(":")[0]
+        if parsed.username or parsed.password or parsed.path or parsed.query or parsed.fragment:
+            raise ValueError(f"{name} must be a canonical origin in production")
+        host = parsed.hostname.casefold()
         if host in {"localhost", "127.0.0.1"} or host.endswith(".localhost"):
             raise ValueError(f"{name} must not use localhost in production")
+
+
+def _origin_key(origin: str) -> tuple[str, int]:
+    parsed = urlsplit(origin)
+    host = parsed.hostname
+    assert host is not None
+    return host.casefold(), parsed.port or 443
+
+
+class AppEnvironment(StrEnum):
+    LOCAL = "local"
+    TEST = "test"
+    PRODUCTION = "production"
 
 
 class Settings(BaseSettings):
@@ -35,7 +59,7 @@ class Settings(BaseSettings):
     marketing_host_origin: str = "http://host.localhost:3000"
     widget_csp_service_secret: str = ""
     trusted_proxy_cidrs: str = ""
-    app_env: str = "local"
+    app_env: AppEnvironment = AppEnvironment.LOCAL
     chat_retention_days: int = 30
     rate_bootstrap: int = 60
     rate_bootstrap_window: int = 600
@@ -151,7 +175,7 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def production_must_fail_closed(self) -> "Settings":
-        if self.app_env != "production":
+        if self.app_env is not AppEnvironment.PRODUCTION:
             return self
         if self.chat_retention_days < 1:
             raise ValueError("CHAT_RETENTION_DAYS must be a positive integer in production")
@@ -164,6 +188,15 @@ class Settings(BaseSettings):
                 ("MARKETING_HOST_ORIGIN", self.marketing_host_origin),
             )
         )
+        origins = {
+            _origin_key(self.staff_app_origin),
+            _origin_key(self.widget_origin),
+            _origin_key(self.marketing_host_origin),
+        }
+        if len(origins) != 3:
+            raise ValueError(
+                "STAFF_APP_ORIGIN, WIDGET_ORIGIN, and MARKETING_HOST_ORIGIN must be distinct"
+            )
         if not self.redis_url.startswith("rediss://"):
             raise ValueError("REDIS_URL must use rediss:// in production")
         if "local-dev-redis" in self.redis_url:
@@ -176,8 +209,8 @@ class Settings(BaseSettings):
         _reject_weak_production_secret("WIDGET_CSP_SERVICE_SECRET", self.widget_csp_service_secret)
         if self.openai_embed_dim != 1536:
             raise ValueError("OPENAI_EMBED_DIM must be 1536 in production")
-        if not self.openai_api_key or not self.openai_api_key.strip():
-            raise ValueError("OPENAI_API_KEY is required in production")
+        _validate_provider_key("OPENAI_API_KEY", self.openai_api_key)
+        _validate_provider_key("ANTHROPIC_API_KEY", self.anthropic_api_key)
         return self
 
     @property

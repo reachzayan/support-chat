@@ -44,6 +44,7 @@
 **/.turbo/
 **/.deepeval/
 **/*.log
+deploy/redis-tls/
 **/*.tsbuildinfo
 **/.DS_Store
 **/Thumbs.db

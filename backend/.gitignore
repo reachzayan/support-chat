@@ -10,4 +10,5 @@ htmlcov/
 .env
 .env.*
 !.env.example
+!.env.prod.example
 eval_artifacts/

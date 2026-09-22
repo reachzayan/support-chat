@@ -6,7 +6,7 @@
 #   - backend/.env.prod         → all app settings (see backend/.env.prod.example)
 #
 # Host nginx (+ sslip.io / certbot) terminates TLS and proxies to loopback.
-# Use APP_ENV=dev unless Redis TLS (rediss://) is configured.
+# The overlay forces APP_ENV=production. Redis is TLS-only on the private network.
 
 services:
   postgres:
@@ -25,6 +25,18 @@ services:
     command:
       [
         "redis-server",
+        "--port",
+        "0",
+        "--tls-port",
+        "6379",
+        "--tls-cert-file",
+        "/run/tls/redis.crt",
+        "--tls-key-file",
+        "/run/tls/redis.key",
+        "--tls-ca-cert-file",
+        "/run/tls/ca.crt",
+        "--tls-auth-clients",
+        "no",
         "--requirepass",
         "${REDIS_PASSWORD}",
         "--appendonly",
@@ -41,15 +53,30 @@ services:
         "--rename-command",
         "KEYS",
         "",
+        "--rename-command",
+        "CONFIG",
+        "",
       ]
+    volumes: !override
+      - redis_data:/data
+      - ${REDIS_TLS_DIR:-./deploy/redis-tls}/redis.crt:/run/tls/redis.crt:ro
+      - ${REDIS_TLS_DIR:-./deploy/redis-tls}/redis.key:/run/tls/redis.key:ro
+      - ${REDIS_TLS_DIR:-./deploy/redis-tls}/ca.crt:/run/tls/ca.crt:ro
     healthcheck:
-      test: ["CMD-SHELL", 'redis-cli -a "$$REDIS_PASSWORD" --no-auth-warning ping | grep PONG']
+      test:
+        [
+          "CMD-SHELL",
+          'redis-cli --tls --cacert /run/tls/ca.crt -h redis -a "$$REDIS_PASSWORD" --no-auth-warning ping | grep PONG',
+        ]
 
   backend:
     restart: unless-stopped
     env_file: !override
       - ./backend/.env.prod
-    environment: !reset {}
+    environment: !override
+      APP_ENV: production
+    volumes:
+      - ${REDIS_TLS_DIR:-./deploy/redis-tls}/ca.crt:/run/secrets/redis-ca.crt:ro
     ports: !override
       - "127.0.0.1:${BACKEND_PORT:-8000}:8000"
 

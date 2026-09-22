@@ -1,67 +1,133 @@
-# Host nginx for ai-webchat on a single EC2 (inbox-triage pattern).
-# Replace __PUBLIC_HOST__ with your sslip.io hostname (e.g. deployment.example.com),
-# install as /etc/nginx/conf.d/ai-webchat.conf, then:
-#   sudo nginx -t && sudo systemctl reload nginx
-#   sudo certbot --nginx -d __PUBLIC_HOST__
-#
-# Backend/frontend must listen on 127.0.0.1 only (docker-compose.prod.yml).
+# Three-origin edge for SupportChat on one EC2 instance. Certbot adds the
+# corresponding TLS listeners and redirects HTTP to HTTPS.
 
+map $http_upgrade $connection_upgrade {
+    default upgrade;
+    '' close;
+}
+
+proxy_set_header Host $host;
+proxy_set_header X-Real-IP $remote_addr;
+proxy_set_header X-Forwarded-For $remote_addr;
+proxy_set_header X-Forwarded-Proto $scheme;
+
+# Marketing/demo surface: no backend, auth, staff API, or WebSocket access.
 server {
     listen 80;
-    server_name __PUBLIC_HOST__ staff.__PUBLIC_HOST__ widget.__PUBLIC_HOST__;
+    server_name __MARKETING_HOST__;
+
+    location = / {
+        proxy_pass http://127.0.0.1:3000;
+    }
+
+    location = /demo {
+        proxy_pass http://127.0.0.1:3000;
+    }
+
+    location ^~ /_next/ {
+        proxy_pass http://127.0.0.1:3000;
+    }
+
+    location / {
+        return 404;
+    }
+}
+
+# Staff surface: staff HTML, authentication, administrative APIs, and agent socket only.
+server {
+    listen 80;
+    server_name __STAFF_HOST__;
 
     client_max_body_size 8m;
 
-    location /health {
+    location = /health {
         proxy_pass http://127.0.0.1:8000;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $remote_addr;
-        proxy_set_header X-Forwarded-Proto $scheme;
     }
 
-    location /auth/ {
+    location ^~ /auth/ {
         proxy_pass http://127.0.0.1:8000;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $remote_addr;
-        proxy_set_header X-Forwarded-Proto $scheme;
     }
 
-    # Server-to-server only. The frontend container reaches this route over the
-    # private Docker network; it must never be exposed at the public edge.
+    location = /api/public/widget-bootstrap {
+        return 404;
+    }
+
     location ^~ /api/internal/ {
         return 404;
     }
 
     location /api/ {
         proxy_pass http://127.0.0.1:8000;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $remote_addr;
-        proxy_set_header X-Forwarded-Proto $scheme;
     }
 
-    location /ws/ {
+    location = /ws/agent {
         proxy_pass http://127.0.0.1:8000;
         proxy_http_version 1.1;
         proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection "upgrade";
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $remote_addr;
-        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header Connection $connection_upgrade;
         proxy_read_timeout 3600s;
+    }
+
+    location ^~ /ws/ {
+        return 404;
+    }
+
+    location = /widget {
+        return 404;
+    }
+
+    location = /supportchat.js {
+        return 404;
+    }
+
+    location = / {
+        return 302 /inbox;
+    }
+
+    location = /demo {
+        return 404;
     }
 
     location / {
         proxy_pass http://127.0.0.1:3000;
         proxy_http_version 1.1;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $remote_addr;
-        proxy_set_header X-Forwarded-Proto $scheme;
         proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection "upgrade";
+        proxy_set_header Connection $connection_upgrade;
+    }
+}
+
+# Public widget surface: loader, iframe, bootstrap, and visitor socket only.
+server {
+    listen 80;
+    server_name __WIDGET_HOST__;
+
+    client_max_body_size 32k;
+
+    location = /api/public/widget-bootstrap {
+        proxy_pass http://127.0.0.1:8000;
+    }
+
+    location = /ws/visitor {
+        proxy_pass http://127.0.0.1:8000;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection $connection_upgrade;
+        proxy_read_timeout 3600s;
+    }
+
+    location = /widget {
+        proxy_pass http://127.0.0.1:3000;
+    }
+
+    location = /supportchat.js {
+        proxy_pass http://127.0.0.1:3000;
+    }
+
+    location ^~ /_next/ {
+        proxy_pass http://127.0.0.1:3000;
+    }
+
+    location / {
+        return 404;
     }
 }

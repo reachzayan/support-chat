@@ -11,6 +11,7 @@ from app.chat.connection_manager import FRAME_MAX, VisitorConnection, connection
 from app.chat.state_machine import IllegalTransition
 from app.db import session_maker
 from app.security.client_ip import resolve_client_ip
+from app.security.surfaces import websocket_surface_allowed
 from app.security.widget_tokens import decode_widget_token
 from app.services.conversation_service import CommandError, ConversationService
 from app.settings import get_settings
@@ -61,7 +62,9 @@ async def _conversation_idle_watch(websocket: WebSocket, connection: VisitorConn
 @router.websocket("/ws/visitor")
 async def visitor_socket(websocket: WebSocket) -> None:
     settings = get_settings()
-    if websocket.headers.get("origin") != settings.widget_origin:
+    if websocket.headers.get("origin") != settings.widget_origin or not websocket_surface_allowed(
+        websocket.headers.get("host"), settings.widget_origin, settings
+    ):
         await websocket.close(code=4403)
         return
     await websocket.accept()

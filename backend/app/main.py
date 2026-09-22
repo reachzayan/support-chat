@@ -35,8 +35,10 @@ from app.models import (
     Visitor,
 )
 from app.redis import close_redis
+from app.security.surfaces import http_surface_allowed
 from app.services.app_log import record_app_log
 from app.services.kb_embedder import OpenAIEmbedder
+from app.settings import get_settings
 from app.workers import start_kb_workers, stop_kb_workers
 
 __all__ = [
@@ -134,6 +136,12 @@ def create_app() -> FastAPI:
     async def privacy_headers(
         request: Request, call_next: Callable[[Request], Awaitable[Response]]
     ) -> Response:
+        if not http_surface_allowed(
+            request.url.path,
+            request.headers.get("host"),
+            get_settings(),
+        ):
+            return JSONResponse(status_code=404, content={"detail": "Not found"})
         try:
             response = await call_next(request)
         except Exception as exc:

@@ -73,6 +73,7 @@ def test_production_startup_accepts_https_origins_and_secure_cookies() -> None:
         widget_origin="https://widget.sample-site.example.com",
         marketing_host_origin="https://sample-site.example.com",
         redis_url="rediss://:prod-redis-secret@127.0.0.1:6379/0",
+        anthropic_api_key="sk-ant-test-not-a-real-key",
         openai_api_key="sk-test-not-a-real-key",
     )
     assert settings.cookie_secure is True
@@ -146,3 +147,71 @@ def test_production_startup_rejects_missing_openai_api_key() -> None:
             **_PROD,
             openai_api_key=None,
         )
+
+
+def test_settings_reject_unknown_app_environment() -> None:
+    with pytest.raises(ValueError, match=r"local.*test.*production"):
+        Settings(
+            **_SECRETS,
+            app_env="dev",
+        )
+
+
+def test_production_startup_rejects_shared_staff_and_widget_origin() -> None:
+    with pytest.raises(ValueError, match="distinct"):
+        Settings(
+            **_SECRETS,
+            **{
+                **_PROD,
+                "widget_origin": "https://admin.sample-site.example.com",
+            },
+            anthropic_api_key="sk-ant-test-not-a-real-key",
+            openai_api_key="sk-test-not-a-real-key",
+        )
+
+
+def test_production_startup_rejects_shared_marketing_and_widget_origin() -> None:
+    with pytest.raises(ValueError, match="distinct"):
+        Settings(
+            **_SECRETS,
+            **{
+                **_PROD,
+                "marketing_host_origin": "https://widget.sample-site.example.com",
+            },
+            anthropic_api_key="sk-ant-test-not-a-real-key",
+            openai_api_key="sk-test-not-a-real-key",
+        )
+
+
+def test_production_startup_rejects_missing_anthropic_api_key() -> None:
+    with pytest.raises(ValueError, match="ANTHROPIC_API_KEY"):
+        Settings(
+            **_SECRETS,
+            **_PROD,
+            anthropic_api_key=None,
+            openai_api_key="sk-test-not-a-real-key",
+        )
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "error"),
+    [
+        ("anthropic_api_key", "REPLACE_WITH_REAL_ANTHROPIC_KEY", "ANTHROPIC_API_KEY"),
+        ("openai_api_key", "REPLACE_WITH_REAL_OPENAI_KEY", "OPENAI_API_KEY"),
+    ],
+)
+def test_production_startup_rejects_provider_key_placeholders(
+    field: str,
+    value: str,
+    error: str,
+) -> None:
+    values = {
+        **_SECRETS,
+        **_PROD,
+        "anthropic_api_key": "sk-ant-api03-" + "a" * 64,
+        "openai_api_key": "sk-proj-" + "b" * 64,
+        field: value,
+    }
+
+    with pytest.raises(ValueError, match=error):
+        Settings(**values)
