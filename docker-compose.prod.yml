@@ -75,10 +75,21 @@ services:
       - ./backend/.env.prod
     environment: !override
       APP_ENV: production
+      ENABLE_BACKGROUND_WORKERS: "false"
     volumes:
       - ${REDIS_TLS_DIR:-./deploy/redis-tls}/ca.crt:/run/secrets/redis-ca.crt:ro
     ports: !override
       - "127.0.0.1:${BACKEND_PORT:-8000}:8000"
+
+  worker:
+    restart: unless-stopped
+    env_file: !override
+      - ./backend/.env.prod
+    environment: !override
+      APP_ENV: production
+      ENABLE_BACKGROUND_WORKERS: "true"
+    volumes:
+      - ${REDIS_TLS_DIR:-./deploy/redis-tls}/ca.crt:/run/secrets/redis-ca.crt:ro
 
   frontend:
     restart: unless-stopped

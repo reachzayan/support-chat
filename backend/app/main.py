@@ -1,6 +1,5 @@
 from collections.abc import Awaitable, Callable
 from contextlib import asynccontextmanager
-from traceback import format_exception
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
@@ -58,10 +57,13 @@ __all__ = [
 
 @asynccontextmanager
 async def lifespan(application: FastAPI):
+    settings = get_settings()
     await start_fanout()
-    await start_kb_workers()
+    if settings.enable_background_workers:
+        await start_kb_workers()
     yield
-    await stop_kb_workers()
+    if settings.enable_background_workers:
+        await stop_kb_workers()
     await stop_fanout()
     await close_redis()
     await BotResponder.close_shared_client()
@@ -71,9 +73,6 @@ async def lifespan(application: FastAPI):
 
 async def _persist_unhandled_exception(request: Request, exc: Exception) -> None:
     try:
-        frames = format_exception(type(exc), exc, exc.__traceback__)
-        # Keep stack for operators; never include request body.
-        stack = "".join(frames)[-4000:]
         async with session_maker()() as session:
             await record_app_log(
                 session,
@@ -81,13 +80,12 @@ async def _persist_unhandled_exception(request: Request, exc: Exception) -> None
                 source="backend",
                 logger_name="app.main",
                 event="unhandled_exception",
-                message=f"{type(exc).__name__}: {exc}",
+                message=type(exc).__name__,
                 detail={
                     "error_class": type(exc).__name__,
                     "path": request.url.path,
                     "method": request.method,
                     "status_code": 500,
-                    "stack": stack,
                 },
             )
             await session.commit()
