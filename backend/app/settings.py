@@ -1,4 +1,5 @@
 from enum import StrEnum
+from functools import lru_cache
 from ipaddress import ip_network
 from urllib.parse import urlsplit
 
@@ -60,6 +61,7 @@ class Settings(BaseSettings):
     widget_csp_service_secret: str = ""
     trusted_proxy_cidrs: str = ""
     app_env: AppEnvironment = AppEnvironment.LOCAL
+    enable_background_workers: bool = True
     chat_retention_days: int = 30
     rate_bootstrap: int = 60
     rate_bootstrap_window: int = 600
@@ -97,6 +99,7 @@ class Settings(BaseSettings):
     fast_path_min_score: float = 0.15
     fast_path_margin_ratio: float = 1.5
     conversation_window_size: int = 24
+    message_replay_limit: int = 500
     query_vector_cache_ttl: int = 24 * 60 * 60
     grounded_response_cache_ttl: int = 24 * 60 * 60
     kb_ingest_page_concurrency: int = 4
@@ -160,18 +163,74 @@ class Settings(BaseSettings):
             raise ValueError("OPENAI_EMBED_MODEL must be a non-empty model id")
         return model_id
 
-    @field_validator("openai_embed_dim")
+    @field_validator(
+        "openai_embed_dim",
+        "haiku_max_tokens",
+        "chat_retention_days",
+        "rate_bootstrap",
+        "rate_bootstrap_window",
+        "rate_widget_csp_ip",
+        "rate_widget_csp_site",
+        "rate_widget_csp_window",
+        "rate_visitor_create",
+        "rate_visitor_create_window",
+        "rate_visitor_submit",
+        "rate_visitor_submit_window",
+        "rate_visitor_submit_ip",
+        "rate_visitor_submit_ip_window",
+        "rate_login_failure",
+        "rate_login_failure_window",
+        "embed_batch",
+        "chunk_target_chars",
+        "chunk_overlap_chars",
+        "openai_embed_max_tokens",
+        "max_answer_chars",
+        "max_bot_answer_chars",
+        "anthropic_calls_per_minute",
+        "full_context_max_tokens",
+        "conversation_window_size",
+        "message_replay_limit",
+        "query_vector_cache_ttl",
+        "grounded_response_cache_ttl",
+        "kb_ingest_page_concurrency",
+        "kb_ingest_source_concurrency",
+        "kb_ingest_stuck_minutes",
+        "kb_llm_extract_concurrency",
+    )
     @classmethod
-    def openai_embed_dim_positive(cls, value: int) -> int:
+    def positive_int(cls, value: int) -> int:
         if value < 1:
-            raise ValueError("OPENAI_EMBED_DIM must be a positive integer")
+            raise ValueError("must be a positive integer")
+        return value
+
+    @field_validator(
+        "anthropic_timeout",
+        "haiku_timeout",
+        "embed_query_timeout",
+        "embed_ingest_timeout",
+        "kb_ingest_source_timeout_seconds",
+        "fast_path_min_score",
+        "fast_path_margin_ratio",
+    )
+    @classmethod
+    def positive_float(cls, value: float) -> float:
+        if value < 0:
+            raise ValueError("must be zero or positive")
+        return value
+
+    @field_validator("kb_ingest_host_delay_ms", "kb_ingest_retry_sleep")
+    @classmethod
+    def non_negative_int(cls, value: int) -> int:
+        if value < 0:
+            raise ValueError("must be zero or positive")
         return value
 
     @field_validator("anthropic_max_tokens")
     @classmethod
     def anthropic_max_tokens_positive(cls, value: int) -> int:
-        del value
-        return 500
+        if value < 1:
+            raise ValueError("ANTHROPIC_MAX_TOKENS must be a positive integer")
+        return value
 
     @model_validator(mode="after")
     def production_must_fail_closed(self) -> "Settings":
@@ -227,5 +286,10 @@ class Settings(BaseSettings):
         return url
 
 
+@lru_cache
 def get_settings() -> Settings:
     return Settings()
+
+
+def reset_settings_cache() -> None:
+    get_settings.cache_clear()
