@@ -103,20 +103,30 @@ class RateLimiter:
             self.hash_value(ip or "none"),
         )
 
-    def _login_parts(self, email: str, ip: str | None) -> tuple[str, str]:
-        return self.hash_value(email.strip().lower()), self.hash_value(ip or "none")
+    def _login_email_key(self, email: str) -> str:
+        return self.hash_value(email.strip().lower())
+
+    def _login_ip_key(self, ip: str | None) -> str:
+        return self.hash_value(ip or "none")
 
     async def guard_login(self, email: str, ip: str | None) -> None:
         settings = self._settings
-        count = await self.peek("login", *self._login_parts(email, ip))
-        if count >= settings.rate_login_failure:
+        email_count = await self.peek("login-email", self._login_email_key(email))
+        ip_count = await self.peek("login-ip", self._login_ip_key(ip))
+        if email_count >= settings.rate_login_failure or ip_count >= settings.rate_login_failure:
             raise RateLimitExceeded()
 
     async def hit_login_failure(self, email: str, ip: str | None) -> None:
         settings = self._settings
         await self.hit(
-            "login",
+            "login-email",
             settings.rate_login_failure,
             settings.rate_login_failure_window,
-            *self._login_parts(email, ip),
+            self._login_email_key(email),
+        )
+        await self.hit(
+            "login-ip",
+            settings.rate_login_failure,
+            settings.rate_login_failure_window,
+            self._login_ip_key(ip),
         )

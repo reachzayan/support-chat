@@ -68,6 +68,10 @@ async def record_app_log(
     return await AppLogRepository(session).add(row)
 
 
+def _safe_log_field(text: str) -> str:
+    return text.replace("\n", "\\n").replace("\r", "\\r").replace("\t", "\\t")
+
+
 def format_log_dump_line(row: AppLog) -> str:
     stamp = row.created_at
     if stamp.tzinfo is None:
@@ -78,7 +82,8 @@ def format_log_dump_line(row: AppLog) -> str:
     detail_text = ""
     if row.detail:
         detail_text = " " + json.dumps(row.detail, default=str, separators=(",", ":"))
+    message = _safe_log_field(row.message)
     return (
         f"{iso} {row.level.upper()} source={row.source} logger={row.logger_name} "
-        f"event={row.event} message={row.message}{detail_text}"
+        f"event={row.event} message={message}{detail_text}"
     )

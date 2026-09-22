@@ -22,8 +22,11 @@ from tests.ws_helpers import (
 
 
 def _set_budgets(monkeypatch, **values: str) -> None:
+    from app.settings import reset_settings_cache
+
     for key, value in values.items():
         monkeypatch.setenv(key, value)
+    reset_settings_cache()
 
 
 def test_third_new_visitor_is_429_and_creates_zero_rows(client: TestClient, monkeypatch) -> None:
