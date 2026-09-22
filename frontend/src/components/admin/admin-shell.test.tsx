@@ -23,7 +23,10 @@ vi.mock("next/navigation", () => ({
 
 vi.mock("@/lib/auth-client", async () => {
   const actual = await vi.importActual<typeof import("@/lib/auth-client")>("@/lib/auth-client")
-  return { ...actual, refreshSession: vi.fn().mockResolvedValue(USER) }
+  return {
+    ...actual,
+    refreshSession: vi.fn().mockResolvedValue({ status: "authenticated", user: USER }),
+  }
 })
 
 const sidebarCookie = () => {

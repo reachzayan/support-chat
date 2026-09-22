@@ -69,7 +69,11 @@ const workspaceLinks: AdminLink[] = [
   { href: "/admin/inbox", label: "Inbox", icon: Inbox },
   { href: "/admin/data", label: "Data", icon: Table2 },
   { href: "/admin/knowledge", label: "Knowledge base", icon: BookOpen },
-  { href: "/admin/canned-responses", label: "Canned responses", icon: MessageSquareText },
+  {
+    href: "/admin/canned-responses",
+    label: "Canned responses",
+    icon: MessageSquareText,
+  },
   { href: "/admin/sites", label: "Sites", icon: Globe2 },
   { href: "/admin/logs", label: "Logs", icon: ScrollText },
 ]
@@ -83,7 +87,12 @@ const initialsFor = (displayName: string) =>
     .join("")
     .toUpperCase() || "SP"
 
-const NAV_SPRING = { type: "spring", stiffness: 500, damping: 42, mass: 0.6 } as const
+const NAV_SPRING = {
+  type: "spring",
+  stiffness: 500,
+  damping: 42,
+  mass: 0.6,
+} as const
 
 const AvatarMark = ({ initials }: { initials: string }) => (
   <span className="relative flex size-7 shrink-0 items-center justify-center">
@@ -311,24 +320,29 @@ const AdminSidebar = ({ displayName }: { displayName: string }) => {
   )
 }
 
-export const AdminShell = ({ children }: { children: ReactNode }) => {
-  const router = useRouter()
-  const { sidebarOpen, setSidebarOpen } = usePreferences()
+const useAdminSession = (router: ReturnType<typeof useRouter>) => {
   const [user, setUser] = useState<StaffUser | null>(null)
   const [checkingSession, setCheckingSession] = useState(true)
+  const [sessionError, setSessionError] = useState(false)
 
   useEffect(() => {
     let active = true
     const boot = async () => {
-      const nextUser = await refreshSession()
+      const result = await refreshSession()
       if (!active) {
         return
       }
-      if (nextUser === null) {
+      if (result.status === "unauthenticated") {
         router.replace("/login")
         return
       }
-      setUser(nextUser)
+      if (result.status === "unavailable") {
+        setSessionError(true)
+        setCheckingSession(false)
+        return
+      }
+      setSessionError(false)
+      setUser(result.user)
       setCheckingSession(false)
     }
     void boot()
@@ -337,7 +351,40 @@ export const AdminShell = ({ children }: { children: ReactNode }) => {
     }
   }, [router])
 
-  const frame = user === null ? <StaffPageSkeleton /> : children
+  const handleRetry = () => {
+    setSessionError(false)
+    setCheckingSession(true)
+    void (async () => {
+      const result = await refreshSession()
+      if (result.status === "authenticated") {
+        setUser(result.user)
+        setCheckingSession(false)
+        return
+      }
+      if (result.status === "unauthenticated") {
+        router.replace("/login")
+        return
+      }
+      setSessionError(true)
+      setCheckingSession(false)
+    })()
+  }
+
+  return { user, checkingSession, sessionError, handleRetry }
+}
+
+export const AdminShell = ({ children }: { children: ReactNode }) => {
+  const router = useRouter()
+  const { sidebarOpen, setSidebarOpen } = usePreferences()
+  const { user, checkingSession, sessionError, handleRetry } = useAdminSession(router)
+
+  const frame = sessionError ? (
+    <SessionRetryPanel onRetry={handleRetry} />
+  ) : user === null ? (
+    <StaffPageSkeleton />
+  ) : (
+    children
+  )
 
   return (
     <>
@@ -345,7 +392,12 @@ export const AdminShell = ({ children }: { children: ReactNode }) => {
       <SidebarProvider
         open={sidebarOpen}
         onOpenChange={setSidebarOpen}
-        style={{ "--sidebar-width": "15rem", "--sidebar-width-icon": "3rem" } as CSSProperties}
+        style={
+          {
+            "--sidebar-width": "15rem",
+            "--sidebar-width-icon": "3rem",
+          } as CSSProperties
+        }
       >
         <AdminSidebar displayName={user?.display_name ?? "Loading workspace"} />
         <SidebarInset className="flex h-svh min-h-0 min-w-0 flex-col overflow-hidden bg-[#14161b] p-2">
@@ -359,3 +411,17 @@ export const AdminShell = ({ children }: { children: ReactNode }) => {
     </>
   )
 }
+
+const SessionRetryPanel = ({ onRetry }: { onRetry: () => void }) => (
+  <div className="bg-ice flex min-h-0 flex-1 flex-col items-center justify-center px-6 text-center">
+    <p className="text-navy heading text-sm">Could not reach the staff API.</p>
+    <p className="text-mute mt-2 text-sm">Check your connection and try again.</p>
+    <button
+      type="button"
+      className="bg-ember mt-4 rounded-[8px] px-4 py-2 text-sm font-semibold text-white"
+      onClick={onRetry}
+    >
+      Retry
+    </button>
+  </div>
+)

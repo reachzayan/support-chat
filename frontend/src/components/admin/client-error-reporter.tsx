@@ -33,8 +33,6 @@ export const installClientErrorReporting = () => {
       detail: {
         path: window.location.pathname,
         error_class: event.error?.name ?? "Error",
-        stack:
-          typeof event.error?.stack === "string" ? event.error.stack.slice(0, 4000) : undefined,
         source: event.filename,
         line: event.lineno,
         column: event.colno,
@@ -57,10 +55,6 @@ export const installClientErrorReporting = () => {
       detail: {
         path: window.location.pathname,
         error_class: reason instanceof Error ? reason.name : "UnhandledRejection",
-        stack:
-          reason instanceof Error && typeof reason.stack === "string"
-            ? reason.stack.slice(0, 4000)
-            : undefined,
       },
     })
   }

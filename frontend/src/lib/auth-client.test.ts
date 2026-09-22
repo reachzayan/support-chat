@@ -40,8 +40,10 @@ describe("refreshSession", () => {
 
     expect(vi.mocked(fetch).mock.calls).toHaveLength(1)
     expect(peak).toBe(1)
-    expect(first?.display_name).toBe("Alex Morgan")
-    expect(second?.display_name).toBe("Alex Morgan")
+    expect(first.status).toBe("authenticated")
+    expect(second.status).toBe("authenticated")
+    expect(first).toEqual({ status: "authenticated", user: ALEX })
+    expect(second).toEqual({ status: "authenticated", user: ALEX })
   })
 })
 
