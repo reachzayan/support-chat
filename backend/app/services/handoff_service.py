@@ -125,6 +125,7 @@ class HandoffService:
         body = handoff_copy(trigger.reason, human_enabled=site.human_enabled, window_hours=window)
         await self._messages.create(
             conversation.id,
+            conversation.site_id,
             "system",
             body,
             system_reason=trigger.reason,

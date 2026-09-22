@@ -195,8 +195,9 @@ def test_reconnect_after_cursor_11_replays_only_later_ids_then_state(
             )
 
     total_messages = message_count(uuid.UUID(conversation_id))
-    assert total_messages == 26
-    assert message_count(uuid.UUID(conversation_id), role="bot") >= 1
+    assert total_messages == 27
+    assert message_count(uuid.UUID(conversation_id), role="visitor") == 13
+    assert message_count(uuid.UUID(conversation_id), role="bot") == 13
     assert conversation_state(uuid.UUID(conversation_id)) == "bot"
 
     with client.websocket_connect("/ws/visitor", headers={"Origin": WIDGET_ORIGIN}) as visitor:

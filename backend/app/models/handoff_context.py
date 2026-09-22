@@ -5,6 +5,7 @@ from sqlalchemy import (
     CheckConstraint,
     DateTime,
     ForeignKey,
+    ForeignKeyConstraint,
     Index,
     String,
     Text,
@@ -37,6 +38,18 @@ HANDOFF_ROUTES = ("live_queue", "callback")
 class HandoffContext(Base):
     __tablename__ = "handoff_contexts"
     __table_args__ = (
+        ForeignKeyConstraint(
+            ["conversation_id", "site_id"],
+            ["conversations.id", "conversations.site_id"],
+            name="fk_handoff_contexts_conversation_site",
+            ondelete="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ["snapshot_id", "site_id"],
+            ["kb_snapshots.id", "kb_snapshots.site_id"],
+            name="fk_handoff_contexts_snapshot_site",
+            ondelete="SET NULL (snapshot_id)",
+        ),
         CheckConstraint(
             "escalation_reason IN (" + ", ".join(f"'{item}'" for item in ESCALATION_REASONS) + ")",
             name="ck_handoff_contexts_reason",
@@ -64,9 +77,7 @@ class HandoffContext(Base):
     id: Mapped[UUID] = mapped_column(
         primary_key=True, default=uuid4, server_default=text("gen_random_uuid()")
     )
-    conversation_id: Mapped[UUID] = mapped_column(
-        ForeignKey("conversations.id", ondelete="CASCADE")
-    )
+    conversation_id: Mapped[UUID] = mapped_column()
     site_id: Mapped[UUID] = mapped_column(ForeignKey("sites.id"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     escalation_reason: Mapped[str] = mapped_column(Text)
@@ -84,6 +95,4 @@ class HandoffContext(Base):
         DateTime(timezone=True), nullable=True
     )
     route: Mapped[str] = mapped_column(String)
-    snapshot_id: Mapped[UUID | None] = mapped_column(
-        ForeignKey("kb_snapshots.id", ondelete="SET NULL"), nullable=True
-    )
+    snapshot_id: Mapped[UUID | None] = mapped_column(nullable=True)

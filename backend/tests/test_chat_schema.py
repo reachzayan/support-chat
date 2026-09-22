@@ -165,6 +165,7 @@ def test_message_role_constraints(client) -> None:
         session.add(
             Message(
                 conversation_id=convo.id,
+                site_id=site.id,
                 client_message_id=uuid.uuid4(),
                 role="visitor",
                 body="hi",
@@ -175,7 +176,14 @@ def test_message_role_constraints(client) -> None:
             session.commit()
         session.rollback()
 
-        session.add(Message(conversation_id=convo.id, role="agent", body="I can help with that."))
+        session.add(
+            Message(
+                conversation_id=convo.id,
+                site_id=site.id,
+                role="agent",
+                body="I can help with that.",
+            )
+        )
         with pytest.raises(IntegrityError):
             session.commit()
         session.rollback()
@@ -183,6 +191,7 @@ def test_message_role_constraints(client) -> None:
         session.add(
             Message(
                 conversation_id=convo.id,
+                site_id=site.id,
                 client_message_id=uuid.uuid4(),
                 role="visitor",
                 body="hi",
@@ -196,6 +205,7 @@ def test_message_role_constraints(client) -> None:
         session.add(
             Message(
                 conversation_id=convo.id,
+                site_id=site.id,
                 role="bot",
                 body="Most negative results are reported within 24-48 hours.",
                 source_article_ids=[],

@@ -10,6 +10,7 @@ from sqlalchemy import (
     Index,
     Integer,
     String,
+    UniqueConstraint,
     func,
     text,
 )
@@ -37,6 +38,7 @@ ESCALATION_REASONS = (
 class Conversation(Base):
     __tablename__ = "conversations"
     __table_args__ = (
+        UniqueConstraint("id", "site_id", name="uq_conversations_id_site"),
         ForeignKeyConstraint(
             ["visitor_id", "site_id"],
             ["visitors.id", "visitors.site_id"],

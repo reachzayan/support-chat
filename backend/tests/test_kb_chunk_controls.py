@@ -3,7 +3,7 @@ from sqlalchemy import select
 from app.db import session_maker
 from app.models.kb_chunk import KbChunk
 from app.models.kb_page import KbPage
-from app.services.full_context import clear_units_cache, load_live_units
+from app.services.full_context import load_live_units
 from app.services.kb_source_admin import KbSourceService
 from tests.bot_fixtures import insert_chunk, insert_site
 
@@ -12,7 +12,6 @@ async def test_page_toggle_preserves_individual_chunk_choices_and_cache_eligibil
     migrated_db,
 ) -> None:
     """Catches a page toggle overwriting a disabled block or leaving cached blocks available."""
-    clear_units_cache()
     async with session_maker()() as session:
         site = await insert_site(session, "samplesite", "SampleSite")
         enabled_chunk = await insert_chunk(
@@ -62,7 +61,6 @@ async def test_chunk_toggle_requires_live_snapshot_and_changes_retrievable_block
     migrated_db,
 ) -> None:
     """Catches a disabled live chunk still reaching full-context prompts."""
-    clear_units_cache()
     async with session_maker()() as session:
         site = await insert_site(session, "backgroundchecks", "Sample Services")
         chunk = await insert_chunk(

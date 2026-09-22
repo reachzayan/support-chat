@@ -6,10 +6,12 @@ from sqlalchemy import (
     CheckConstraint,
     DateTime,
     ForeignKey,
+    ForeignKeyConstraint,
     Index,
     Integer,
     String,
     Text,
+    UniqueConstraint,
     func,
     text,
 )
@@ -21,6 +23,13 @@ from app.models.base import Base
 class KbPage(Base):
     __tablename__ = "kb_pages"
     __table_args__ = (
+        UniqueConstraint("id", "site_id", name="uq_kb_pages_id_site"),
+        ForeignKeyConstraint(
+            ["source_id", "site_id"],
+            ["kb_sources.id", "kb_sources.site_id"],
+            name="fk_kb_pages_source_site",
+            ondelete="CASCADE",
+        ),
         Index("uq_kb_pages_source_url", "source_id", "url", unique=True),
         Index("uq_kb_pages_site_url", "site_id", "url", unique=True),
         Index("ix_kb_pages_site_enabled", "site_id", "enabled"),

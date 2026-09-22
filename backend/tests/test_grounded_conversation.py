@@ -351,6 +351,7 @@ async def test_no_reaches_retrieval_after_assistant_question(migrated_db) -> Non
         messages = MessageRepository(session)
         await messages.create(
             conversation.id,
+            site.id,
             "bot",
             "Would you like DOT services or occupational health?",
             client_message_id=None,

@@ -25,7 +25,11 @@ async def _open_chat(
 ):
     _visitor, conversation = await insert_bot_conversation(session, site)
     await MessageRepository(session).create(
-        conversation.id, "visitor", "how fast are results", client_message_id=uuid4()
+        conversation.id,
+        conversation.site_id,
+        "visitor",
+        "how fast are results",
+        client_message_id=uuid4(),
     )
     conversation.last_message_at = when
     conversation.state = state
@@ -86,8 +90,13 @@ async def test_any_role_resets_the_five_minute_clock(migrated_db) -> None:
         easy, _bg, _timing, _fcra = await seed_brand_articles(session)
         conversation_id = await _open_chat(session, easy)
         service = ConversationService(session)
+        loaded_for_site = await session.get(Conversation, conversation_id)
+        assert loaded_for_site is not None
         await MessageRepository(session).create(
-            conversation_id, "system", "A specialist will join this chat shortly."
+            conversation_id,
+            loaded_for_site.site_id,
+            "system",
+            "A specialist will join this chat shortly.",
         )
         loaded = await session.get(Conversation, conversation_id)
         assert loaded is not None
@@ -137,7 +146,11 @@ async def _open_prechat_form(
     conversation.last_message_at = when
     if with_visitor_message:
         await MessageRepository(session).create(
-            conversation.id, "visitor", "how fast are results", client_message_id=uuid4()
+            conversation.id,
+            conversation.site_id,
+            "visitor",
+            "how fast are results",
+            client_message_id=uuid4(),
         )
     await session.commit()
     return conversation.id

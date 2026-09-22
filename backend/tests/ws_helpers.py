@@ -6,6 +6,7 @@ from typing import Any
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, func, select
 from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.pool import NullPool
 from starlette.websockets import WebSocketDisconnect
 
 from app.models.conversation import Conversation
@@ -51,7 +52,7 @@ SYNC_URL = TEST_DATABASE_URL.replace("postgresql+asyncpg://", "postgresql+psycop
 
 
 def sync_session() -> Iterator[Session]:
-    engine = create_engine(SYNC_URL)
+    engine = create_engine(SYNC_URL, poolclass=NullPool)
     factory = sessionmaker(engine, expire_on_commit=False)
     session = factory()
     try:

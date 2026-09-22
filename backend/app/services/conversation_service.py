@@ -1098,6 +1098,7 @@ class ConversationService:
             self._session.add(
                 MessageCitation(
                     message=inserted,
+                    site_id=conversation.site_id,
                     chunk_id=citation.chunk_id,
                     snapshot_id=citation.snapshot_id,
                     response_start=citation.response_start,
@@ -1422,6 +1423,7 @@ class ConversationService:
     ) -> Message:
         message = await self._messages.create(
             conversation.id,
+            conversation.site_id,
             role,
             body,
             client_message_id=client_message_id,
