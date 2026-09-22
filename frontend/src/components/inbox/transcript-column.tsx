@@ -20,6 +20,8 @@ type TranscriptColumnProps = {
   mine: boolean
   joinedBy: string | null
   lines: ReturnType<typeof useInboxLive>["live"]["lines"]
+  hasOlder: boolean
+  loadingOlder: boolean
   composerEnabled: boolean
   canned: CannedReply[]
   inputId: string
@@ -31,6 +33,7 @@ type TranscriptColumnProps = {
   onEnd: () => void
   onTransfer: () => void
   onSend: (body: string) => void
+  onLoadOlder: () => void
 }
 
 const TAP_SCALE = { scale: 0.96 }
@@ -199,6 +202,19 @@ export const TranscriptColumn = (props: TranscriptColumnProps) => {
         <TranscriptActions {...props} />
       </div>
       {props.joinedBy ? <JoinedByBanner joinedBy={props.joinedBy} /> : null}
+      {props.hasOlder ? (
+        <div className="border-line bg-paper flex shrink-0 justify-center border-b px-4 py-2">
+          <button
+            type="button"
+            disabled={props.loadingOlder}
+            aria-busy={props.loadingOlder}
+            onClick={props.onLoadOlder}
+            className="text-steel focus-visible:ring-steel hover:bg-ice-2 rounded-full px-3 py-1 text-xs font-bold focus-visible:ring-2 focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {props.loadingOlder ? "Loading older messages…" : "Load older messages"}
+          </button>
+        </div>
+      ) : null}
       <div className="flex min-h-0 flex-1 flex-col">
         <TranscriptPane lines={lines} muted={closed} />
       </div>

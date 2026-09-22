@@ -64,6 +64,8 @@ export type ConversationDetail = {
     referrer: string | null
   }
   messages: InboxMessage[]
+  has_older?: boolean
+  older_before_id?: number | null
 }
 
 export type CannedReply = {

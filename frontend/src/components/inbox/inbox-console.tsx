@@ -79,6 +79,8 @@ const InboxShell = ({ userId, isAdmin, inbox }: InboxShellProps) => {
               mine={mine}
               joinedBy={otherAgentName(inbox.live, mine)}
               lines={inbox.live.lines}
+              hasOlder={detail.has_older === true}
+              loadingOlder={inbox.loadingOlder}
               composerEnabled={mine}
               canned={inbox.canned}
               inputId={`inbox-message-${userId}`}
@@ -90,6 +92,7 @@ const InboxShell = ({ userId, isAdmin, inbox }: InboxShellProps) => {
               onEnd={inbox.handleEnd}
               onTransfer={inbox.handleTransfer}
               onSend={inbox.handleSend}
+              onLoadOlder={inbox.handleLoadOlder}
             />
           ) : (
             <EmptyTranscript loading={inbox.selectedId !== null} />

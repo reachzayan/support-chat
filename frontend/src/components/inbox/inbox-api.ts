@@ -6,6 +6,7 @@ import type {
   InboxCounts,
   InboxFilter,
   InboxListItem,
+  InboxMessage,
 } from "./types"
 import { EMPTY_INBOX_COUNTS } from "./types"
 
@@ -14,6 +15,11 @@ export type InboxListPage = {
   next_cursor: string | null
   counts: InboxCounts
 }
+
+export const mergeInboxMessages = (...pages: InboxMessage[][]) =>
+  Array.from(new Map(pages.flat().map((message) => [message.id, message])).values()).toSorted(
+    (left, right) => left.id - right.id,
+  )
 
 export const fetchInboxList = async (filter: InboxFilter, cursor?: string | null) => {
   const params = new URLSearchParams({ state: filter })
@@ -36,15 +42,23 @@ export const fetchInboxList = async (filter: InboxFilter, cursor?: string | null
   } satisfies InboxListPage
 }
 
-export const fetchInboxDetail = async (conversationId: string) => {
-  const response = await staffGet(`/api/conversations/${conversationId}`)
+export const fetchInboxDetailPage = async (conversationId: string, beforeId?: number) => {
+  const query = beforeId === undefined ? "" : `?before_id=${beforeId}`
+  const response = await staffGet(`/api/conversations/${conversationId}${query}`)
   if (!response.ok) {
     return null
   }
-  const body = (await response.json()) as ConversationDetail
-  const cannedResponse = await staffGet(`/api/canned-replies?site_id=${body.site_id}`)
+  return (await response.json()) as ConversationDetail
+}
+
+export const fetchInboxDetail = async (conversationId: string) => {
+  const detail = await fetchInboxDetailPage(conversationId)
+  if (detail === null) {
+    return null
+  }
+  const cannedResponse = await staffGet(`/api/canned-replies?site_id=${detail.site_id}`)
   const canned = cannedResponse.ok
     ? ((await cannedResponse.json()) as { items: CannedReply[] }).items
     : []
-  return { detail: body, canned }
+  return { detail, canned }
 }
