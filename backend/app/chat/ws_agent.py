@@ -91,6 +91,7 @@ async def agent_socket(websocket: WebSocket) -> None:
         await _agent_loop(websocket, connection)
     finally:
         closer.cancel()
+        await asyncio.gather(closer, return_exceptions=True)
         connection_manager.drop(websocket)
 
 
@@ -138,6 +139,7 @@ async def _agent_loop(websocket: WebSocket, connection: AgentConnection) -> None
                 return
     finally:
         watcher.cancel()
+        await asyncio.gather(watcher, return_exceptions=True)
 
 
 async def _handle_agent_frame(
@@ -219,8 +221,6 @@ async def _run_agent_command(
         except (IllegalTransition, ValueError, KeyError, TypeError):
             await connection_manager.send_error(websocket, "invalid")
             return
-    if kind == "message" and result.message is not None and result.client_message_id:
-        await connection_manager.send_ack(websocket, result.client_message_id, result.message.id)
     async with session_maker()() as session:
         assigned = await ConversationService(session).assigned_agent_view(result.conversation)
     await connection_manager.send_state(websocket, result.conversation, assigned)
@@ -230,3 +230,5 @@ async def _run_agent_command(
             result.site_key,
             result.message.id if result.message is not None else None,
         )
+    if kind == "message" and result.message is not None and result.client_message_id:
+        await connection_manager.send_ack(websocket, result.client_message_id, result.message.id)

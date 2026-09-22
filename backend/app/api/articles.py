@@ -1,3 +1,10 @@
+"""Legacy article CRUD.
+
+Deprecated: knowledge is managed via kb-sources / kb-pages / kb-chunks.
+Removal target: the first major release after 2026-12-01 (or earlier once
+no internal callers remain). Prefer the KB source APIs for all new work.
+"""
+
 from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, status
@@ -60,7 +67,12 @@ def _article_out(article: KbArticle) -> ArticleOut:
     )
 
 
-@router.get("/api/sites/{site_id}/articles", response_model=ArticleListOut)
+@router.get(
+    "/api/sites/{site_id}/articles",
+    response_model=ArticleListOut,
+    deprecated=True,
+    summary="Deprecated legacy article API",
+)
 async def list_articles(site_id: UUID, session: SessionDep, _staff: CurrentUser) -> ArticleListOut:
     try:
         rows = await SiteAdminService(session).list_articles(site_id)
@@ -73,6 +85,7 @@ async def list_articles(site_id: UUID, session: SessionDep, _staff: CurrentUser)
     "/api/sites/{site_id}/articles",
     response_model=ArticleOut,
     status_code=status.HTTP_201_CREATED,
+    deprecated=True,
 )
 async def create_article(
     site_id: UUID, payload: ArticleIn, session: SessionDep, admin: CurrentAdmin
@@ -86,7 +99,7 @@ async def create_article(
     return _article_out(article)
 
 
-@router.patch("/api/articles/{article_id}", response_model=ArticleOut)
+@router.patch("/api/articles/{article_id}", response_model=ArticleOut, deprecated=True)
 async def patch_article(
     article_id: UUID, payload: ArticlePatchIn, session: SessionDep, admin: CurrentAdmin
 ) -> ArticleOut:

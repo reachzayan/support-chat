@@ -15,11 +15,12 @@ from app.models.visitor import Visitor
 from app.repositories.conversation_repo import ConversationRepository
 from app.repositories.message_repo import MessageRepository
 from app.services.conversation_types import CommandError
+from app.settings import get_settings
 
 PREVIEW_MAX = 80
 INBOX_PAGE = 50
 INBOX_STATES = frozenset({"bot", "queued", "human", "closed"})
-SUBMISSIONS_PAGE = 200
+SUBMISSIONS_PAGE = 50
 
 
 class ConversationQueries:
@@ -51,19 +52,40 @@ class ConversationQueries:
         counts = await self._conversations.count_inbox_by_state()
         return items, next_cursor, counts
 
-    async def list_submissions(self) -> list[dict]:
-        rows = await self._conversations.list_submissions(limit=SUBMISSIONS_PAGE)
-        return [
+    async def list_submissions(self, cursor: str | None) -> tuple[list[dict], str | None]:
+        cursor_ts, cursor_id = _decode_submission_cursor(cursor)
+        rows = await self._conversations.list_submissions(
+            cursor_ts=cursor_ts,
+            cursor_id=cursor_id,
+            limit=SUBMISSIONS_PAGE + 1,
+        )
+        extra = rows[SUBMISSIONS_PAGE:]
+        page = rows[:SUBMISSIONS_PAGE]
+        items = [
             _submission_item(conversation, visitor, site, agent, opening)
-            for conversation, visitor, site, agent, opening in rows
+            for conversation, visitor, site, agent, opening in page
         ]
+        next_cursor = None
+        if extra and page:
+            last = page[-1][0]
+            next_cursor = _encode_submission_cursor(last.last_message_at, last.id)
+        return items, next_cursor
 
-    async def get_inbox_detail(self, conversation_id: UUID) -> dict:
+    async def get_inbox_detail(
+        self, conversation_id: UUID, *, before_id: int | None = None
+    ) -> dict:
         packed = await self._conversations.get_inbox_detail(conversation_id)
         if packed is None:
             raise CommandError("not_found")
         conversation, visitor, site, agent = packed
-        rows = await self._messages.list_for_conversation_with_authors(conversation.id)
+        limit = get_settings().message_replay_limit
+        rows = await self._messages.list_for_conversation_with_authors_bounded(
+            conversation.id, limit=limit + 1, before_id=before_id
+        )
+        has_older = len(rows) > limit
+        if has_older:
+            rows = rows[1:]
+        oldest_id = rows[0][0].id if rows else None
         return {
             "id": str(conversation.id),
             "site_id": str(site.id),
@@ -90,6 +112,8 @@ class ConversationQueries:
                 "referrer": conversation.referrer,
             },
             "messages": [self._inbox_message(message, author) for message, author in rows],
+            "has_older": has_older,
+            "older_before_id": oldest_id if has_older else None,
         }
 
     @staticmethod
@@ -136,6 +160,14 @@ def _inbox_state(state: str | None) -> str | None:
 def _encode_inbox_cursor(ts: datetime, conversation_id: UUID) -> str:
     raw = f"{ts.isoformat()}|{conversation_id}"
     return urlsafe_b64encode(raw.encode("utf-8")).decode("ascii").rstrip("=")
+
+
+def _encode_submission_cursor(ts: datetime, conversation_id: UUID) -> str:
+    return _encode_inbox_cursor(ts, conversation_id)
+
+
+def _decode_submission_cursor(cursor: str | None) -> tuple[datetime | None, UUID | None]:
+    return _decode_inbox_cursor(cursor)
 
 
 def _decode_inbox_cursor(cursor: str | None) -> tuple[datetime | None, UUID | None]:

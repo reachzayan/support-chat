@@ -4,6 +4,7 @@ from uuid import UUID
 
 import jwt
 import structlog
+from anyio import CancelScope
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from starlette.websockets import WebSocketState
 
@@ -176,6 +177,7 @@ async def _visitor_loop(websocket: WebSocket, connection: VisitorConnection) -> 
     finally:
         watcher.cancel()
         idle_nudge.cancel()
+        await asyncio.gather(watcher, idle_nudge, return_exceptions=True)
 
 
 async def _handle_visitor_ping_pong(
@@ -261,14 +263,6 @@ async def _run_visitor_command(
         except (IllegalTransition, ValueError, KeyError, TypeError):
             await connection_manager.send_error(websocket, "invalid")
             return
-    if kind == "prechat":
-        await connection_manager.send_prechat_accepted(
-            websocket,
-            result.submission_id or "",
-            result.message.id if result.message is not None else None,
-        )
-    elif kind == "message" and result.message is not None and result.client_message_id:
-        await connection_manager.send_ack(websocket, result.client_message_id, result.message.id)
     assigned = None
     async with session_maker()() as session:
         assigned = await ConversationService(session).assigned_agent_view(result.conversation)
@@ -279,8 +273,17 @@ async def _run_visitor_command(
             result.site_key,
             result.message.id if result.message is not None else None,
         )
+    if kind == "prechat":
+        await connection_manager.send_prechat_accepted(
+            websocket,
+            result.submission_id or "",
+            result.message.id if result.message is not None else None,
+        )
+    elif kind == "message" and result.message is not None and result.client_message_id:
+        await connection_manager.send_ack(websocket, result.client_message_id, result.message.id)
     if result.generation_id is not None:
-        await _finish_bot_generation(websocket, result)
+        with CancelScope(shield=True):
+            await _finish_bot_generation(websocket, result)
 
 
 async def _finish_bot_generation(websocket: WebSocket, result) -> None:

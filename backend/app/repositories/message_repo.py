@@ -1,10 +1,11 @@
 from uuid import UUID
 
-from sqlalchemy import exists, select
+from sqlalchemy import exists, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.message import Message
 from app.models.user import User
+from app.settings import get_settings
 
 
 class MessageRepository:
@@ -25,6 +26,7 @@ class MessageRepository:
     async def create(
         self,
         conversation_id: UUID,
+        site_id: UUID,
         role: str,
         body: str,
         client_message_id: UUID | None = None,
@@ -41,6 +43,7 @@ class MessageRepository:
     ) -> Message:
         message = Message(
             conversation_id=conversation_id,
+            site_id=site_id,
             role=role,
             body=body,
             client_message_id=client_message_id,
@@ -70,13 +73,47 @@ class MessageRepository:
         )
         return result.scalar_one_or_none()
 
-    async def list_after(self, conversation_id: UUID, cursor: int) -> list[Message]:
+    async def list_after(
+        self, conversation_id: UUID, cursor: int, limit: int | None = None
+    ) -> list[Message]:
+        max_rows = limit if limit is not None else get_settings().message_replay_limit
         result = await self._session.execute(
             select(Message)
             .where(Message.conversation_id == conversation_id, Message.id > cursor)
             .order_by(Message.id)
+            .limit(max_rows)
         )
         return list(result.scalars().all())
+
+    async def list_for_conversation_with_authors_bounded(
+        self,
+        conversation_id: UUID,
+        *,
+        limit: int | None = None,
+        before_id: int | None = None,
+    ) -> list[tuple[Message, User | None]]:
+        max_rows = limit if limit is not None else get_settings().message_replay_limit
+        filters = [Message.conversation_id == conversation_id]
+        if before_id is not None:
+            filters.append(Message.id < before_id)
+        result = await self._session.execute(
+            select(Message, User)
+            .outerjoin(User, User.id == Message.author_user_id)
+            .where(*filters)
+            .order_by(Message.id.desc())
+            .limit(max_rows)
+        )
+        rows = list(result.all())
+        rows.reverse()
+        return [(message, author) for message, author in rows]
+
+    async def count_for_conversation(self, conversation_id: UUID) -> int:
+        result = await self._session.scalar(
+            select(func.count())
+            .select_from(Message)
+            .where(Message.conversation_id == conversation_id)
+        )
+        return int(result or 0)
 
     async def latest(self, conversation_id: UUID) -> Message | None:
         result = await self._session.execute(

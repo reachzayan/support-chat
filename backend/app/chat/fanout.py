@@ -1,5 +1,6 @@
 import asyncio
 import json
+import uuid
 from typing import Any
 
 import redis.asyncio as redis
@@ -12,6 +13,7 @@ from app.settings import get_settings
 log = structlog.get_logger("fanout")
 WAKEUP_CHANNEL = "chat:wakeup"
 RETRY_SLEEP = 1.0
+INSTANCE_ID = uuid.uuid4().hex
 
 _subscriber_task: asyncio.Task | None = None
 _subscriber_client: redis.Redis | None = None
@@ -19,7 +21,8 @@ _subscriber_client: redis.Redis | None = None
 
 async def publish_wakeup(payload: dict[str, Any]) -> None:
     try:
-        await get_redis().publish(WAKEUP_CHANNEL, json.dumps(payload))
+        outbound = {**payload, "origin_instance": INSTANCE_ID}
+        await get_redis().publish(WAKEUP_CHANNEL, json.dumps(outbound))
     except Exception:
         log.info("wakeup_publish_failed", conversation_id=payload.get("conversation_id"))
 
@@ -86,5 +89,7 @@ async def _handle_wakeup_message(message: dict[str, Any]) -> None:
     except json.JSONDecodeError:
         return
     if "conversation_id" not in payload:
+        return
+    if payload.get("origin_instance") == INSTANCE_ID:
         return
     await connection_manager.deliver_wakeup(payload)

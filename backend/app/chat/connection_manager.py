@@ -14,6 +14,7 @@ from app.models.message import Message
 from app.models.user import User
 from app.repositories.user_repo import UserRepository
 from app.services.conversation_service import ConversationService
+from app.settings import get_settings
 
 log = structlog.get_logger("chat")
 FRAME_MAX = 16384
@@ -168,10 +169,20 @@ class ConnectionManager:
         self, conversation_id: UUID, *, site_key: str, inbox: bool
     ) -> None:
         after = self.oldest_message_cursor(conversation_id)
+        limit = get_settings().message_replay_limit
         async with session_maker()() as session:
             service = ConversationService(session)
             try:
-                messages, conversation = await service.replay(conversation_id, after)
+                while True:
+                    messages, conversation = await service.replay(conversation_id, after)
+                    assigned = await service.assigned_agent_view(conversation)
+                    await self._fanout_visitors(service, conversation, messages, assigned)
+                    await self._fanout_agents(
+                        UserRepository(session), conversation, messages, assigned, site_key, inbox
+                    )
+                    if not messages or len(messages) < limit:
+                        break
+                    after = messages[-1].id
             except Exception:
                 log.info(
                     "wakeup_catch_up_failed",
@@ -180,11 +191,6 @@ class ConnectionManager:
                     length=0,
                 )
                 return
-            assigned = await service.assigned_agent_view(conversation)
-            await self._fanout_visitors(service, conversation, messages, assigned)
-            await self._fanout_agents(
-                UserRepository(session), conversation, messages, assigned, site_key, inbox
-            )
 
     async def _fanout_visitors(
         self,
@@ -241,16 +247,21 @@ class ConnectionManager:
             await self.send_state(agent.websocket, conversation, assigned)
 
     async def _replay_visitor(self, visitor: VisitorConnection) -> None:
+        limit = get_settings().message_replay_limit
         async with session_maker()() as session:
             service = ConversationService(session)
-            messages, conversation = await service.replay(
-                visitor.conversation_id, visitor.last_event_id
-            )
-            assigned = await service.assigned_agent_view(conversation)
-            await self._send_new_messages(visitor.websocket, messages, visitor.last_event_id)
-            if messages:
-                visitor.last_event_id = messages[-1].id
-            await self.send_state(visitor.websocket, conversation, assigned)
+            cursor = visitor.last_event_id
+            while True:
+                messages, conversation = await service.replay(visitor.conversation_id, cursor)
+                assigned = await service.assigned_agent_view(conversation)
+                await session.close()
+                await self._send_new_messages(visitor.websocket, messages, visitor.last_event_id)
+                if messages:
+                    visitor.last_event_id = messages[-1].id
+                    cursor = messages[-1].id
+                await self.send_state(visitor.websocket, conversation, assigned)
+                if not messages or len(messages) < limit:
+                    break
 
     async def _replay_agent_conversation(
         self,
@@ -260,17 +271,23 @@ class ConnectionManager:
         conversation_id: UUID,
         cursor: int,
     ) -> None:
+        limit = get_settings().message_replay_limit
         try:
-            messages, conversation = await service.replay(conversation_id, cursor)
+            while True:
+                messages, conversation = await service.replay(conversation_id, cursor)
+                assigned = await service.assigned_agent_view(conversation)
+                await session.close()
+                await self._send_new_messages(agent.websocket, messages, cursor)
+                if messages:
+                    agent.subscriptions[conversation_id] = messages[-1].id
+                    cursor = messages[-1].id
+                else:
+                    agent.subscriptions[conversation_id] = cursor
+                await self.send_state(agent.websocket, conversation, assigned)
+                if not messages or len(messages) < limit:
+                    break
         except Exception:
             return
-        assigned = await service.assigned_agent_view(conversation)
-        await self._send_new_messages(agent.websocket, messages, cursor)
-        if messages:
-            agent.subscriptions[conversation_id] = messages[-1].id
-        else:
-            agent.subscriptions[conversation_id] = cursor
-        await self.send_state(agent.websocket, conversation, assigned)
 
     async def _send_new_messages(
         self, websocket: WebSocket, messages: list[Message], cursor: int
