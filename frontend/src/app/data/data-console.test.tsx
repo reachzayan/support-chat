@@ -7,7 +7,7 @@ import { renderWithProviders } from "@/test/render"
 import { DataConsole } from "./data-console"
 import { DataConsoleBody } from "./data-console-body"
 
-describe("data console", () => {
+describe("data console errors", () => {
   beforeEach(() => {
     vi.stubGlobal(
       "fetch",
@@ -24,13 +24,26 @@ describe("data console", () => {
     await waitFor(() => expect(screen.getByText("Could not load submissions.")).toBeInTheDocument())
     expect(screen.queryByText("No form submissions yet")).not.toBeInTheDocument()
   })
+})
 
+describe("data console body", () => {
   test("shows a skeleton while submissions are loading", () => {
-    renderWithProviders(<DataConsoleBody rows={null} loadError={false} onTranscript={vi.fn()} />)
+    renderWithProviders(
+      <DataConsoleBody
+        rows={null}
+        loadError={false}
+        hasMore={false}
+        loadingMore={false}
+        onLoadMore={vi.fn()}
+        onTranscript={vi.fn()}
+      />,
+    )
 
     expect(screen.getByLabelText("Loading submissions")).toBeInTheDocument()
   })
+})
 
+describe("data console table", () => {
   test("renders every submission field in a paginated shadcn table", async () => {
     const rows = Array.from({ length: 11 }, (_, index) => ({
       id: `conversation-${index + 1}`,
@@ -81,7 +94,7 @@ describe("data console", () => {
     expect(within(table).getByText("Visitor 1")).toBeInTheDocument()
     expect(within(table).getAllByText("Needs Attention").length).toBeGreaterThan(0)
     expect(within(table).queryByText("Visitor 11")).not.toBeInTheDocument()
-    expect(screen.getByText("11 total submissions")).toBeInTheDocument()
+    expect(screen.getByText("11 loaded submissions")).toBeInTheDocument()
 
     await userEvent.setup().click(screen.getByRole("link", { name: "Go to page 2" }))
 

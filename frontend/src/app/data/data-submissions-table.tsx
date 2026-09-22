@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useMemo, useState } from "react"
+import { useCallback, useMemo, useState, type CSSProperties } from "react"
 
 import { Badge } from "@/components/ui/badge"
 import {
@@ -142,32 +142,30 @@ const Cell = ({ children, mono = false }: { children: string; mono?: boolean }) 
 
 export const SubmissionsTable = ({
   rows,
+  hasMore,
+  loadingMore,
+  onLoadMore,
   onTranscript,
 }: {
   rows: SubmissionRow[]
+  hasMore: boolean
+  loadingMore: boolean
+  onLoadMore: () => void
   onTranscript: (id: string) => void
 }) => {
   const [page, setPage] = useState(1)
-  const {
-    widths,
-    tableWidth,
-    handleResizeStart,
-    handleResizeMove,
-    handleResizeEnd,
-    handleResizeKeyDown,
-    handleResizeReset,
-  } = useDataColumnWidths()
-  const tableStyle = useMemo(() => ({ width: "100%", minWidth: tableWidth }), [tableWidth])
+  const widthsApi = useDataColumnWidths()
+  const tableStyle = useMemo(
+    () => ({ width: "100%", minWidth: widthsApi.tableWidth }),
+    [widthsApi.tableWidth],
+  )
   const colStyles = useMemo(
-    () => COLUMNS.map((label) => ({ key: label, style: { width: widths[label] } })),
-    [widths],
+    () => COLUMNS.map((label) => ({ key: label, style: { width: widthsApi.widths[label] } })),
+    [widthsApi.widths],
   )
   const pageCount = Math.max(1, Math.ceil(rows.length / PAGE_SIZE))
   const currentPage = Math.min(page, pageCount)
   const visibleRows = rows.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE)
-  const handlePage = useCallback((nextPage: number) => {
-    setPage(nextPage)
-  }, [])
 
   return (
     <section
@@ -176,45 +174,79 @@ export const SubmissionsTable = ({
     >
       <div className="border-line flex shrink-0 items-baseline justify-between border-b px-5 py-4">
         <h2 className="text-navy heading text-sm">Submissions</h2>
-        <p className="text-mute text-xs">{rows.length} total submissions</p>
+        <p className="text-mute text-xs">{rows.length} loaded submissions</p>
       </div>
-      <div className="min-h-0 flex-1 overflow-x-auto overflow-y-auto">
-        <Table
-          aria-label="Form submissions"
-          className="table-fixed border-collapse text-left"
-          style={tableStyle}
-        >
-          <colgroup>
-            {colStyles.map((col) => (
-              <col key={col.key} style={col.style} />
-            ))}
-          </colgroup>
-          <TableHeader className="bg-ice-2">
-            <TableRow>
-              {COLUMNS.map((label) => (
-                <DataColumnHeader
-                  key={label}
-                  label={label}
-                  onResizeStart={handleResizeStart}
-                  onResizeMove={handleResizeMove}
-                  onResizeEnd={handleResizeEnd}
-                  onResizeKeyDown={handleResizeKeyDown}
-                  onResizeReset={handleResizeReset}
-                />
-              ))}
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {visibleRows.map((row) => (
-              <SubmissionRowView key={row.id} row={row} onTranscript={onTranscript} />
-            ))}
-          </TableBody>
-        </Table>
+      <SubmissionsTableGrid
+        tableStyle={tableStyle}
+        colStyles={colStyles}
+        widthsApi={widthsApi}
+        visibleRows={visibleRows}
+        onTranscript={onTranscript}
+      />
+      <div className="border-line flex shrink-0 items-center justify-between border-t px-5 py-3">
+        <TablePagination currentPage={currentPage} pageCount={pageCount} onPage={setPage} />
+        {hasMore ? (
+          <button
+            type="button"
+            className="text-steel text-xs font-semibold disabled:opacity-50"
+            disabled={loadingMore}
+            onClick={onLoadMore}
+          >
+            {loadingMore ? "Loading…" : "Load older submissions"}
+          </button>
+        ) : null}
       </div>
-      <TablePagination currentPage={currentPage} pageCount={pageCount} onPage={handlePage} />
     </section>
   )
 }
+
+const SubmissionsTableGrid = ({
+  tableStyle,
+  colStyles,
+  widthsApi,
+  visibleRows,
+  onTranscript,
+}: {
+  tableStyle: CSSProperties
+  colStyles: { key: string; style: CSSProperties }[]
+  widthsApi: ReturnType<typeof useDataColumnWidths>
+  visibleRows: SubmissionRow[]
+  onTranscript: (id: string) => void
+}) => (
+  <div className="min-h-0 flex-1 overflow-x-auto overflow-y-auto">
+    <Table
+      aria-label="Form submissions"
+      className="table-fixed border-collapse text-left"
+      style={tableStyle}
+    >
+      <colgroup>
+        {colStyles.map((col) => (
+          <col key={col.key} style={col.style} />
+        ))}
+      </colgroup>
+      <TableHeader className="bg-ice-2">
+        <TableRow>
+          {COLUMNS.map((label) => (
+            <DataColumnHeader
+              key={label}
+              label={label}
+              onResizeStart={widthsApi.handleResizeStart}
+              onResizeMove={widthsApi.handleResizeMove}
+              onResizeEnd={widthsApi.handleResizeEnd}
+              onResizeKeyDown={widthsApi.handleResizeKeyDown}
+              onResizeReset={widthsApi.handleResizeReset}
+            />
+          ))}
+        </TableRow>
+      </TableHeader>
+      <TableBody>
+        {visibleRows.map((row) => (
+          <SubmissionRowView key={row.id} row={row} onTranscript={onTranscript} />
+        ))}
+      </TableBody>
+    </Table>
+  </div>
+)
 
 const TablePagination = ({
   currentPage,

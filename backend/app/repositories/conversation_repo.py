@@ -171,7 +171,11 @@ class ConversationRepository:
         return rows
 
     async def list_submissions(
-        self, *, limit: int
+        self,
+        *,
+        cursor_ts: datetime | None,
+        cursor_id: UUID | None,
+        limit: int,
     ) -> list[tuple[Conversation, Visitor, Site, User | None, str | None]]:
         opening_body = (
             select(Message.body)
@@ -186,8 +190,14 @@ class ConversationRepository:
             .join(Site, Site.id == Conversation.site_id)
             .outerjoin(User, User.id == Conversation.assigned_agent_id)
             .where(Conversation.prechat_submission_id.is_not(None))
-            .order_by(Conversation.last_message_at.desc(), Conversation.id.desc())
-            .limit(limit)
+        )
+        if cursor_ts is not None and cursor_id is not None:
+            query = query.where(
+                (Conversation.last_message_at < cursor_ts)
+                | ((Conversation.last_message_at == cursor_ts) & (Conversation.id < cursor_id))
+            )
+        query = query.order_by(Conversation.last_message_at.desc(), Conversation.id.desc()).limit(
+            limit
         )
         result = await self._session.execute(query)
         return [
