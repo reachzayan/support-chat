@@ -161,10 +161,10 @@ def test_http_www_evil_and_missing_origin_fail_bootstrap_and_create_zero_visitor
     assert "allowed_origins" not in allowed.json()
     assert "origins" not in allowed.json()
     assert http_variant.status_code == 403
-    assert www.status_code == 200
+    assert www.status_code == 403
     assert evil.status_code == 403
     assert missing.status_code == 403
-    assert visitor_count() == 2
+    assert visitor_count() == 1
 
 
 def test_removing_active_origin_closes_visitor_socket_4403_on_heartbeat(
@@ -397,9 +397,11 @@ def test_new_site_defaults_to_empty_allowlist_and_key_is_immutable(client: TestC
         headers=_auth(token),
         json={"key": "hijacked", "name": "SampleSite Support screening"},
     )
-    assert renamed.status_code == 200
-    assert renamed.json()["key"] == EASY_KEY
-    assert renamed.json()["name"] == "SampleSite Support screening"
+    assert renamed.status_code == 422
+    listed = client.get("/api/sites", headers=_auth(token)).json()["items"]
+    loaded = next(item for item in listed if item["id"] == site_id)
+    assert loaded["key"] == EASY_KEY
+    assert loaded["name"] == EASY_NAME
 
 
 def test_admin_create_without_key_generates_site_and_public_keys(client: TestClient) -> None:

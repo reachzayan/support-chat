@@ -32,6 +32,13 @@ def _service_headers(secret: str = SERVICE_SECRET) -> dict[str, str]:
     return {"X-SupportChat-Widget-CSP": secret}
 
 
+def _use_widget_secret(monkeypatch) -> None:
+    from app.settings import reset_settings_cache
+
+    monkeypatch.setenv("WIDGET_CSP_SERVICE_SECRET", SERVICE_SECRET)
+    reset_settings_cache()
+
+
 def _lookup(
     client: TestClient,
     *,
@@ -72,7 +79,7 @@ def _login_admin(client: TestClient) -> str:
 def test_exact_enabled_site_returns_only_its_requested_allowed_origin(
     client: TestClient, monkeypatch
 ) -> None:
-    monkeypatch.setenv("WIDGET_CSP_SERVICE_SECRET", SERVICE_SECRET)
+    _use_widget_secret(monkeypatch)
     insert_site(
         "lovable-demo",
         "Lovable demo",
@@ -97,7 +104,7 @@ def test_exact_enabled_site_returns_only_its_requested_allowed_origin(
 def test_site_identity_cannot_authorize_another_sites_origin(
     client: TestClient, monkeypatch
 ) -> None:
-    monkeypatch.setenv("WIDGET_CSP_SERVICE_SECRET", SERVICE_SECRET)
+    _use_widget_secret(monkeypatch)
     insert_site(
         "lovable-demo",
         "Lovable demo",
@@ -120,7 +127,7 @@ def test_site_identity_cannot_authorize_another_sites_origin(
 def test_lookup_hides_unknown_mismatched_and_disabled_sites(
     client: TestClient, monkeypatch
 ) -> None:
-    monkeypatch.setenv("WIDGET_CSP_SERVICE_SECRET", SERVICE_SECRET)
+    _use_widget_secret(monkeypatch)
     insert_site(
         "lovable-demo",
         "Lovable demo",
@@ -148,7 +155,7 @@ def test_lookup_hides_unknown_mismatched_and_disabled_sites(
 def test_lookup_rejects_missing_or_wrong_service_secret_before_parsing_body(
     client: TestClient, monkeypatch
 ) -> None:
-    monkeypatch.setenv("WIDGET_CSP_SERVICE_SECRET", SERVICE_SECRET)
+    _use_widget_secret(monkeypatch)
     missing = client.post("/api/internal/widget-frame-ancestors", content=b"not-json")
     wrong = client.post(
         "/api/internal/widget-frame-ancestors",
@@ -164,7 +171,7 @@ def test_lookup_rejects_missing_or_wrong_service_secret_before_parsing_body(
 def test_lookup_rejects_non_ascii_service_secret_without_error(
     client: TestClient, monkeypatch
 ) -> None:
-    monkeypatch.setenv("WIDGET_CSP_SERVICE_SECRET", SERVICE_SECRET)
+    _use_widget_secret(monkeypatch)
 
     response = client.post(
         "/api/internal/widget-frame-ancestors",
@@ -177,7 +184,7 @@ def test_lookup_rejects_non_ascii_service_secret_without_error(
 
 
 def test_lookup_rejects_noncanonical_parent_origin(client: TestClient, monkeypatch) -> None:
-    monkeypatch.setenv("WIDGET_CSP_SERVICE_SECRET", SERVICE_SECRET)
+    _use_widget_secret(monkeypatch)
     insert_site(
         "lovable-demo",
         "Lovable demo",
@@ -194,7 +201,7 @@ def test_lookup_rejects_noncanonical_parent_origin(client: TestClient, monkeypat
 def test_lookup_rate_limit_fails_closed_before_database_work(
     client: TestClient, monkeypatch
 ) -> None:
-    monkeypatch.setenv("WIDGET_CSP_SERVICE_SECRET", SERVICE_SECRET)
+    _use_widget_secret(monkeypatch)
     monkeypatch.setenv("RATE_WIDGET_CSP_IP", "1")
     insert_site(
         "lovable-demo",

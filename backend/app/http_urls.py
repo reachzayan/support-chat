@@ -13,8 +13,6 @@ def _flexible_parts(raw: str) -> tuple[str, str, str, str, str] | None:
     if parsed.scheme not in ("http", "https") or parsed.username or parsed.password:
         return None
     host = (parsed.hostname or "").casefold()
-    if host.startswith("www."):
-        host = host.removeprefix("www.")
     if not host:
         return None
     try:
@@ -28,7 +26,7 @@ def _flexible_parts(raw: str) -> tuple[str, str, str, str, str] | None:
 def _netloc(host: str, port: str, scheme: str) -> str:
     if not port:
         return host
-    if scheme == "https" and port in {"80", "443"}:
+    if scheme == "https" and port == "443":
         return host
     if scheme == "http" and port == "80":
         return host
@@ -46,7 +44,7 @@ def canonicalize_https_url(raw: str) -> str | None:
     if parts is None:
         return None
     _scheme, host, port, path, query = parts
-    netloc = _netloc(host, "" if port == "80" else port, "https")
+    netloc = _netloc(host, port, "https")
     return urlunparse(("https", netloc, _stored_path(path), "", query, ""))
 
 
