@@ -14,6 +14,7 @@ from app.services.kb_crawl import (
     FetchError,
     allowed_fetch_url,
     fetch_html,
+    pinned_get,
     public_fetch_url,
 )
 
@@ -284,6 +285,11 @@ def _internal_links(result: Any, page_url: str) -> tuple[str, ...]:
     return tuple(dict.fromkeys(found))
 
 
+@dataclass
+class _CrawlGuard:
+    blocked: bool = False
+
+
 def _allow_browser_request(url: str, is_navigation: bool, allowed_hosts: set[str]) -> None:
     parsed = urlparse(url)
     if parsed.scheme in {"about", "blob", "data"}:
@@ -294,11 +300,64 @@ def _allow_browser_request(url: str, is_navigation: bool, allowed_hosts: set[str
         public_fetch_url(url)
 
 
+async def _is_main_frame_navigation(page, request) -> bool:
+    from playwright.async_api import Error as PlaywrightError
+
+    if not request.is_navigation_request():
+        return False
+    try:
+        return request.frame == page.main_frame
+    except PlaywrightError:
+        return True
+
+
+def _browser_guard_page_factory(allowed_hosts: set[str], guard: _CrawlGuard):
+    async def guard_page(page, **_kwargs):
+        async def guard_route(route, request):
+            main_navigation = await _is_main_frame_navigation(page, request)
+            scheme = urlparse(request.url).scheme
+            if scheme in {"about", "blob", "data"}:
+                await route.continue_()
+                return
+            try:
+                await asyncio.to_thread(
+                    _allow_browser_request,
+                    request.url,
+                    request.is_navigation_request(),
+                    allowed_hosts,
+                )
+            except FetchError:
+                if main_navigation:
+                    guard.blocked = True
+                await route.abort("blockedbyclient")
+                return
+            if request.method.upper() != "GET" or scheme != "https":
+                await route.abort("blockedbyclient")
+                return
+            hosts = allowed_hosts if request.is_navigation_request() else None
+            try:
+                status, body, content_type = await asyncio.to_thread(pinned_get, request.url, hosts)
+            except FetchError:
+                if main_navigation:
+                    guard.blocked = True
+                await route.abort("blockedbyclient")
+                return
+            await route.fulfill(
+                status=status,
+                body=body,
+                headers={"content-type": content_type, "content-length": str(len(body))},
+            )
+
+        await page.route("**/*", guard_route)
+        return page
+
+    return guard_page
+
+
 @asynccontextmanager
 async def page_crawler(allowed_hosts: set[str]) -> AsyncIterator[CrawlerFn]:
     try:
         from crawl4ai import AsyncWebCrawler, BrowserConfig
-        from playwright.async_api import Error as PlaywrightError
     except ImportError:
 
         async def missing(_url: str) -> Any:
@@ -307,45 +366,23 @@ async def page_crawler(allowed_hosts: set[str]) -> AsyncIterator[CrawlerFn]:
         yield missing
         return
     browser = BrowserConfig(browser_type="chromium", headless=True, user_agent=USER_AGENT)
-    blocked_navigation = False
     crawler = AsyncWebCrawler(config=browser)
     await crawler.__aenter__()
+    # Serialize browser navigations so one shared guard cannot race across pages.
+    crawl_lock = asyncio.Lock()
     try:
 
-        async def guard_page(page, **_kwargs):
-            async def guard_route(route, request):
-                nonlocal blocked_navigation
-                main_navigation = request.is_navigation_request()
-                if main_navigation:
-                    try:
-                        main_navigation = request.frame == page.main_frame
-                    except PlaywrightError:
-                        pass  # Treat navigation without an available frame conservatively.
-                try:
-                    await asyncio.to_thread(
-                        _allow_browser_request,
-                        request.url,
-                        request.is_navigation_request(),
-                        allowed_hosts,
-                    )
-                except FetchError:
-                    blocked_navigation = blocked_navigation or main_navigation
-                    await route.abort("blockedbyclient")
-                    return
-                await route.continue_()
-
-            await page.route("**/*", guard_route)
-            return page
-
-        crawler.crawler_strategy.set_hook("on_page_context_created", guard_page)
-
         async def crawl(url: str) -> Any:
-            nonlocal blocked_navigation
-            blocked_navigation = False
-            result = await crawler.arun(url=url, config=crawler_run_config())
-            if blocked_navigation:
-                raise FetchError("ssrf")
-            return result
+            async with crawl_lock:
+                guard = _CrawlGuard()
+                crawler.crawler_strategy.set_hook(
+                    "on_page_context_created",
+                    _browser_guard_page_factory(allowed_hosts, guard),
+                )
+                result = await crawler.arun(url=url, config=crawler_run_config())
+                if guard.blocked:
+                    raise FetchError("ssrf")
+                return result
 
         yield crawl
     finally:

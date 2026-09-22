@@ -9,6 +9,7 @@ import structlog
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.db import session_maker
 from app.models.kb_chunk import KbChunk
 from app.models.kb_page import KbPage
 from app.models.kb_page_job import KbPageJob
@@ -56,6 +57,17 @@ async def run_ingest(
     source = await session.get(KbSource, source_id)
     if source is None:
         return
+    await session.refresh(
+        source,
+        attribute_names=[
+            "pages_discovered",
+            "pages_fetched",
+            "pages_extracted",
+            "pages_embedded",
+            "pages_failed",
+            "pages_skipped_unchanged",
+        ],
+    )
     site = await session.get(Site, source.site_id)
     if site is None:
         return
@@ -102,7 +114,6 @@ async def _run_website_ingest(
     seen: set[str] = set()
     extra_urls: list[str] = []
     pending: list[dict] = []
-    jobs = KbPageJobRepository(session)
     discover_fetch = fetch if fetch is not None else http_fetch
     limiter = HostLimiter(get_settings().kb_ingest_host_delay_ms)
     db_lock = asyncio.Lock()
@@ -122,57 +133,66 @@ async def _run_website_ingest(
 
     async def handle(url: str) -> None:
         async with page_sem:
-            try:
-                item = await _process_url(
-                    session,
-                    source,
-                    site,
-                    url,
-                    hosts,
-                    fetch,
-                    extra_urls,
-                    robots,
-                    seen,
-                    snapshot_id,
-                    worker,
-                    jobs,
-                    llm_client,
-                    limiter,
-                    db_lock,
-                    robots_lock,
-                    crawler,
-                )
-            except Exception as exc:
-                log.info(
-                    "kb_stage",
-                    source_id=str(source.id),
-                    stage="process",
-                    state_to="failed",
-                    error_code=type(exc).__name__,
-                )
-                async with db_lock:
-                    page = await KbPageRepository(session).get_for_source_url(source.id, url)
-                    job = (
-                        await jobs.get_for_page_snapshot(page.id, snapshot_id)
-                        if page is not None
-                        else None
+            async with session_maker()() as page_session:
+                page_source = await page_session.get(KbSource, source.id)
+                page_site = await page_session.get(Site, site.id)
+                if page_source is None or page_site is None:
+                    return
+                page_jobs = KbPageJobRepository(page_session)
+                try:
+                    item = await _process_url(
+                        page_session,
+                        page_source,
+                        page_site,
+                        url,
+                        hosts,
+                        fetch,
+                        extra_urls,
+                        robots,
+                        seen,
+                        snapshot_id,
+                        worker,
+                        page_jobs,
+                        llm_client,
+                        limiter,
+                        db_lock,
+                        robots_lock,
+                        crawler,
                     )
-                    if page is not None and job is not None and job.state != "dead_letter":
-                        await _fail_page(
-                            session,
-                            source,
-                            page,
-                            job,
-                            _stage_error_code(job.stage),
-                            str(exc),
+                except Exception as exc:
+                    log.info(
+                        "kb_stage",
+                        source_id=str(source.id),
+                        stage="process",
+                        state_to="failed",
+                        error_code=type(exc).__name__,
+                    )
+                    async with db_lock:
+                        page = await KbPageRepository(page_session).get_for_source_url(
+                            page_source.id, url
                         )
-                    else:
-                        await _bump_source(session, source, "pages_failed")
-                        source.last_error_code = "ingest"
-                        await session.commit()
-                return
-            if item:
-                pending.append(item)
+                        job = (
+                            await page_jobs.get_for_page_snapshot(page.id, snapshot_id)
+                            if page is not None
+                            else None
+                        )
+                        if page is not None and job is not None and job.state != "dead_letter":
+                            await _fail_page(
+                                page_session,
+                                page_source,
+                                page,
+                                job,
+                                _stage_error_code(job.stage),
+                                type(exc).__name__,
+                            )
+                        else:
+                            await _bump_source(page_session, page_source, "pages_failed")
+                            page_source.last_error_code = "ingest"
+                            await page_session.commit()
+                    return
+                if item:
+                    async with db_lock:
+                        pending.append(item)
 
     try:
         frontier = planned

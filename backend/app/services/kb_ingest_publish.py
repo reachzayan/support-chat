@@ -15,7 +15,7 @@ from app.models.kb_page_job import KbPageJob
 from app.models.kb_snapshot import KbSnapshot
 from app.models.kb_source import KbSource
 from app.services.kb_ingest_chunks import _copy_live_chunks
-from app.services.kb_ingest_state import _record_job_event, _sync_status
+from app.services.kb_ingest_state import _bump_source, _record_job_event, _sync_status
 from app.services.kb_snapshot import fail, mark_unchanged, validate_snapshot
 from app.services.kb_validate import PageEvidence, ValidationResult
 
@@ -157,9 +157,6 @@ async def _publish_validated_snapshot(
     source.page_count = len({item["page_id"] for item in pending})
     source.last_run_finished_at = datetime.now(UTC)
     await session.commit()
-    from app.services.full_context import clear_units_cache
-
-    clear_units_cache()
 
 
 async def _copy_pending_live_chunks(
@@ -179,7 +176,7 @@ async def _copy_pending_live_chunks(
         if copied:
             item["token_estimate"] = copied_tokens
             if not item.get("preserve_failure") and not item.get("preserve_page_state"):
-                source.pages_embedded += 1
+                await _bump_source(session, source, "pages_embedded")
 
 
 async def _stage_snapshot(
