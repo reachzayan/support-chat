@@ -314,7 +314,7 @@ export const installSupportChat = (win: Window, doc: Document, script: HTMLScrip
     retryTimer: null,
     hideTimer: null,
   }
-  runtime.launcher = mountLauncher(doc, () => handleOpen(runtime))
+  runtime.launcher = mountLauncher(doc, () => handleOpen(runtime), widgetOrigin)
   runtime.launcher.addEventListener("pointerenter", () => warmPanel(runtime))
   runtime.launcher.addEventListener("focus", () => warmPanel(runtime))
   win.addEventListener("message", (event: MessageEvent) => handleHostMessage(runtime, event))

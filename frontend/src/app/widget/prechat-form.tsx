@@ -5,6 +5,14 @@ import { useCallback, useState, type FocusEvent, type FormEvent } from "react"
 import { Button } from "@/components/ui/button"
 import { FieldError } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
+import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 import { Textarea } from "@/components/ui/textarea"
 import { emailError, phoneError, requiredError } from "@/lib/validation"
 
@@ -29,6 +37,9 @@ const PRIVACY =
 
 const FIELD =
   "h-11 rounded-[8px] border border-line bg-paper px-3 py-2.5 text-base font-normal outline-none transition-colors focus-visible:border-steel focus-visible:ring-2 focus-visible:ring-steel"
+
+const ICE_BUTTON =
+  "border-steel/15 bg-ice-2 text-navy hover:!bg-[#e6eefc] hover:!text-navy focus-visible:ring-steel/30 min-h-11 w-full border px-4 text-sm font-bold leading-none shadow-[0_8px_20px_rgba(36,86,160,0.12)] focus-visible:ring-4"
 
 const focusNamed = (form: HTMLFormElement, name: string) => {
   const field = form.elements.namedItem(name)
@@ -186,11 +197,7 @@ const PrechatFields = ({
       </Button>
     </div>
     <div className="shrink-0 bg-transparent px-3 pt-2 pb-3">
-      <Button
-        type="submit"
-        variant="default"
-        className="bg-ember focus-visible:ring-ember/30 hover:bg-ember-mid min-h-11 w-full rounded-[22px] px-4 py-2.5 text-sm font-bold text-white shadow-[0_10px_24px_rgba(196,85,22,0.22)] focus-visible:ring-4 focus-visible:outline-none"
-      >
+      <Button type="submit" variant="secondary" size="lg" className={ICE_BUTTON}>
         Start the chat
       </Button>
     </div>
@@ -247,22 +254,36 @@ const INQUIRY_ITEMS = [
   { label: "Other", value: "other" },
 ]
 
+const INQUIRY_LABELS = Object.fromEntries(INQUIRY_ITEMS.map((item) => [item.value, item.label]))
+
 const InquirySelect = () => {
+  const [value, setValue] = useState("other")
+  const handleValueChange = useCallback((next: string | null) => {
+    if (typeof next === "string") {
+      setValue(next)
+    }
+  }, [])
   return (
-    <label className="text-ink flex flex-col gap-1 text-sm font-medium" htmlFor="inquiry-type">
-      Inquiry type
-      <select
-        id="inquiry-type"
-        name="inquiryType"
-        defaultValue="other"
-        className="border-line bg-paper text-ink focus-visible:border-steel focus-visible:ring-steel h-11 w-full cursor-pointer rounded-[8px] border px-3 text-base font-normal outline-none focus-visible:ring-2"
-      >
-        {INQUIRY_ITEMS.map((item) => (
-          <option key={item.value} value={item.value}>
-            {item.label}
-          </option>
-        ))}
-      </select>
-    </label>
+    <div className="text-ink flex flex-col gap-1 text-sm font-medium">
+      <label htmlFor="inquiry-type">Inquiry type</label>
+      <input type="hidden" name="inquiryType" value={value} />
+      <Select value={value} onValueChange={handleValueChange} items={INQUIRY_LABELS}>
+        <SelectTrigger
+          id="inquiry-type"
+          className="border-line bg-paper focus-visible:border-steel focus-visible:ring-steel h-11 w-full rounded-[8px] px-3 text-base font-normal"
+        >
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent align="start" alignItemWithTrigger={false}>
+          <SelectGroup>
+            {INQUIRY_ITEMS.map((item) => (
+              <SelectItem key={item.value} value={item.value}>
+                {item.label}
+              </SelectItem>
+            ))}
+          </SelectGroup>
+        </SelectContent>
+      </Select>
+    </div>
   )
 }

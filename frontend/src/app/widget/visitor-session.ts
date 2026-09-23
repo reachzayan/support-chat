@@ -121,6 +121,13 @@ const applyMessage = (view: ChatView, frame: Record<string, unknown>): ChatView 
   const responseOutcome = nullableString(frame.response_outcome)
   const reasonCode = nullableString(frame.reason_code)
   const createdAt = nullableString(frame.created_at)
+  const authorUser =
+    isRecord(frame.author_user) && typeof frame.author_user.display_name === "string"
+      ? {
+          id: typeof frame.author_user.id === "string" ? frame.author_user.id : "",
+          display_name: frame.author_user.display_name,
+        }
+      : null
   const lines = [
     ...view.lines,
     {
@@ -128,6 +135,7 @@ const applyMessage = (view: ChatView, frame: Record<string, unknown>): ChatView 
       role: frame.role,
       body: frame.body,
       created_at: createdAt,
+      author_user: authorUser,
       source_chunk_ids: sourceChunkIds,
       source_urls: sourceUrls,
       display_locator: displayLocator,

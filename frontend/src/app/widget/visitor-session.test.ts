@@ -67,6 +67,7 @@ describe("visitor session view", () => {
         response_outcome: null,
         reason_code: null,
         citations: [],
+        author_user: null,
       },
     ])
     expect(view.lastEventId).toBe(12)
@@ -136,6 +137,7 @@ describe("conversation snapshot", () => {
         response_outcome: null,
         reason_code: null,
         citations: [],
+        author_user: null,
       },
     ])
     expect(view.lastEventId).toBe(11)
