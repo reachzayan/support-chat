@@ -116,7 +116,7 @@ class SubmissionItemOut(BaseModel):
 
 class SubmissionListOut(BaseModel):
     items: list[SubmissionItemOut]
-    next_cursor: str | None = None
+    has_more: bool
 
 
 def _map_command_error(exc: CommandError) -> HTTPException:
@@ -146,11 +146,12 @@ async def list_conversations(
 async def list_submissions(
     session: SessionDep,
     _staff: CurrentUser,
-    cursor: Annotated[str | None, Query()] = None,
+    offset: Annotated[int, Query(ge=0)] = 0,
+    limit: Annotated[int | None, Query(ge=1, le=50)] = None,
 ) -> SubmissionListOut:
     service = ConversationQueries(session)
-    items, next_cursor = await service.list_submissions(cursor)
-    return SubmissionListOut.model_validate({"items": items, "next_cursor": next_cursor})
+    items, has_more = await service.list_submissions(offset, limit)
+    return SubmissionListOut.model_validate({"items": items, "has_more": has_more})
 
 
 @router.get("/api/conversations/{conversation_id}", response_model=ConversationDetailOut)

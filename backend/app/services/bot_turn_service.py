@@ -33,7 +33,6 @@ from app.services.grounded_response import (
     TurnContext,
     _has_prior_assistant,
     _is_source_followup,
-    contextual_grounding_query,
     history_recap_decision,
 )
 from app.services.kb_embedder import default_embedder
@@ -42,6 +41,9 @@ from app.services.pii_redactor import redact_for_model
 from app.services.response_cache import load_response, response_cache_key
 from app.services.route_decision import live_snapshots_for_site
 from app.settings import get_settings
+
+MAX_TURN_EVIDENCE = 8
+MAX_CARRIED_EVIDENCE = 2
 
 
 @dataclass
@@ -117,12 +119,19 @@ class BotTurnService:
         )
         if cached is not None:
             return PreparedBotReply(cached, stage_timings)
-        retrieval_text = await self._contextual_retrieval_query(
-            site.id, visitor_text, prior_messages, window
+        # Retrieval answers the current message exactly as written. Conversation
+        # continuity comes from live evidence cited by the previous bot answer,
+        # not from guessing whether this wording looks like a follow-up.
+        record_trace("retrieval", query=redact_for_model(visitor_text))
+        current_evidence = await self._evidence_loader(site.id, visitor_text, stage_timings)
+        carried_evidence = await self._load_carried_evidence(site.id, window)
+        evidence = self._merge_evidence(current_evidence, carried_evidence)
+        record_trace(
+            "retrieval",
+            current_evidence_ids=[unit.id for unit in current_evidence],
+            carried_evidence_ids=[unit.id for unit in carried_evidence],
+            evidence=evidence,
         )
-        record_trace("retrieval", query=redact_for_model(retrieval_text))
-        evidence = await self._evidence_loader(site.id, retrieval_text, stage_timings)
-        record_trace("retrieval", evidence=evidence)
         record_trace(
             "classification",
             evidence_topics=list(dict.fromkeys(unit.topic_label for unit in evidence)),
@@ -146,32 +155,65 @@ class BotTurnService:
         )
         return PreparedBotReply(decision, stage_timings, cache_key)
 
-    async def _contextual_retrieval_query(
+    async def _load_carried_evidence(
         self,
         site_id: UUID,
-        visitor_text: str,
-        prior_messages: tuple[dict[str, str], ...],
         window: list[Message],
-    ) -> str:
-        query = contextual_grounding_query(visitor_text, prior_messages)
-        if query == visitor_text:
-            return query
+    ) -> list[EvidenceUnit]:
         previous = next(
-            (row for row in reversed(window) if row.role == "bot" and row.citations), None
+            (row for row in reversed(window) if row.role == "bot" and row.citations),
+            None,
         )
         if previous is None:
-            return query
-        ids = list(dict.fromkeys(c.chunk_id for c in previous.citations))[:2]
-        rows = await self._session.execute(
-            live_chunks_query(site_id)
-            .with_only_columns(KbChunk.id, KbChunk.heading)
-            .where(KbChunk.id.in_(ids))
+            return []
+
+        citations = [citation for citation in previous.citations if citation.chunk_id is not None]
+        chunk_ids = list(dict.fromkeys(citation.chunk_id for citation in citations))[
+            :MAX_CARRIED_EVIDENCE
+        ]
+        if not chunk_ids:
+            return []
+        result = await self._session.execute(
+            live_chunks_query(site_id).where(KbChunk.id.in_(chunk_ids))
         )
-        headings = dict(rows.all())
-        subject = " ".join(
-            dict.fromkeys(headings[chunk_id] for chunk_id in ids if headings.get(chunk_id))
-        )
-        return contextual_grounding_query(visitor_text, prior_messages, source_subject=subject)
+        by_id = {chunk.id: (chunk, page) for chunk, page in result.all()}
+        metadata = {citation.chunk_id: citation for citation in citations}
+        carried: list[EvidenceUnit] = []
+        for chunk_id in chunk_ids:
+            row = by_id.get(chunk_id)
+            citation = metadata.get(chunk_id)
+            if row is None or citation is None:
+                continue
+            chunk, page = row
+            carried.append(
+                EvidenceUnit(
+                    id=chunk.id,
+                    canonical_question=chunk.canonical_question,
+                    aliases=tuple(chunk.aliases or ()),
+                    topic_label=chunk.topic_label or chunk.heading,
+                    answer_verbatim=chunk.answer_verbatim or chunk.body,
+                    source_title=citation.source_title or page.title,
+                    source_url=citation.source_url or page.public_url,
+                    snapshot_id=chunk.snapshot_id,
+                    risk_class=chunk.risk_class,
+                    answer_mode=chunk.answer_mode,
+                    enabled=chunk.enabled,
+                    live=True,
+                    source_heading="" if chunk.context_prefix else chunk.heading,
+                )
+            )
+        return carried
+
+    @staticmethod
+    def _merge_evidence(
+        current: list[EvidenceUnit],
+        carried: list[EvidenceUnit],
+    ) -> list[EvidenceUnit]:
+        """Reserve a small continuity budget while keeping current-topic evidence last."""
+        current_ids = {unit.id for unit in current}
+        continuity = [unit for unit in carried if unit.id not in current_ids][:MAX_CARRIED_EVIDENCE]
+        current_budget = MAX_TURN_EVIDENCE - len(continuity)
+        return [*continuity, *current[:current_budget]]
 
     def _grounded_response_engine(
         self, site: Site, stage_timings: dict[str, int]

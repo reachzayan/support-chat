@@ -16,7 +16,6 @@ from app.services.grounded_response import (
     ModelDraft,
     ResponseOutcome,
     TurnContext,
-    contextual_grounding_query,
 )
 from app.services.kb_embedder import FakeEmbedder, unit_vector
 from app.services.kb_page_structure import PageBlocks, evidence_from_blocks
@@ -333,21 +332,6 @@ def test_handoff_requires_an_affirmative_request(message, expected) -> None:
     assert is_escalate_request(message) is expected
 
 
-def test_self_contained_topic_switch_does_not_inherit_mail_context() -> None:
-    question = "We also want to confirm employers. Which product should we look at?"
-    query = contextual_grounding_query(
-        question,
-        (
-            {"role": "user", "content": "What extra benefit does SampleMail Plus provide?"},
-            {
-                "role": "assistant",
-                "content": "SampleMail Plus supplies refreshed addresses for returned mail.",
-            },
-        ),
-    )
-    assert query == question
-
-
 def test_unsupported_non_numeric_ingestion_claim_cannot_be_cited() -> None:
     source = "Sample Identity Search is a consumer public-records search service."
     units = evidence_from_blocks(
@@ -502,16 +486,6 @@ async def test_repeated_malware_requests_never_offer_a_specialist() -> None:
     assert result.outcome is ResponseOutcome.BOUNDARY
     assert result.reason_code == "off_topic"
     assert result.offer_handoff is False
-
-
-def test_short_named_topic_switch_does_not_inherit_previous_answer() -> None:
-    assert (
-        contextual_grounding_query(
-            "What is VBANK?",
-            ({"role": "assistant", "content": "SampleMail Plus refreshes addresses."},),
-        )
-        == "What is VBANK?"
-    )
 
 
 def test_deduplication_keeps_a_distinct_prohibition() -> None:

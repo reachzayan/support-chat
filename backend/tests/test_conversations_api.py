@@ -109,6 +109,8 @@ def _insert_conversation(
     referrer: str | None = None,
     assigned_agent_id: uuid.UUID | None = None,
     closed_at: datetime | None = None,
+    prechat_submission_id: uuid.UUID | None = None,
+    prechat_payload_hash: str | None = None,
 ) -> Conversation:
     conversation = Conversation(
         site_id=site.id,
@@ -122,6 +124,8 @@ def _insert_conversation(
         assigned_agent_id=assigned_agent_id,
         last_message_at=last_message_at,
         closed_at=closed_at,
+        prechat_submission_id=prechat_submission_id,
+        prechat_payload_hash=prechat_payload_hash,
     )
     session.add(conversation)
     session.flush()
@@ -421,3 +425,78 @@ def test_canned_replies_are_site_scoped_and_require_staff(client: TestClient) ->
     assert easy_items == [{"shortcut": "hours", "body": HOURS_BODY, "scope": "website"}]
     assert other_items[0]["body"] != HOURS_BODY
     assert other_items[0]["shortcut"] == "hours"
+
+
+def test_submissions_offset_pages_newest_first_and_skips_unsubmitted(
+    client: TestClient,
+) -> None:
+    session = _session()
+    try:
+        site = _insert_site(session, EASY_KEY, EASY_NAME)
+        ada = _insert_visitor(session, site, name=ADA_NAME, email=ADA_EMAIL)
+        blair = _insert_visitor(session, site, name="Blair Diaz", email="blair@example.com")
+        casey = _insert_visitor(session, site, name="Casey Ortiz", email="casey@example.com")
+        draft = _insert_visitor(session, site, name="Draft Only", email="draft@example.com")
+        now = datetime(2026, 9, 9, 15, 0, tzinfo=UTC)
+        _insert_conversation(
+            session,
+            site,
+            ada,
+            "queued",
+            last_message_at=now,
+            prechat_submission_id=uuid.uuid4(),
+            prechat_payload_hash="ada-form",
+        )
+        _insert_conversation(
+            session,
+            site,
+            blair,
+            "queued",
+            last_message_at=now - timedelta(hours=1),
+            prechat_submission_id=uuid.uuid4(),
+            prechat_payload_hash="blair-form",
+        )
+        _insert_conversation(
+            session,
+            site,
+            casey,
+            "queued",
+            last_message_at=now - timedelta(hours=2),
+            prechat_submission_id=uuid.uuid4(),
+            prechat_payload_hash="casey-form",
+        )
+        _insert_conversation(
+            session,
+            site,
+            draft,
+            "prechat",
+            last_message_at=now + timedelta(hours=1),
+        )
+        session.commit()
+    finally:
+        session.close()
+
+    token = _seed_staff(client)
+    first = client.get(
+        "/api/conversations/submissions",
+        params={"offset": 0, "limit": 2},
+        headers=_auth(token),
+    )
+    second = client.get(
+        "/api/conversations/submissions",
+        params={"offset": 2, "limit": 2},
+        headers=_auth(token),
+    )
+    assert first.status_code == 200
+    assert second.status_code == 200
+    first_names = [item["visitor"]["name"] for item in first.json()["items"]]
+    second_names = [item["visitor"]["name"] for item in second.json()["items"]]
+    assert first_names == [ADA_NAME, "Blair Diaz"]
+    assert first.json()["has_more"] is True
+    assert "next_cursor" not in first.json()
+    assert second_names == ["Casey Ortiz"]
+    assert second.json()["has_more"] is False
+    assert "Draft Only" not in first_names + second_names
+
+    unauthenticated = client.get("/api/conversations/submissions", params={"offset": 0, "limit": 2})
+    assert unauthenticated.status_code == 401

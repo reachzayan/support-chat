@@ -52,24 +52,20 @@ class ConversationQueries:
         counts = await self._conversations.count_inbox_by_state()
         return items, next_cursor, counts
 
-    async def list_submissions(self, cursor: str | None) -> tuple[list[dict], str | None]:
-        cursor_ts, cursor_id = _decode_submission_cursor(cursor)
+    async def list_submissions(self, offset: int, limit: int | None) -> tuple[list[dict], bool]:
+        page_size = SUBMISSIONS_PAGE if limit is None else min(max(limit, 1), SUBMISSIONS_PAGE)
+        start = max(offset, 0)
         rows = await self._conversations.list_submissions(
-            cursor_ts=cursor_ts,
-            cursor_id=cursor_id,
-            limit=SUBMISSIONS_PAGE + 1,
+            offset=start,
+            limit=page_size + 1,
         )
-        extra = rows[SUBMISSIONS_PAGE:]
-        page = rows[:SUBMISSIONS_PAGE]
+        extra = rows[page_size:]
+        page = rows[:page_size]
         items = [
             _submission_item(conversation, visitor, site, agent, opening)
             for conversation, visitor, site, agent, opening in page
         ]
-        next_cursor = None
-        if extra and page:
-            last = page[-1][0]
-            next_cursor = _encode_submission_cursor(last.last_message_at, last.id)
-        return items, next_cursor
+        return items, bool(extra)
 
     async def get_inbox_detail(
         self, conversation_id: UUID, *, before_id: int | None = None
@@ -160,14 +156,6 @@ def _inbox_state(state: str | None) -> str | None:
 def _encode_inbox_cursor(ts: datetime, conversation_id: UUID) -> str:
     raw = f"{ts.isoformat()}|{conversation_id}"
     return urlsafe_b64encode(raw.encode("utf-8")).decode("ascii").rstrip("=")
-
-
-def _encode_submission_cursor(ts: datetime, conversation_id: UUID) -> str:
-    return _encode_inbox_cursor(ts, conversation_id)
-
-
-def _decode_submission_cursor(cursor: str | None) -> tuple[datetime | None, UUID | None]:
-    return _decode_inbox_cursor(cursor)
 
 
 def _decode_inbox_cursor(cursor: str | None) -> tuple[datetime | None, UUID | None]:

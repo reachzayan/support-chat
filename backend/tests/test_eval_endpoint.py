@@ -23,6 +23,8 @@ def former_eval_client(client, monkeypatch, request):
         "/api/internal/eval/turn",
         "/api/internal/eval/run",
         "/api/internal/playground/turn",
+        "/api/internal/dev/chat",
+        "/api/internal/dev/trace",
     ],
 )
 def test_temporary_internal_chat_routes_are_not_found(former_eval_client, path: str) -> None:
@@ -39,3 +41,5 @@ def test_temporary_internal_chat_routes_are_not_advertised(former_eval_client) -
     assert "/api/internal/eval/turn" not in paths
     assert "/api/internal/eval/run" not in paths
     assert "/api/internal/playground/turn" not in paths
+    assert "/api/internal/dev/chat" not in paths
+    assert "/api/internal/dev/trace" not in paths

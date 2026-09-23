@@ -98,6 +98,21 @@ def test_public_hosts_cannot_reach_internal_widget_csp_route(
     assert response.json() == {"detail": "Not found"}
 
 
+@pytest.mark.parametrize("path", ["/api/internal/dev/chat", "/api/internal/dev/trace"])
+def test_temporary_chat_workbench_is_not_registered_in_production(
+    production_client: TestClient,
+    path: str,
+) -> None:
+    response = production_client.post(
+        path,
+        headers={"Host": "backend:8000"},
+        json={"site_key": "samplesite", "message": "hello"},
+    )
+
+    assert response.status_code == 404
+    assert response.json() == {"detail": "Not Found"}
+
+
 def test_widget_host_cannot_open_agent_socket_even_with_staff_origin(
     production_client: TestClient,
 ) -> None:

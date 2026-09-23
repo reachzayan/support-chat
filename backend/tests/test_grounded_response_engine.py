@@ -12,7 +12,6 @@ from app.services.grounded_response import (
     ProviderStatus,
     ResponseOutcome,
     TurnContext,
-    contextual_grounding_query,
 )
 
 DOT_EVIDENCE = EvidenceUnit(
@@ -114,32 +113,6 @@ async def test_one_valid_citation_does_not_authorize_an_uncited_business_claim()
     assert "free annual audits" not in decision.body
     assert decision.reason_code == "grounding_reject"
     assert decision.outcome is ResponseOutcome.KNOWLEDGE_GAP
-
-
-@pytest.mark.parametrize(
-    ("visitor_text", "assistant_text"),
-    [
-        (
-            "standard",
-            "Are you looking for DOT-regulated testing or a standard workplace program? "
-            "I can help with either.",
-        ),
-        ("huh?", "A specialist can confirm the timeline."),
-        ("what did you say?", "We can help with workplace screening."),
-    ],
-)
-def test_retrieval_query_keeps_context_for_fragments(
-    visitor_text: str, assistant_text: str
-) -> None:
-    query = contextual_grounding_query(
-        visitor_text,
-        (
-            {"role": "user", "content": "I need drug screening for 10 employees."},
-            {"role": "assistant", "content": assistant_text},
-        ),
-    )
-
-    assert query == f"{assistant_text} {visitor_text}"
 
 
 @pytest.mark.asyncio
