@@ -13,7 +13,7 @@ const AlertDialogTitle = ({ className, ...props }: AlertDialogPrimitive.Title.Pr
 const AlertDialogDescription = AlertDialogPrimitive.Description
 
 const ALERT_FRAME =
-  "border-line bg-paper text-ink pointer-events-auto isolate z-50 flex w-[calc(100%-2rem)] max-w-md flex-col overflow-hidden rounded-2xl border shadow-[0_16px_48px_rgba(13,31,58,0.22)] transition-[opacity,scale] duration-200 data-ending-style:scale-[0.97] data-ending-style:opacity-0 data-starting-style:scale-[0.97] data-starting-style:opacity-0"
+  "border-line bg-paper text-ink pointer-events-auto isolate z-50 flex w-[calc(100%-2rem)] max-w-md flex-col overflow-hidden rounded-card border shadow-[0_16px_48px_rgba(13,31,58,0.22)] transition-[opacity,scale] duration-200 data-ending-style:scale-[0.97] data-ending-style:opacity-0 data-starting-style:scale-[0.97] data-starting-style:opacity-0"
 
 const AlertDialogContent = ({
   className,
