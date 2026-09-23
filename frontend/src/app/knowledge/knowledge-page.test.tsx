@@ -119,7 +119,7 @@ describe("knowledge console", () => {
     if (!(otherCard instanceof HTMLElement)) {
       throw new Error("expected the SampleData source card")
     }
-    await user.click(within(otherCard).getByText("Ready"))
+    await user.click(within(otherCard).getByRole("button", { name: /Sample Data Services/i }))
     expect(screen.getByRole("button", { name: OTHER_PAGE_TITLE })).toBeInTheDocument()
     await waitFor(() =>
       expect(screen.queryByRole("button", { name: PAGE_TITLE })).not.toBeInTheDocument(),

@@ -158,6 +158,16 @@ const asStringList = (value: unknown): string[] | null => {
   return value.filter((item): item is string => typeof item === "string")
 }
 
+const parseAuthor = (value: unknown): AssignedAgent | null => {
+  if (!isRecord(value) || typeof value.display_name !== "string") {
+    return null
+  }
+  return {
+    id: typeof value.id === "string" ? value.id : "",
+    display_name: value.display_name,
+  }
+}
+
 const parseMessage = (frame: Record<string, unknown>): InboxMessage | null => {
   if (frame.type !== "message" || typeof frame.id !== "number" || typeof frame.body !== "string") {
     return null
@@ -165,7 +175,7 @@ const parseMessage = (frame: Record<string, unknown>): InboxMessage | null => {
   return {
     id: frame.id,
     role: typeof frame.role === "string" ? frame.role : "system",
-    author_user: null,
+    author_user: parseAuthor(frame.author_user),
     body: frame.body,
     source_article_ids: asStringList(frame.source_article_ids),
     source_chunk_ids: asStringList(frame.source_chunk_ids),

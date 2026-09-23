@@ -1,5 +1,8 @@
+"use client"
+
 import { ChevronDown } from "lucide-react"
-import type { ReactNode } from "react"
+import { motion, useReducedMotion } from "motion/react"
+import { useCallback, useState, type ReactNode } from "react"
 
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import { parseUserAgent, safeHttpUrl } from "@/lib/ua"
@@ -10,11 +13,18 @@ type VisitorRailProps = {
   detail: ConversationDetail
 }
 
+const CHEVRON_SPRING = { type: "spring", stiffness: 420, damping: 28, mass: 0.55 } as const
+const ZERO_TRANSITION = { duration: 0 }
+const CHEVRON_OPEN = { rotate: 180 }
+const CHEVRON_CLOSED = { rotate: 0 }
+
 const Fact = ({ label, children }: { label: string; children: ReactNode }) => {
   return (
-    <div>
-      <dt className="text-mute text-[10px] font-medium tracking-[0.12em] uppercase">{label}</dt>
-      <dd className="text-ink mt-1 text-sm leading-5 break-words">{children}</dd>
+    <div className="border-line/70 grid grid-cols-[5.5rem_minmax(0,1fr)] gap-3 border-b py-2.5 last:border-b-0">
+      <dt className="text-mute pt-0.5 text-[10px] font-semibold tracking-[0.12em] uppercase">
+        {label}
+      </dt>
+      <dd className="text-ink min-w-0 text-sm leading-5 break-words">{children}</dd>
     </div>
   )
 }
@@ -42,23 +52,40 @@ const RailSection = ({
   title: string
   defaultOpen?: boolean
   children: ReactNode
-}) => (
-  <Collapsible defaultOpen={defaultOpen} className="border-line border-b pb-1 last:border-b-0">
-    <CollapsibleTrigger
-      aria-label={title}
-      className="group text-mute hover:text-ink flex w-full items-center justify-between px-5 py-3 text-left text-[10px] font-semibold tracking-[0.12em] uppercase focus-visible:ring-0"
+}) => {
+  const [open, setOpen] = useState(defaultOpen)
+  const reducedMotion = useReducedMotion()
+  const chevronTransition = reducedMotion ? ZERO_TRANSITION : CHEVRON_SPRING
+  const chevronAnimate = open ? CHEVRON_OPEN : CHEVRON_CLOSED
+  const handleOpenChange = useCallback((next: boolean) => {
+    setOpen(next)
+  }, [])
+  return (
+    <Collapsible
+      open={open}
+      onOpenChange={handleOpenChange}
+      className="border-line bg-paper mx-3 mt-3 overflow-hidden rounded-lg border"
     >
-      <span>{title}</span>
-      <ChevronDown
-        aria-hidden="true"
-        className="size-3.5 transition-transform duration-150 group-aria-expanded:rotate-180"
-      />
-    </CollapsibleTrigger>
-    <CollapsibleContent className="mt-0 px-5 pb-1">
-      <dl className="flex flex-col gap-3">{children}</dl>
-    </CollapsibleContent>
-  </Collapsible>
-)
+      <CollapsibleTrigger
+        aria-label={title}
+        className="group text-navy hover:bg-ice-2 h-11 w-full justify-between rounded-none px-3.5 text-left text-[10px] font-bold tracking-[0.14em] uppercase aria-expanded:bg-transparent"
+      >
+        <span>{title}</span>
+        <motion.span
+          aria-hidden="true"
+          className="inline-flex"
+          animate={chevronAnimate}
+          transition={chevronTransition}
+        >
+          <ChevronDown className="size-3.5" aria-hidden="true" />
+        </motion.span>
+      </CollapsibleTrigger>
+      <CollapsibleContent className="mt-0 px-3 pb-2">
+        <dl>{children}</dl>
+      </CollapsibleContent>
+    </Collapsible>
+  )
+}
 
 const orNone = (value: string | null) => value ?? "None"
 
@@ -74,7 +101,7 @@ const VisitorRailHeader = ({
   siteName: string
   closed: boolean
 }) => (
-  <div className="border-line flex h-16 items-center gap-3 border-b px-5">
+  <div className="border-line bg-paper flex h-16 shrink-0 items-center gap-3 border-b px-5">
     <span className="bg-ice-2 text-steel flex size-10 shrink-0 items-center justify-center rounded-full text-sm font-bold">
       {name.slice(0, 1).toUpperCase()}
     </span>
@@ -143,7 +170,7 @@ export const VisitorRail = ({ detail }: VisitorRailProps) => {
   return (
     <aside
       aria-label="Visitor facts"
-      className="border-line bg-paper flex min-h-0 w-full flex-col overflow-y-auto border-l lg:w-[300px] lg:shrink-0"
+      className="border-line bg-ice/60 flex min-h-0 w-full flex-col overflow-y-auto border-l pb-3 lg:w-[320px] lg:shrink-0"
     >
       <VisitorRailHeader
         name={name}

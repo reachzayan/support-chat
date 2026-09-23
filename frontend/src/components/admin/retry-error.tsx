@@ -1,3 +1,5 @@
+import { Button } from "@/components/ui/button"
+
 export const RetryError = ({
   text,
   onRetry,
@@ -9,8 +11,8 @@ export const RetryError = ({
 }) => (
   <p className={`text-ember text-xs ${className}`} role="alert">
     {text}{" "}
-    <button type="button" className="underline underline-offset-2" onClick={onRetry}>
+    <Button type="button" variant="link" size="sm" onClick={onRetry}>
       Retry
-    </button>
+    </Button>
   </p>
 )

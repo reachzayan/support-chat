@@ -89,12 +89,13 @@ describe("inbox layout", () => {
     })
     await waitFor(() => expect(screen.getByText("I can help with that.")).toBeInTheDocument())
     const transcript = screen.getByRole("log", { name: "Transcript" })
+    expect(within(transcript).queryByRole("img")).not.toBeInTheDocument()
     expect(
-      within(transcript).getByText("How fast are DOT results?").closest(".widget-bubble"),
-    ).toHaveClass("rounded-[20px]", "mr-auto", "bg-paper")
+      within(transcript).getByText("How fast are DOT results?").closest('[data-slot="message"]'),
+    ).toHaveAttribute("data-align", "start")
     expect(
-      within(transcript).getByText("I can help with that.").closest(".widget-bubble"),
-    ).toHaveClass("rounded-[20px]", "ml-auto", "bg-steel/15")
+      within(transcript).getByText("I can help with that.").closest('[data-slot="message"]'),
+    ).toHaveAttribute("data-align", "end")
   })
 })
 

@@ -27,8 +27,10 @@ import {
 
 import { ClientErrorReporter } from "@/components/admin/client-error-reporter"
 import { StaffPageSkeleton } from "@/components/admin/loading-skeleton"
+import { BrandMark } from "@/components/brand-mark"
 import { usePreferences } from "@/components/preferences-context"
 import { ThemeToggle } from "@/components/theme-toggle"
+import { Button } from "@/components/ui/button"
 import {
   Sidebar,
   SidebarContent,
@@ -260,9 +262,7 @@ const AdminSidebarBrand = ({ collapsed }: { collapsed: boolean }) => (
         collapsed ? "size-8 justify-center gap-0" : "w-full",
       )}
     >
-      <span className="bg-ember flex size-7 shrink-0 items-center justify-center rounded-[8px] text-[10px] font-semibold tracking-[-0.08em] text-white shadow-[0_4px_14px_rgba(196,85,22,0.32)]">
-        Support
-      </span>
+      <BrandMark size={28} className="size-7" />
       {!collapsed ? (
         <span className="heading min-w-0 truncate text-sm text-white">SupportChat</span>
       ) : null}
@@ -416,12 +416,14 @@ const SessionRetryPanel = ({ onRetry }: { onRetry: () => void }) => (
   <div className="bg-ice flex min-h-0 flex-1 flex-col items-center justify-center px-6 text-center">
     <p className="text-navy heading text-sm">Could not reach the staff API.</p>
     <p className="text-mute mt-2 text-sm">Check your connection and try again.</p>
-    <button
+    <Button
       type="button"
-      className="bg-ember mt-4 rounded-[8px] px-4 py-2 text-sm font-semibold text-white"
+      variant="default"
+      size="lg"
+      className="mt-4 font-semibold"
       onClick={onRetry}
     >
       Retry
-    </button>
+    </Button>
   </div>
 )

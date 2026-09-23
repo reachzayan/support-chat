@@ -3,6 +3,7 @@
 import { useCallback, useState } from "react"
 
 import type { SiteRecord } from "@/components/admin/staff-api"
+import { Button } from "@/components/ui/button"
 import {
   Dialog,
   DialogContent,
@@ -63,8 +64,6 @@ export const AddSiteModal = ({
                 <AddSiteInstallPanel
                   site={created}
                   checking={form.checking}
-                  copyNotice={form.copyNotice}
-                  onCopy={form.handleCopy}
                   onCheckInstall={form.handleCheckInstall}
                 />
               </div>
@@ -93,19 +92,37 @@ export const AddSiteModal = ({
               </div>
             )}
           </ScrollArea>
-          <DialogFooter className="flex-row justify-end gap-2">
+          <DialogFooter className="flex-row items-center justify-end gap-2">
             {created ? (
-              <button type="button" onClick={form.handleDone} className={BTN_PRIMARY}>
+              <Button
+                type="button"
+                variant="default"
+                size="lg"
+                onClick={form.handleDone}
+                className={BTN_PRIMARY}
+              >
                 Done
-              </button>
+              </Button>
             ) : (
               <>
-                <button type="button" onClick={form.requestClose} className={BTN_SECONDARY}>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="lg"
+                  onClick={form.requestClose}
+                  className={BTN_SECONDARY}
+                >
                   Close
-                </button>
-                <button type="button" onClick={form.handleSubmit} className={BTN_PRIMARY}>
+                </Button>
+                <Button
+                  type="button"
+                  variant="default"
+                  size="lg"
+                  onClick={form.handleSubmit}
+                  className={BTN_PRIMARY}
+                >
                   Create website
-                </button>
+                </Button>
               </>
             )}
           </DialogFooter>

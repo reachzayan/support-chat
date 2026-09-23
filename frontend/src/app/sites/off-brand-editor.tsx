@@ -67,6 +67,7 @@ export const OffBrandEditor = ({ site, isAdmin, onError, onSaved }: OffBrandEdit
         <div className="flex justify-end">
           <Button
             type="button"
+            variant="ghost"
             onClick={handleSave}
             className="bg-navy text-primary-foreground hover:bg-navy-deep focus-visible:ring-steel cursor-pointer rounded-lg px-4 py-2.5 text-sm font-bold focus-visible:ring-2 focus-visible:outline-none"
           >

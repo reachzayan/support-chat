@@ -5,6 +5,7 @@ import { useCallback, useState, type ChangeEvent } from "react"
 import { staffWrite } from "@/components/admin/staff-api"
 import { Button } from "@/components/ui/button"
 import { FieldError } from "@/components/ui/field"
+import { Spinner } from "@/components/ui/spinner"
 import { Textarea } from "@/components/ui/textarea"
 import { ToggleGroup } from "@/components/ui/toggle-group"
 
@@ -80,11 +81,14 @@ export const HandoffOutcomeForm = ({ handoffId, onResolved }: HandoffOutcomeForm
       <FieldError>{error ?? undefined}</FieldError>
       <Button
         type="button"
+        variant="default"
+        size="lg"
         disabled={saving}
         onClick={handleSubmit}
-        className="bg-ember hover:bg-ember-mid focus-visible:ring-steel dark:text-navy-deep h-9 rounded-[8px] px-4 text-sm font-bold text-white"
+        className="font-bold"
       >
-        Resolve handoff
+        {saving ? <Spinner data-icon="inline-start" /> : null}
+        {saving ? "Resolving…" : "Resolve handoff"}
       </Button>
     </div>
   )

@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react"
 
 import { staffRead, staffWrite, type HandoffContextRecord } from "@/components/admin/staff-api"
 import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
 
 import { HandoffCardDialog } from "./handoff-card-dialog"
 import { handoffRouteLabel, REASON_STYLES } from "./handoff-utils"
@@ -71,8 +72,9 @@ const HandoffCardInner = ({ conversationId, isAdmin }: HandoffCardProps) => {
 
   return (
     <>
-      <button
+      <Button
         type="button"
+        variant="ghost"
         onClick={handleOpen}
         aria-haspopup="dialog"
         aria-expanded={open}
@@ -80,7 +82,7 @@ const HandoffCardInner = ({ conversationId, isAdmin }: HandoffCardProps) => {
       >
         <Badge className={`${reasonClass} pointer-events-none`}>{handoff.escalation_reason}</Badge>
         <span>{resolved ? "Handoff resolved" : "Handoff context"}</span>
-      </button>
+      </Button>
       <HandoffCardDialog
         handoff={handoff}
         open={open}

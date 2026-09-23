@@ -1,8 +1,11 @@
 "use client"
 
-import type { SiteRecord } from "@/components/admin/staff-api"
+import { Plus } from "lucide-react"
 
-import { BTN_PRIMARY, LABEL } from "./sites-shared"
+import type { SiteRecord } from "@/components/admin/staff-api"
+import { Button } from "@/components/ui/button"
+
+import { LABEL } from "./sites-shared"
 import { SitesTable } from "./sites-table"
 
 export const SitesDirectory = ({
@@ -20,7 +23,7 @@ export const SitesDirectory = ({
   onOpenManage: (siteId: string) => void
   onCheckInstall: (siteId: string) => void
 }) => (
-  <section className="border-line bg-paper min-w-0 overflow-hidden rounded-[8px] border">
+  <section className="border-line bg-paper min-w-0 overflow-hidden rounded-lg border">
     <div className="border-line flex flex-wrap items-center justify-between gap-3 border-b px-4 py-3 sm:px-5">
       <div>
         <p className={LABEL}>Directory</p>
@@ -29,9 +32,16 @@ export const SitesDirectory = ({
         </p>
       </div>
       {isAdmin ? (
-        <button type="button" onClick={onOpenAdd} className={BTN_PRIMARY}>
+        <Button
+          type="button"
+          variant="default"
+          size="lg"
+          onClick={onOpenAdd}
+          className="font-semibold"
+        >
+          <Plus data-icon="inline-start" aria-hidden="true" />
           Add new website
-        </button>
+        </Button>
       ) : null}
     </div>
 

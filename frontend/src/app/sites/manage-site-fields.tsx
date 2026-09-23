@@ -8,6 +8,7 @@ import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 
 import { ContactInfoField, WebsiteUrlField } from "./add-site-fields"
+import { CopyButton } from "./copy-button"
 import { SiteField } from "./sites-form"
 import { FIELD } from "./sites-shared"
 
@@ -225,15 +226,7 @@ const ManageSiteIdentity = ({
   </div>
 )
 
-export const ManageSiteSnippet = ({
-  site,
-  copyNotice,
-  onCopy,
-}: {
-  site: SiteRecord
-  copyNotice: string | null
-  onCopy: () => void
-}) => (
+export const ManageSiteSnippet = ({ site }: { site: SiteRecord }) => (
   <Field>
     <FieldLabel htmlFor={`manage-snippet-${site.id}`}>Embed snippet</FieldLabel>
     <Textarea
@@ -247,13 +240,6 @@ export const ManageSiteSnippet = ({
       Identifies this brand to the widget. Keep the public key in the embed snippet with the site
       key.
     </FieldDescription>
-    <button
-      type="button"
-      onClick={onCopy}
-      className="border-line bg-paper text-ink hover:bg-ice focus-visible:ring-steel w-fit cursor-pointer rounded-lg border px-3 py-2 text-xs font-bold focus-visible:ring-2 focus-visible:outline-none"
-    >
-      Copy snippet
-    </button>
-    {copyNotice ? <output className="text-steel text-xs">{copyNotice}</output> : null}
+    <CopyButton value={site.snippet} className="w-fit" />
   </Field>
 )

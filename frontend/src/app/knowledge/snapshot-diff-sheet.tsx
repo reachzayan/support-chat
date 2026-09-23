@@ -3,6 +3,7 @@
 import { useCallback } from "react"
 
 import type { KbDiff, KbEvidenceUnit, KbProgressRecord } from "@/components/admin/staff-api"
+import { Button } from "@/components/ui/button"
 import {
   Sheet,
   SheetContent,
@@ -11,6 +12,7 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet"
+import { Spinner } from "@/components/ui/spinner"
 
 import { describeProgressEvent } from "./knowledge-format"
 
@@ -73,14 +75,17 @@ export const SnapshotDiffSheet = ({
         </div>
         {canRollback ? (
           <SheetFooter className="border-line border-t">
-            <button
+            <Button
               type="button"
+              variant="destructive"
+              size="lg"
               onClick={handleRollback}
               disabled={rollbackBusy}
-              className="bg-ember hover:bg-ember-mid focus-visible:ring-steel dark:text-navy-deep rounded-[8px] px-4 py-2.5 text-sm font-bold text-white focus-visible:ring-2 focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-60"
+              className="font-bold"
             >
-              Roll back to previous snapshot
-            </button>
+              {rollbackBusy ? <Spinner data-icon="inline-start" /> : null}
+              {rollbackBusy ? "Rolling back…" : "Roll back to previous snapshot"}
+            </Button>
           </SheetFooter>
         ) : null}
       </SheetContent>

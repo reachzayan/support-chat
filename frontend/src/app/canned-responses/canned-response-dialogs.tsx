@@ -21,6 +21,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import { FieldError } from "@/components/ui/field"
+import { Spinner } from "@/components/ui/spinner"
 import { Switch } from "@/components/ui/switch"
 import { Textarea } from "@/components/ui/textarea"
 
@@ -32,7 +33,7 @@ const keyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
     event.currentTarget.form?.requestSubmit()
 }
 
-// oxlint-disable-next-line eslint/max-lines-per-function -- Form fields, scope picker, and submit validation stay together for one reviewable edit flow.
+// oxlint-disable-next-line eslint/max-lines-per-function, eslint/complexity -- Form fields, scope picker, and submit validation stay together for one reviewable edit flow.
 export const ResponseForm = ({
   form,
   sites,
@@ -130,11 +131,12 @@ export const ResponseForm = ({
               </label>
               <FieldError>{formError || undefined}</FieldError>
             </div>
-            <DialogFooter className="flex-row justify-end">
-              <Button type="button" variant="outline" onClick={onRequestClose}>
+            <DialogFooter className="flex-row items-center justify-end gap-2">
+              <Button type="button" variant="outline" size="lg" onClick={onRequestClose}>
                 Cancel
               </Button>
-              <Button type="submit" disabled={submitting} className="bg-ember hover:bg-ember/90">
+              <Button type="submit" variant="default" size="lg" disabled={submitting}>
+                {submitting ? <Spinner data-icon="inline-start" /> : null}
                 {submitting ? "Saving…" : form.id ? "Save changes" : "Save response"}
               </Button>
             </DialogFooter>
@@ -176,6 +178,7 @@ export const DeleteDialog = ({
       <AlertDialogFooter>
         <AlertDialogClose render={<Button variant="outline">Cancel</Button>} />
         <Button variant="destructive" disabled={deleting} onClick={onConfirm}>
+          {deleting ? <Spinner data-icon="inline-start" /> : null}
           {deleting ? "Removing…" : "Remove response"}
         </Button>
       </AlertDialogFooter>

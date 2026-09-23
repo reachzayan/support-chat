@@ -43,7 +43,12 @@ export const CannedResponsesConsole = () => {
           <div className="border-line bg-paper w-full max-w-md rounded-xl border p-6 text-center">
             <p className="text-navy heading text-base">Canned responses could not be loaded</p>
             <p className="text-mute mt-2 text-sm">Check your connection and try again.</p>
-            <Button className="bg-ember hover:bg-ember/90 mt-5" onClick={() => void state.load()}>
+            <Button
+              variant="default"
+              size="lg"
+              className="mt-5 font-bold"
+              onClick={() => void state.load()}
+            >
               Retry
             </Button>
           </div>
@@ -72,8 +77,8 @@ export const CannedResponsesConsole = () => {
         title="Canned responses"
         description="Reuse approved specialist wording across chats."
         action={
-          <Button className="bg-ember hover:bg-ember/90" onClick={state.openCreate}>
-            <Plus aria-hidden="true" /> Add response
+          <Button variant="default" size="lg" className="font-bold" onClick={state.openCreate}>
+            <Plus data-icon="inline-start" aria-hidden="true" /> Add response
           </Button>
         }
       />
@@ -97,6 +102,9 @@ export const CannedResponsesConsole = () => {
               <span className="border-line bg-ice flex h-10 items-center gap-2 rounded-[8px] border px-3">
                 <Search aria-hidden="true" className="text-mute size-4" />
                 <Input
+                  type="search"
+                  autoComplete="off"
+                  spellCheck={false}
                   aria-label="Search canned responses"
                   value={state.query}
                   onChange={(event) => state.updateQuery(event.target.value)}
@@ -127,7 +135,28 @@ export const CannedResponsesConsole = () => {
         </section>
 
         {state.visible.length === 0 ? (
-          <EmptyState scope={state.scope} sites={state.sites} onAdd={state.openCreate} />
+          state.query.trim() || state.status !== "all" ? (
+            <section className="border-line bg-paper rounded-xl border p-8 text-center">
+              <p className="text-navy heading text-base">
+                {state.query.trim()
+                  ? `No responses match “${state.query.trim()}”`
+                  : `No ${state.status} responses in this scope`}
+              </p>
+              <p className="text-mute mx-auto mt-2 max-w-md text-sm">
+                Try fewer words, another shortcut, or clear the current search filters.
+              </p>
+              <Button
+                type="button"
+                variant="outline"
+                className="mt-5"
+                onClick={state.clearSearchFilters}
+              >
+                Clear search filters
+              </Button>
+            </section>
+          ) : (
+            <EmptyState scope={state.scope} sites={state.sites} onAdd={state.openCreate} />
+          )
         ) : (
           <section className="border-line bg-paper overflow-hidden rounded-xl border">
             <div className="hidden overflow-x-auto md:block">
@@ -212,7 +241,7 @@ export const CannedResponsesConsole = () => {
           <AlertDialogFooter>
             <AlertDialogClose render={<Button variant="outline">Keep editing</Button>} />
             <Button
-              className="bg-ember hover:bg-ember/90"
+              variant="default"
               onClick={() => {
                 state.setDiscardOpen(false)
                 state.setForm(null)

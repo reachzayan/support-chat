@@ -3,6 +3,7 @@
 import { useCallback, useState } from "react"
 
 import type { SiteRecord } from "@/components/admin/staff-api"
+import { Button } from "@/components/ui/button"
 import {
   Dialog,
   DialogContent,
@@ -99,30 +100,40 @@ export const ManageSiteModal = ({
                 onError={handleError}
                 onSaved={onSaved}
               />
-              <ManageSiteSnippet
-                site={site}
-                copyNotice={form.copyNotice}
-                onCopy={form.handleCopy}
-              />
+              <ManageSiteSnippet site={site} />
             </div>
           </ScrollArea>
-          <DialogFooter className="flex-row justify-end gap-2">
+          <DialogFooter className="flex-row items-center justify-end gap-2">
             {isAdmin ? (
-              <button
+              <Button
                 type="button"
+                variant="destructive"
+                size="lg"
                 onClick={handleRequestDelete}
                 className={`${BTN_DANGER} mr-auto`}
               >
                 Delete
-              </button>
+              </Button>
             ) : null}
-            <button type="button" onClick={form.requestClose} className={BTN_SECONDARY}>
+            <Button
+              type="button"
+              variant="outline"
+              size="lg"
+              onClick={form.requestClose}
+              className={BTN_SECONDARY}
+            >
               Close
-            </button>
+            </Button>
             {isAdmin ? (
-              <button type="button" onClick={form.handleSave} className={BTN_PRIMARY}>
+              <Button
+                type="button"
+                variant="default"
+                size="lg"
+                onClick={form.handleSave}
+                className={BTN_PRIMARY}
+              >
                 Save
-              </button>
+              </Button>
             ) : null}
           </DialogFooter>
         </DialogContent>

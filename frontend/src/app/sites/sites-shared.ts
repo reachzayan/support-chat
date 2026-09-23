@@ -2,12 +2,9 @@
 
 export const FIELD = "bg-ice"
 export const LABEL = "text-mute text-[10px] font-bold tracking-[0.12em] uppercase"
-export const BTN_PRIMARY =
-  "micro-interaction bg-ember text-white dark:text-navy-deep hover:bg-ember-mid focus-visible:ring-steel cursor-pointer rounded-[8px] px-3 py-2 text-xs font-bold focus-visible:ring-2 focus-visible:outline-none"
-export const BTN_SECONDARY =
-  "border-line bg-paper text-ink hover:bg-ice focus-visible:ring-steel cursor-pointer rounded-[8px] border px-3 py-2 text-xs font-bold focus-visible:ring-2 focus-visible:outline-none"
-export const BTN_DANGER =
-  "border-ember/30 bg-ember/10 text-ember hover:bg-ember/15 focus-visible:ring-steel cursor-pointer rounded-[8px] border px-3 py-2 text-xs font-bold focus-visible:ring-2 focus-visible:outline-none"
+export const BTN_PRIMARY = "font-bold"
+export const BTN_SECONDARY = "font-bold"
+export const BTN_DANGER = "font-bold"
 
 export const COLUMNS = [
   "Name",

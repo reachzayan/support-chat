@@ -9,7 +9,7 @@ import {
   canonicalizeOriginLines,
 } from "@/lib/validation"
 
-import { copyManageSnippet, saveManageSite } from "./manage-site-save"
+import { saveManageSite } from "./manage-site-save"
 import { useLeaveGuard } from "./sites-form"
 import { useSiteValidation } from "./use-site-validation"
 
@@ -47,7 +47,6 @@ export const useManageSiteForm = (
   const [originsText, setOriginsText] = useState(site.origins.join("\n"))
   const [contactInfoText, setContactInfoText] = useState((site.contact_info ?? []).join("\n"))
   const [windowHours, setWindowHours] = useState(site.callback_window_hours ?? 24)
-  const [copyNotice, setCopyNotice] = useState<string | null>(null)
   const [errors, setErrors] = useState<Record<string, string>>({})
 
   const dirty = isManageSiteDirty(site, {
@@ -139,10 +138,6 @@ export const useManageSiteForm = (
     websiteUrl,
     windowHours,
   ])
-  const handleCopy = useCallback(async () => {
-    await copyManageSnippet(site.snippet, setCopyNotice)
-  }, [site.snippet])
-
   return {
     name,
     greeting,
@@ -152,7 +147,6 @@ export const useManageSiteForm = (
     contactInfoText,
     windowHours,
     errors,
-    copyNotice,
     leaveOpen,
     requestClose,
     handleStay,
@@ -170,6 +164,5 @@ export const useManageSiteForm = (
     handleOriginsBlur: handleOriginsFieldBlur,
     handleOpenChange,
     handleSave,
-    handleCopy,
   }
 }

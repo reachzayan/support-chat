@@ -8,7 +8,7 @@ import { FieldError } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 
 const FIELD =
-  "border-line bg-ice text-ink focus:border-steel focus:ring-steel h-12 rounded-2xl border px-4 text-base font-normal shadow-none outline-none transition-[border-color,box-shadow] duration-200 ease-out focus:ring-2 dark:bg-ice-2"
+  "border-line bg-ice text-ink focus:border-steel focus:ring-steel h-12 rounded-lg border px-4 text-base font-normal shadow-none outline-none transition-[border-color,box-shadow] duration-200 ease-out focus:ring-2 dark:bg-ice-2"
 
 export const LoginFields = ({
   email,

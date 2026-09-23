@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState, type ChangeEvent, type FocusEvent } from "react"
 
+import { Button } from "@/components/ui/button"
 import {
   Dialog,
   DialogContent,
@@ -40,13 +41,25 @@ export const LeaveGuard = ({
           <DialogTitle>Unsaved changes</DialogTitle>
           <DialogDescription>Do you want to leave? Your changes are not saved.</DialogDescription>
         </DialogHeader>
-        <DialogFooter className="flex-row justify-end gap-2 sm:flex-row">
-          <button type="button" onClick={onStay} className={BTN_SECONDARY}>
+        <DialogFooter className="flex-row items-center justify-end gap-2 sm:flex-row">
+          <Button
+            type="button"
+            variant="outline"
+            size="lg"
+            onClick={onStay}
+            className={BTN_SECONDARY}
+          >
             Stay
-          </button>
-          <button type="button" onClick={onLeave} className={BTN_PRIMARY}>
+          </Button>
+          <Button
+            type="button"
+            variant="default"
+            size="lg"
+            onClick={onLeave}
+            className={BTN_PRIMARY}
+          >
             Leave
-          </button>
+          </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
@@ -71,9 +84,25 @@ export const useLeaveGuard = (dirty: boolean, onClose: () => void) => {
 }
 
 export const useAnimatedDialogClose = (onClosed: () => void) => {
-  const [open, setOpen] = useState(true)
+  const [open, setOpen] = useState(false)
   const closing = useRef(false)
   const timer = useRef<number | null>(null)
+  const frame = useRef<number | null>(null)
+
+  useEffect(() => {
+    frame.current = window.requestAnimationFrame(() => {
+      frame.current = null
+      if (!closing.current) {
+        setOpen(true)
+      }
+    })
+    return () => {
+      if (frame.current !== null) {
+        window.cancelAnimationFrame(frame.current)
+      }
+    }
+  }, [])
+
   const close = useCallback(
     (afterClose?: () => void) => {
       if (closing.current) {
@@ -87,6 +116,9 @@ export const useAnimatedDialogClose = (onClosed: () => void) => {
   )
   useEffect(
     () => () => {
+      if (frame.current !== null) {
+        window.cancelAnimationFrame(frame.current)
+      }
       if (timer.current !== null) {
         window.clearTimeout(timer.current)
       }
@@ -153,8 +185,9 @@ export const RouteSwitch = ({
 }) => {
   const trackOn = accent === "ember" ? "bg-ember" : "bg-steel"
   return (
-    <button
+    <Button
       type="button"
+      variant="ghost"
       role="switch"
       aria-checked={checked}
       aria-label={label}
@@ -177,6 +210,6 @@ export const RouteSwitch = ({
           }`}
         />
       </span>
-    </button>
+    </Button>
   )
 }
