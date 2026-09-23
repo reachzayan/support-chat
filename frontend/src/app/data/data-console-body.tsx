@@ -9,6 +9,7 @@ export const DataConsoleBody = ({
   rows,
   loadError,
   hasMore,
+  loadMoreError,
   loadingMore,
   onLoadMore,
   onTranscript,
@@ -16,6 +17,7 @@ export const DataConsoleBody = ({
   rows: SubmissionRow[] | null
   loadError: boolean
   hasMore: boolean
+  loadMoreError: boolean
   loadingMore: boolean
   onLoadMore: () => void
   onTranscript: (id: string) => void
@@ -48,6 +50,7 @@ export const DataConsoleBody = ({
     <SubmissionsTable
       rows={rows}
       hasMore={hasMore}
+      loadMoreError={loadMoreError}
       loadingMore={loadingMore}
       onLoadMore={onLoadMore}
       onTranscript={onTranscript}

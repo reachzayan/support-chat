@@ -5,6 +5,7 @@ import { useCallback, useEffect, useMemo, useState } from "react"
 import { Transcript } from "@/app/widget/transcript"
 import { fetchInboxDetailPage, mergeInboxMessages } from "@/components/inbox/inbox-api"
 import type { ConversationDetail, InboxMessage } from "@/components/inbox/types"
+import { Button } from "@/components/ui/button"
 import {
   Sheet,
   SheetContent,
@@ -12,6 +13,7 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet"
+import { Spinner } from "@/components/ui/spinner"
 
 import { blank, STATE_LABEL, type SubmissionRow } from "./data-shared"
 
@@ -43,15 +45,17 @@ const TranscriptPane = ({
     <div className="flex min-h-0 flex-1 flex-col">
       {hasOlder ? (
         <div className="border-line bg-paper flex shrink-0 justify-center border-b px-4 py-2">
-          <button
+          <Button
             type="button"
+            variant="ghost"
             disabled={loadingOlder}
             aria-busy={loadingOlder}
             onClick={onLoadOlder}
-            className="text-steel focus-visible:ring-steel hover:bg-ice-2 rounded-full px-3 py-1 text-xs font-bold focus-visible:ring-2 focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-60"
+            className="text-steel focus-visible:ring-steel hover:bg-ice-2 px-3 py-1 text-xs font-bold focus-visible:ring-2 focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-60"
           >
+            {loadingOlder ? <Spinner data-icon="inline-start" /> : null}
             {loadingOlder ? "Loading older messages…" : "Load older messages"}
-          </button>
+          </Button>
         </div>
       ) : null}
       <Transcript lines={lines} selfRole="agent" logLabel="Transcript" />

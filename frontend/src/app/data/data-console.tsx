@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 
 import { StaffHeader } from "@/components/admin/staff-nav"
 import { staffGet } from "@/lib/auth-client"
@@ -9,41 +9,68 @@ import { DataConsoleBody } from "./data-console-body"
 import { SubmissionDetailSheet } from "./data-detail-sheet"
 import type { SubmissionRow } from "./data-shared"
 
-const submissionsPath = (cursor: string | null) =>
-  cursor === null
-    ? "/api/conversations/submissions"
-    : `/api/conversations/submissions?cursor=${encodeURIComponent(cursor)}`
+const PAGE_SIZE = 50
+
+const submissionsPath = (offset: number) =>
+  `/api/conversations/submissions?offset=${offset}&limit=${PAGE_SIZE}`
 
 const useSubmissionsFeed = () => {
   const [rows, setRows] = useState<SubmissionRow[] | null>(null)
-  const [nextCursor, setNextCursor] = useState<string | null>(null)
+  const [hasMore, setHasMore] = useState(false)
   const [loadError, setLoadError] = useState(false)
   const [loadingMore, setLoadingMore] = useState(false)
+  const [loadMoreError, setLoadMoreError] = useState(false)
+  const loadingMoreRef = useRef(false)
+  const nextOffsetRef = useRef(0)
 
-  const loadPage = useCallback(async (cursor: string | null, append: boolean) => {
-    const response = await staffGet(submissionsPath(cursor))
-    if (!response.ok) {
-      if (!append) {
+  const loadPage = useCallback(async (offset: number, append: boolean) => {
+    try {
+      const response = await staffGet(submissionsPath(offset))
+      if (!response.ok) {
+        if (append) {
+          setLoadMoreError(true)
+        } else {
+          setLoadError(true)
+          setRows(null)
+          setHasMore(false)
+        }
+        return false
+      }
+      const body = (await response.json()) as {
+        items: SubmissionRow[]
+        has_more?: boolean
+      }
+      nextOffsetRef.current = offset + body.items.length
+      setLoadError(false)
+      setLoadMoreError(false)
+      setRows((current) => {
+        if (!append || current === null) {
+          return body.items
+        }
+        const byId = new Map(current.map((row) => [row.id, row]))
+        for (const row of body.items) {
+          byId.set(row.id, row)
+        }
+        return Array.from(byId.values())
+      })
+      setHasMore(Boolean(body.has_more) && body.items.length > 0)
+      return true
+    } catch {
+      if (append) {
+        setLoadMoreError(true)
+      } else {
         setLoadError(true)
         setRows(null)
-        setNextCursor(null)
+        setHasMore(false)
       }
       return false
     }
-    const body = (await response.json()) as {
-      items: SubmissionRow[]
-      next_cursor?: string | null
-    }
-    setLoadError(false)
-    setRows((current) => (append && current ? [...current, ...body.items] : body.items))
-    setNextCursor(body.next_cursor ?? null)
-    return true
   }, [])
 
   useEffect(() => {
     let ignore = false
     const boot = async () => {
-      const ok = await loadPage(null, false)
+      const ok = await loadPage(0, false)
       if (ignore || ok) {
         return
       }
@@ -55,20 +82,26 @@ const useSubmissionsFeed = () => {
     }
   }, [loadPage])
 
-  const handleLoadMore = useCallback(async () => {
-    if (!nextCursor || loadingMore) {
+  const handleLoadMore = async () => {
+    if (!hasMore || loadingMoreRef.current) {
       return
     }
+    loadingMoreRef.current = true
     setLoadingMore(true)
-    await loadPage(nextCursor, true)
-    setLoadingMore(false)
-  }, [loadPage, loadingMore, nextCursor])
+    try {
+      await loadPage(nextOffsetRef.current, true)
+    } finally {
+      loadingMoreRef.current = false
+      setLoadingMore(false)
+    }
+  }
 
-  return { rows, nextCursor, loadError, loadingMore, handleLoadMore }
+  return { rows, hasMore, loadError, loadMoreError, loadingMore, handleLoadMore }
 }
 
 export const DataConsole = () => {
-  const { rows, nextCursor, loadError, loadingMore, handleLoadMore } = useSubmissionsFeed()
+  const { rows, hasMore, loadError, loadMoreError, loadingMore, handleLoadMore } =
+    useSubmissionsFeed()
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const selected = rows?.find((row) => row.id === selectedId) ?? null
 
@@ -90,7 +123,8 @@ export const DataConsole = () => {
         <DataConsoleBody
           rows={rows}
           loadError={loadError}
-          hasMore={nextCursor !== null}
+          hasMore={hasMore}
+          loadMoreError={loadMoreError}
           loadingMore={loadingMore}
           onLoadMore={handleLoadMore}
           onTranscript={setSelectedId}
