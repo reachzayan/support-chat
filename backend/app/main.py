@@ -10,6 +10,7 @@ from app.api.auth import router as auth_router
 from app.api.canned_replies import router as canned_replies_router
 from app.api.conversations import router as conversations_router
 from app.api.health import router as health_router
+from app.api.internal_dev import router as internal_dev_router
 from app.api.kb_sources import router as kb_sources_router
 from app.api.logs import router as logs_router
 from app.api.sites import router as sites_router
@@ -37,7 +38,7 @@ from app.redis import close_redis
 from app.security.surfaces import http_surface_allowed
 from app.services.app_log import record_app_log
 from app.services.kb_embedder import OpenAIEmbedder
-from app.settings import get_settings
+from app.settings import AppEnvironment, get_settings
 from app.workers import start_kb_workers, stop_kb_workers
 
 __all__ = [
@@ -94,10 +95,17 @@ async def _persist_unhandled_exception(request: Request, exc: Exception) -> None
         return
 
 
+def _include_internal_dev_router(application: FastAPI) -> None:
+    settings = get_settings()
+    if settings.app_env is AppEnvironment.LOCAL and settings.internal_eval_enabled:
+        application.include_router(internal_dev_router)
+
+
 def create_app() -> FastAPI:
     configure_logging()
     application = FastAPI(title="SupportChat", lifespan=lifespan)
     application.include_router(health_router)
+    _include_internal_dev_router(application)
     application.include_router(auth_router, prefix="/auth")
     application.include_router(widget_bootstrap_router)
     application.include_router(conversations_router)
@@ -157,9 +165,10 @@ def create_app() -> FastAPI:
         if (
             path.startswith("/auth")
             or path.startswith("/api/conversations")
+            or path.startswith("/api/internal/")
             or path.startswith("/api/public/widget-bootstrap")
         ):
-            response.headers["Cache-Control"] = "no-store"
+            response.headers.setdefault("Cache-Control", "no-store")
         response.headers.setdefault("X-Content-Type-Options", "nosniff")
         return response
 

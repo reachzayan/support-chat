@@ -61,6 +61,7 @@ class Settings(BaseSettings):
     widget_csp_service_secret: str = ""
     trusted_proxy_cidrs: str = ""
     app_env: AppEnvironment = AppEnvironment.LOCAL
+    internal_eval_enabled: bool = False
     enable_background_workers: bool = True
     chat_retention_days: int = 30
     rate_bootstrap: int = 60
@@ -236,6 +237,8 @@ class Settings(BaseSettings):
     def production_must_fail_closed(self) -> "Settings":
         if self.app_env is not AppEnvironment.PRODUCTION:
             return self
+        if self.internal_eval_enabled:
+            raise ValueError("INTERNAL_EVAL_ENABLED must be false in production")
         if self.chat_retention_days < 1:
             raise ValueError("CHAT_RETENTION_DAYS must be a positive integer in production")
         if not self.cookie_secure:
