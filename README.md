@@ -26,8 +26,6 @@ Only `backend/`, `frontend/`, `deploy/`, `.github/`, and a small set of root fil
 
 Typical flow: feature branch → PR into `dev` → validate on dev host → merge `dev` into `staging` → after sign-off, merge `staging` into `main`.
 
-`master` is legacy and should not receive new work.
-
 ## Architecture
 
 ### Surfaces
