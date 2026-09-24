@@ -344,26 +344,17 @@ class KbSourceService:
         await self._session.commit()
         return chunk
 
-    async def list_snapshots(self, source_id: UUID) -> list[KbSnapshot]:
+    async def list_snapshots(self, source_id: UUID, *, limit: int = 50) -> list[KbSnapshot]:
         source = await self._session.get(KbSource, source_id)
         if source is None:
             raise AdminError("not_found")
-        return await KbSnapshotRepository(self._session).list_for_source(source_id)
+        return await KbSnapshotRepository(self._session).list_for_source(source_id, limit=limit)
 
     async def latest_snapshot(self, source_id: UUID) -> KbSnapshot | None:
-        rows = await KbSnapshotRepository(self._session).list_for_source(source_id)
-        return rows[0] if rows else None
+        return await KbSnapshotRepository(self._session).latest_for_source(source_id)
 
     async def status_snapshot(self, source_id: UUID) -> KbSnapshot | None:
-        rows = await KbSnapshotRepository(self._session).list_for_source(source_id)
-        for state in ("building", "validated"):
-            match = next((row for row in rows if row.state == state), None)
-            if match is not None:
-                return match
-        live = next((row for row in rows if row.state == "live"), None)
-        if live is not None:
-            return live
-        return rows[0] if rows else None
+        return await KbSnapshotRepository(self._session).status_for_source(source_id)
 
     async def diff_snapshots(
         self, source_id: UUID, from_id: UUID | None, to_id: UUID | None
@@ -372,9 +363,8 @@ class KbSourceService:
         if source is None:
             raise AdminError("not_found")
         repo = KbSnapshotRepository(self._session)
-        snapshots = await repo.list_for_source(source_id)
-        live = next((row for row in snapshots if row.state == "live"), None)
-        previous = next((row for row in snapshots if row.state == "superseded"), None)
+        live = await repo.get_live(source_id)
+        previous = await repo.previous_superseded(source_id)
         start = from_id or (previous.id if previous is not None else None)
         end = to_id or (live.id if live is not None else None)
         if start is None or end is None:

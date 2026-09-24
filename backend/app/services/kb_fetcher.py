@@ -358,6 +358,7 @@ def _browser_guard_page_factory(allowed_hosts: set[str], guard: _CrawlGuard):
 async def page_crawler(allowed_hosts: set[str]) -> AsyncIterator[CrawlerFn]:
     try:
         from crawl4ai import AsyncWebCrawler, BrowserConfig
+        from crawl4ai.browser_manager import BrowserManager, ManagedBrowser
     except ImportError:
 
         async def missing(_url: str) -> Any:
@@ -365,6 +366,7 @@ async def page_crawler(allowed_hosts: set[str]) -> AsyncIterator[CrawlerFn]:
 
         yield missing
         return
+    _install_browser_sandbox_guards(BrowserManager, ManagedBrowser)
     browser = BrowserConfig(browser_type="chromium", headless=True, user_agent=USER_AGENT)
     crawler = AsyncWebCrawler(config=browser)
     await crawler.__aenter__()
@@ -387,6 +389,30 @@ async def page_crawler(allowed_hosts: set[str]) -> AsyncIterator[CrawlerFn]:
         yield crawl
     finally:
         await crawler.__aexit__(None, None, None)
+
+
+def _without_unsafe_browser_flags(flags: list[str]) -> list[str]:
+    unsafe = {"--no-sandbox", "--disable-setuid-sandbox"}
+    return [flag for flag in flags if flag not in unsafe]
+
+
+def _install_browser_sandbox_guards(browser_manager, managed_browser) -> None:
+    if getattr(browser_manager, "_supportchat_sandbox_guard", False):
+        return
+    original_build = browser_manager._build_browser_args
+    original_flags = managed_browser.build_browser_flags
+
+    def secure_build(instance):
+        kwargs = original_build(instance)
+        kwargs["args"] = _without_unsafe_browser_flags(list(kwargs.get("args") or []))
+        return kwargs
+
+    def secure_flags(config):
+        return _without_unsafe_browser_flags(list(original_flags(config)))
+
+    browser_manager._build_browser_args = secure_build
+    managed_browser.build_browser_flags = staticmethod(secure_flags)
+    browser_manager._supportchat_sandbox_guard = True
 
 
 async def _crawl4ai(url: str, allowed_hosts: set[str]) -> Any:
