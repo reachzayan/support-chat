@@ -1,6 +1,10 @@
+import path from "node:path"
+import { fileURLToPath } from "node:url"
+
 import type { NextConfig } from "next"
 
 const apiOrigin = process.env.API_ORIGIN ?? "http://127.0.0.1:8000"
+const frontendRoot = path.dirname(fileURLToPath(import.meta.url))
 
 const nosniff = { key: "X-Content-Type-Options", value: "nosniff" }
 const referrer = { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" }
@@ -9,6 +13,9 @@ const widgetReferrer = { key: "Referrer-Policy", value: "no-referrer" }
 
 const nextConfig: NextConfig = {
   output: "standalone",
+  turbopack: {
+    root: frontendRoot,
+  },
   allowedDevOrigins: ["widget.localhost", "host.localhost", "localhost", "127.0.0.1"],
   async headers() {
     return [

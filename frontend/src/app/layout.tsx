@@ -1,13 +1,13 @@
 import type { Metadata } from "next"
-import { Manrope } from "next/font/google"
+import localFont from "next/font/local"
 import { cookies, headers } from "next/headers"
 
 import { AppProviders } from "@/components/app-providers"
 
 import "./globals.css"
 
-const manrope = Manrope({
-  subsets: ["latin"],
+const manrope = localFont({
+  src: "./fonts/Manrope-variable.ttf",
   variable: "--font-manrope",
   display: "swap",
 })

@@ -24,12 +24,15 @@ const reportClientLog = async (payload: {
   }
 }
 
+export const safeClientErrorMessage = (value: unknown, fallback: string): string =>
+  value instanceof Error && value.name ? value.name.slice(0, 128) : fallback
+
 export const installClientErrorReporting = () => {
   const onError = (event: ErrorEvent) => {
     void reportClientLog({
       level: "error",
       event: "ui_window_error",
-      message: event.message || "Unhandled window error",
+      message: safeClientErrorMessage(event.error, "Unhandled window error"),
       detail: {
         path: window.location.pathname,
         error_class: event.error?.name ?? "Error",
@@ -42,16 +45,10 @@ export const installClientErrorReporting = () => {
 
   const onRejection = (event: PromiseRejectionEvent) => {
     const reason = event.reason
-    const message =
-      reason instanceof Error
-        ? reason.message
-        : typeof reason === "string"
-          ? reason
-          : "Unhandled promise rejection"
     void reportClientLog({
       level: "error",
       event: "ui_unhandled_rejection",
-      message: message.slice(0, 4000),
+      message: safeClientErrorMessage(reason, "Unhandled promise rejection"),
       detail: {
         path: window.location.pathname,
         error_class: reason instanceof Error ? reason.name : "UnhandledRejection",
