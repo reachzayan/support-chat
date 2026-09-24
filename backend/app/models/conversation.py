@@ -92,6 +92,12 @@ class Conversation(Base):
     visitor_id: Mapped[UUID]
     state: Mapped[str] = mapped_column(String)
     active_generation_id: Mapped[UUID | None] = mapped_column(nullable=True)
+    generation_created_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    generation_lease_expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     prechat_submission_id: Mapped[UUID | None] = mapped_column(nullable=True)
     prechat_payload_hash: Mapped[str | None] = mapped_column(String, nullable=True)
     inquiry_type: Mapped[str | None] = mapped_column(String, nullable=True)

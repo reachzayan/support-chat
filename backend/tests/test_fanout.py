@@ -28,6 +28,23 @@ class _FakeRedis:
         return None
 
 
+async def test_publish_wakeup_has_a_hard_timeout(monkeypatch) -> None:
+    cancelled = asyncio.Event()
+
+    class _HungRedis:
+        async def publish(self, _channel: str, _payload: str) -> None:
+            try:
+                await asyncio.Event().wait()
+            finally:
+                cancelled.set()
+
+    monkeypatch.setattr(fanout, "get_redis", lambda: _HungRedis())
+    monkeypatch.setattr(fanout, "PUBLISH_TIMEOUT", 0.01)
+
+    await asyncio.wait_for(fanout.publish_wakeup({"conversation_id": str(uuid4())}), timeout=0.2)
+    assert cancelled.is_set()
+
+
 async def test_subscriber_delivers_wakeup_after_listen_failure(monkeypatch) -> None:
     conversation_id = str(uuid4())
     delivered: list[dict] = []

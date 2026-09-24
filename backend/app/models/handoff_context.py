@@ -7,6 +7,7 @@ from sqlalchemy import (
     ForeignKey,
     ForeignKeyConstraint,
     Index,
+    Integer,
     String,
     Text,
     func,
@@ -62,6 +63,10 @@ class HandoffContext(Base):
             "route IN ('live_queue','callback')",
             name="ck_handoff_contexts_route",
         ),
+        CheckConstraint(
+            "summary_status IN ('queued','running','completed','failed')",
+            name="ck_handoff_contexts_summary_status",
+        ),
         Index(
             "ix_handoff_contexts_conversation_created",
             "conversation_id",
@@ -96,3 +101,12 @@ class HandoffContext(Base):
     )
     route: Mapped[str] = mapped_column(String)
     snapshot_id: Mapped[UUID | None] = mapped_column(nullable=True)
+    summary_status: Mapped[str] = mapped_column(String, server_default=text("'queued'"))
+    summary_attempts: Mapped[int] = mapped_column(Integer, server_default=text("0"))
+    summary_next_run_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    summary_lease_expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    summary_error: Mapped[str | None] = mapped_column(String(128), nullable=True)

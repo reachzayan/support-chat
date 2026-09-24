@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import Literal
@@ -21,7 +20,7 @@ from app.repositories.handoff_repo import HandoffRepository
 from app.repositories.message_repo import MessageRepository
 from app.repositories.site_repo import SiteRepository
 from app.services import handoff_summary
-from app.services.bot_trace import record_trace, register_trace_task
+from app.services.bot_trace import record_trace
 
 log = structlog.get_logger("handoff")
 
@@ -154,17 +153,7 @@ class HandoffService:
         return row
 
     def schedule_summary(self, row: HandoffContext) -> None:
-        record_trace("handoff_summary", status="pending", handoff_id=row.id, persisted=False)
-        task = asyncio.create_task(
-            handoff_summary.generate_in_background(
-                row.id,
-                row.conversation_id,
-                row.original_question,
-                row.escalation_reason,
-            )
-        )
-        register_trace_task(task)
-        task.add_done_callback(lambda _: None)
+        record_trace("handoff_summary", status="queued", handoff_id=row.id, persisted=True)
 
     async def close_handoff(
         self,

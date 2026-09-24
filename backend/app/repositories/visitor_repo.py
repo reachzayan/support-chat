@@ -1,3 +1,5 @@
+from datetime import UTC, datetime, timedelta
+from ipaddress import IPv4Address, IPv6Address
 from uuid import UUID
 
 from sqlalchemy import select
@@ -57,3 +59,30 @@ class VisitorRepository:
             .with_for_update()
         )
         return result.scalar_one_or_none()
+
+    async def claim_location_lookup(
+        self, *, retry_after: timedelta
+    ) -> tuple[UUID, IPv4Address | IPv6Address] | None:
+        now = datetime.now(UTC)
+        result = await self._session.execute(
+            select(Visitor)
+            .where(
+                Visitor.ip.is_not(None),
+                Visitor.location.is_(None),
+                (
+                    Visitor.location_checked_at.is_(None)
+                    | (Visitor.location_checked_at <= now - retry_after)
+                ),
+            )
+            .order_by(Visitor.location_checked_at.asc().nullsfirst(), Visitor.created_at)
+            .limit(1)
+            .with_for_update(skip_locked=True)
+            .execution_options(populate_existing=True)
+        )
+        visitor = result.scalar_one_or_none()
+        if visitor is None or visitor.ip is None:
+            await self._session.commit()
+            return None
+        visitor.location_checked_at = now
+        await self._session.commit()
+        return visitor.id, visitor.ip

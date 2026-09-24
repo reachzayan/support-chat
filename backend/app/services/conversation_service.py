@@ -74,11 +74,11 @@ from app.services.grounded_response import (
     _safe_technical_failure,
 )
 from app.services.handoff_service import EscalationReason, HandoffService, HandoffTrigger
-from app.services.ip_geolocation import lookup_location
 from app.services.pii_redactor import redact_for_log
 from app.services.rate_limit import RateLimiter, RateLimitExceeded, RateLimitUnavailable
 from app.services.refusal_library import fallback_refusal_body, lookup_refusal
 from app.services.response_cache import store_response
+from app.settings import get_settings
 
 log = structlog.get_logger("chat")
 
@@ -844,6 +844,8 @@ class ConversationService:
             return None
         generation_id = uuid4()
         conversation.active_generation_id = generation_id
+        conversation.generation_created_at = datetime.now(UTC)
+        conversation.generation_lease_expires_at = None
         return generation_id
 
     async def _handle_transfer_consent_reply(self, conversation: Conversation, text: str) -> bool:
@@ -937,8 +939,16 @@ class ConversationService:
         )
 
     async def run_bot_turn(
-        self, conversation_id: UUID, generation_id: UUID
+        self, conversation_id: UUID, generation_id: UUID, *, already_claimed: bool = False
     ) -> CommandResult | None:
+        if not already_claimed:
+            claimed = await self._conversations.claim_generation(
+                conversation_id,
+                generation_id,
+                lease=timedelta(seconds=get_settings().bot_generation_lease_seconds),
+            )
+            if not claimed:
+                return None
         try:
             return await self._run_bot_turn(conversation_id, generation_id)
         except Exception:
@@ -1257,9 +1267,9 @@ class ConversationService:
             )
             if found is not None:
                 location = found.location
-                if str(found.ip) != ip or found.location_checked_at is None:
-                    location = await lookup_location(ip)
-                    found.location_checked_at = datetime.now(UTC)
+                if str(found.ip) != ip:
+                    location = None
+                    found.location_checked_at = None
                 found.ip = ip
                 found.user_agent = user_agent
                 found.location = location
@@ -1269,15 +1279,13 @@ class ConversationService:
             raise CommandError("not_found")
         token, token_hash = issue_resume_token()
         await self._rate_limit_create(ip, site_id)
-        location = await lookup_location(ip)
         visitor = await self._visitors.create(
             site_id,
             token_hash,
             ip=ip,
             user_agent=user_agent,
-            location=location,
+            location=None,
         )
-        visitor.location_checked_at = datetime.now(UTC)
         return visitor, token, False
 
     async def _forget_visitor(self, site_id: UUID, resume_token: str | None) -> None:

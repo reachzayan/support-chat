@@ -13,6 +13,7 @@ from app.settings import get_settings
 log = structlog.get_logger("fanout")
 WAKEUP_CHANNEL = "chat:wakeup"
 RETRY_SLEEP = 1.0
+PUBLISH_TIMEOUT = 2.0
 INSTANCE_ID = uuid.uuid4().hex
 
 _subscriber_task: asyncio.Task | None = None
@@ -22,7 +23,10 @@ _subscriber_client: redis.Redis | None = None
 async def publish_wakeup(payload: dict[str, Any]) -> None:
     try:
         outbound = {**payload, "origin_instance": INSTANCE_ID}
-        await get_redis().publish(WAKEUP_CHANNEL, json.dumps(outbound))
+        await asyncio.wait_for(
+            get_redis().publish(WAKEUP_CHANNEL, json.dumps(outbound)),
+            timeout=PUBLISH_TIMEOUT,
+        )
     except Exception:
         log.info("wakeup_publish_failed", conversation_id=payload.get("conversation_id"))
 
@@ -64,7 +68,11 @@ async def _subscriber_loop() -> None:
         try:
             await _close_subscriber_client()
             _subscriber_client = redis.Redis.from_url(
-                get_settings().redis_url, decode_responses=True
+                get_settings().redis_url,
+                decode_responses=True,
+                socket_connect_timeout=2,
+                socket_timeout=30,
+                health_check_interval=15,
             )
             pubsub = _subscriber_client.pubsub()
             await pubsub.subscribe(WAKEUP_CHANNEL)

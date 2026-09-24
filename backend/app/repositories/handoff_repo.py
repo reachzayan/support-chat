@@ -1,7 +1,7 @@
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.handoff_context import HandoffContext
@@ -97,5 +97,61 @@ class HandoffRepository:
             return None
         row.machine_summary = summary
         row.machine_summary_model = model
+        row.summary_status = "completed"
+        row.summary_lease_expires_at = None
+        row.summary_error = None
         await self._session.flush()
         return row
+
+    async def claim_next_summary(self, *, lease: timedelta) -> HandoffContext | None:
+        now = datetime.now(UTC)
+        result = await self._session.execute(
+            select(HandoffContext)
+            .where(
+                or_(
+                    and_(
+                        HandoffContext.summary_status == "queued",
+                        HandoffContext.summary_next_run_at <= now,
+                    ),
+                    and_(
+                        HandoffContext.summary_status == "running",
+                        HandoffContext.summary_lease_expires_at <= now,
+                    ),
+                )
+            )
+            .order_by(HandoffContext.summary_next_run_at, HandoffContext.created_at)
+            .limit(1)
+            .with_for_update(skip_locked=True)
+            .execution_options(populate_existing=True)
+        )
+        row = result.scalar_one_or_none()
+        if row is None:
+            await self._session.commit()
+            return None
+        row.summary_status = "running"
+        row.summary_attempts += 1
+        row.summary_lease_expires_at = now + lease
+        row.summary_error = None
+        await self._session.commit()
+        await self._session.refresh(row)
+        return row
+
+    async def retry_or_fail_summary(
+        self,
+        handoff_id: UUID,
+        *,
+        error: str,
+        max_attempts: int,
+        retry_delay: timedelta,
+    ) -> None:
+        row = await self.get_by_id(handoff_id)
+        if row is None:
+            return
+        row.summary_error = error[:128]
+        row.summary_lease_expires_at = None
+        if row.summary_attempts >= max_attempts:
+            row.summary_status = "failed"
+        else:
+            row.summary_status = "queued"
+            row.summary_next_run_at = datetime.now(UTC) + retry_delay
+        await self._session.flush()

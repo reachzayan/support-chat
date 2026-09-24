@@ -1,7 +1,7 @@
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
-from sqlalchemy import func, select, tuple_
+from sqlalchemy import and_, func, or_, select, tuple_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.chat.state_machine import apply_event
@@ -47,6 +47,58 @@ class ConversationRepository:
             .with_for_update(skip_locked=True)
         )
         return list(result.scalars().all())
+
+    async def claim_generation(
+        self, conversation_id: UUID, generation_id: UUID, *, lease: timedelta
+    ) -> bool:
+        now = datetime.now(UTC)
+        conversation = await self.lock_by_id(conversation_id)
+        if (
+            conversation is None
+            or conversation.state != "bot"
+            or conversation.active_generation_id != generation_id
+            or (
+                conversation.generation_lease_expires_at is not None
+                and conversation.generation_lease_expires_at > now
+            )
+        ):
+            await self._session.commit()
+            return False
+        conversation.generation_created_at = conversation.generation_created_at or now
+        conversation.generation_lease_expires_at = now + lease
+        await self._session.commit()
+        return True
+
+    async def claim_recoverable_generation(
+        self, *, recovery_grace: timedelta, lease: timedelta
+    ) -> tuple[UUID, UUID] | None:
+        now = datetime.now(UTC)
+        result = await self._session.execute(
+            select(Conversation)
+            .where(
+                Conversation.state == "bot",
+                Conversation.active_generation_id.is_not(None),
+                or_(
+                    Conversation.generation_lease_expires_at <= now,
+                    and_(
+                        Conversation.generation_lease_expires_at.is_(None),
+                        Conversation.generation_created_at <= now - recovery_grace,
+                    ),
+                ),
+            )
+            .order_by(Conversation.generation_created_at, Conversation.id)
+            .limit(1)
+            .with_for_update(skip_locked=True)
+            .execution_options(populate_existing=True)
+        )
+        conversation = result.scalar_one_or_none()
+        if conversation is None or conversation.active_generation_id is None:
+            await self._session.commit()
+            return None
+        generation_id = conversation.active_generation_id
+        conversation.generation_lease_expires_at = now + lease
+        await self._session.commit()
+        return conversation.id, generation_id
 
     async def get_open_for_visitor(
         self, site_id: UUID, visitor_id: UUID, *, for_update: bool = False
