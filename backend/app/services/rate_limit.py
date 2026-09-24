@@ -21,6 +21,36 @@ end
 return current
 """
 
+RESERVE_LOGIN = """
+local budget = tonumber(ARGV[1])
+local window = tonumber(ARGV[2])
+for _, key in ipairs(KEYS) do
+    local current = tonumber(redis.call("get", key) or "0")
+    if current >= budget then
+        return 0
+    end
+end
+for _, key in ipairs(KEYS) do
+    local current = redis.call("incr", key)
+    if current == 1 then
+        redis.call("expire", key, window)
+    end
+end
+return 1
+"""
+
+RELEASE_LOGIN = """
+for _, key in ipairs(KEYS) do
+    local current = tonumber(redis.call("get", key) or "0")
+    if current <= 1 then
+        redis.call("del", key)
+    else
+        redis.call("decr", key)
+    end
+end
+return 1
+"""
+
 
 class RateLimiter:
     def __init__(self, settings: Settings | None = None) -> None:
@@ -35,13 +65,6 @@ class RateLimiter:
 
     def _key(self, bucket: str, *parts: str) -> str:
         return "rate:" + bucket + ":" + ":".join(parts)
-
-    async def peek(self, bucket: str, *parts: str) -> int:
-        try:
-            raw = await get_redis().get(self._key(bucket, *parts))
-        except Exception as exc:
-            raise RateLimitUnavailable() from exc
-        return int(raw) if raw is not None else 0
 
     async def hit(self, bucket: str, budget: int, window: int, *parts: str) -> None:
         key = self._key(bucket, *parts)
@@ -109,24 +132,35 @@ class RateLimiter:
     def _login_ip_key(self, ip: str | None) -> str:
         return self.hash_value(ip or "none")
 
-    async def guard_login(self, email: str, ip: str | None) -> None:
+    async def reserve_login(self, email: str, ip: str | None) -> None:
         settings = self._settings
-        email_count = await self.peek("login-email", self._login_email_key(email))
-        ip_count = await self.peek("login-ip", self._login_ip_key(ip))
-        if email_count >= settings.rate_login_failure or ip_count >= settings.rate_login_failure:
+        keys = (
+            self._key("login-email", self._login_email_key(email)),
+            self._key("login-ip", self._login_ip_key(ip)),
+        )
+        try:
+            admitted = int(
+                await get_redis().eval(
+                    RESERVE_LOGIN,
+                    len(keys),
+                    *keys,
+                    str(settings.rate_login_failure),
+                    str(settings.rate_login_failure_window),
+                )
+            )
+        except Exception as exc:
+            raise RateLimitUnavailable() from exc
+        if not admitted:
             raise RateLimitExceeded()
 
-    async def hit_login_failure(self, email: str, ip: str | None) -> None:
-        settings = self._settings
-        await self.hit(
-            "login-email",
-            settings.rate_login_failure,
-            settings.rate_login_failure_window,
-            self._login_email_key(email),
+    async def release_login(self, email: str, ip: str | None) -> None:
+        keys = (
+            self._key("login-email", self._login_email_key(email)),
+            self._key("login-ip", self._login_ip_key(ip)),
         )
-        await self.hit(
-            "login-ip",
-            settings.rate_login_failure,
-            settings.rate_login_failure_window,
-            self._login_ip_key(ip),
-        )
+        try:
+            await get_redis().eval(RELEASE_LOGIN, len(keys), *keys)
+        except Exception:
+            # A successful credential check must not fail solely because cleanup
+            # failed; the reservation expires and therefore fails conservatively.
+            return

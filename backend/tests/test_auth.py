@@ -171,6 +171,25 @@ def test_wrong_password_is_generic_and_does_not_log_secrets(client: TestClient) 
     assert any(entry.get("event") == "login_failed" for entry in logs)
 
 
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"email": "a" * 255 + "@example.com", "password": "valid-sized-password"},
+        {"email": ALEX_EMAIL, "password": "p" * 1025},
+        {"email": ALEX_EMAIL, "password": ALEX_PASSWORD, "unexpected": "field"},
+    ],
+)
+def test_login_rejects_oversized_and_unknown_fields_before_password_hashing(
+    client: TestClient, payload: dict[str, str]
+) -> None:
+    _insert_alex()
+
+    response = client.post("/auth/login", json=payload)
+
+    assert response.status_code == 422
+    assert "supportchat_refresh=" not in " ".join(response.headers.get_list("set-cookie")).lower()
+
+
 def test_refresh_rotation_and_reuse_revokes_family(client: TestClient) -> None:
     _insert_alex()
     login = client.post("/auth/login", json={"email": ALEX_EMAIL, "password": ALEX_PASSWORD})
