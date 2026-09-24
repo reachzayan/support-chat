@@ -3,6 +3,7 @@ import json
 import re
 from datetime import UTC, datetime
 from secrets import token_hex
+from urllib.parse import urlsplit
 from uuid import UUID
 
 import structlog
@@ -26,7 +27,7 @@ from app.repositories.conversation_repo import ConversationRepository
 from app.repositories.origins import InvalidOrigin, canonicalize_origins, parent_origin
 from app.repositories.site_repo import SiteRepository
 from app.services.kb_crawl import fetch_html
-from app.settings import get_settings
+from app.settings import AppEnvironment, get_settings
 
 log = structlog.get_logger("site_admin")
 
@@ -47,8 +48,8 @@ class AdminError(Exception):
 
 
 def build_snippet(site_key: str, public_key: str, widget_origin: str) -> str:
-    key = json.dumps(site_key)
-    pub = json.dumps(public_key)
+    key = json.dumps(site_key).replace("<", "\\u003c")
+    pub = json.dumps(public_key).replace("<", "\\u003c")
     return (
         "<script>\n"
         f"  window.__supportchat = {{ siteKey: {key}, publicKey: {pub} }};\n"
@@ -66,11 +67,22 @@ def _plain(value: str, limit: int, empty_ok: bool = False) -> str:
     return text
 
 
-def _privacy_url(raw: str) -> str:
-    clean = canonicalize_http_url(raw)
+def validate_privacy_url(raw: str, *, production: bool) -> str:
+    if production and urlsplit(raw.strip()).scheme.casefold() == "http":
+        raise ValueError("privacy URL must use HTTPS in production")
+    clean = canonicalize_https_url(raw) if production else canonicalize_http_url(raw)
     if clean is None:
-        raise AdminError("invalid")
+        raise ValueError("privacy URL must use HTTPS in production")
     return clean
+
+
+def _privacy_url(raw: str) -> str:
+    try:
+        return validate_privacy_url(
+            raw, production=get_settings().app_env is AppEnvironment.PRODUCTION
+        )
+    except ValueError as exc:
+        raise AdminError("invalid") from exc
 
 
 def _website_url(raw: str) -> str:
@@ -113,12 +125,20 @@ def _contact_info(raw: list[str] | None) -> list[str]:
     return cleaned
 
 
+def validate_site_origin(raw: str, *, production: bool) -> str:
+    origin = canonicalize_origins([raw])[0]
+    if production and not origin.startswith("https://"):
+        raise ValueError("site origin must use HTTPS in production")
+    return origin
+
+
 def _origins(raw: list[str] | None) -> list[str]:
     if raw is None:
         return []
     try:
-        return canonicalize_origins(raw)
-    except InvalidOrigin as exc:
+        production = get_settings().app_env is AppEnvironment.PRODUCTION
+        return [validate_site_origin(item, production=production) for item in raw]
+    except (InvalidOrigin, ValueError) as exc:
         raise AdminError("invalid_origin") from exc
 
 

@@ -210,6 +210,21 @@ def test_frontend_client_log_endpoint_accepts_staff_errors(client: TestClient) -
     assert "ui_unhandled_rejection" in events
 
 
+def test_frontend_client_log_rejects_unknown_fields(client: TestClient) -> None:
+    staff = _login_staff(client)
+    response = client.post(
+        "/api/logs/client",
+        headers=_auth(staff),
+        json={
+            "level": "error",
+            "event": "ui_window_error",
+            "message": "Error",
+            "stack": "should-not-be-accepted",
+        },
+    )
+    assert response.status_code == 422
+
+
 def test_unhandled_api_exception_is_persisted_for_admins(client: TestClient) -> None:
     from fastapi import APIRouter
 

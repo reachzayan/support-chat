@@ -8,7 +8,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Query, Request
 from fastapi.responses import PlainTextResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from app.db import SessionDep
 from app.repositories.app_log_repo import DEFAULT_RETENTION_DAYS, AppLogRepository
@@ -34,6 +34,8 @@ class AppLogListOut(BaseModel):
 
 
 class ClientLogIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     level: str = Field(default="error", max_length=16)
     event: str = Field(min_length=1, max_length=128)
     message: str = Field(min_length=1, max_length=4000)
