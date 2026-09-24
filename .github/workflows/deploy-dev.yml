@@ -44,7 +44,7 @@ jobs:
           INSTANCE_ID: ${{ env.EC2_INSTANCE_ID }}
           DEPLOY_SHA: ${{ github.sha }}
           BRANCH: ${{ env.DEPLOY_BRANCH }}
-          GITHUB_TOKEN: ${{ github.token }}
           REPO_DIR: ${{ env.REPO_DIR }}
           GITHUB_REPO: ${{ github.repository }}
+          COMPOSE_APP_SERVICES: backend worker frontend
         run: bash deploy/github-actions-ssm-deploy.sh

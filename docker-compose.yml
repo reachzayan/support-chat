@@ -10,8 +10,8 @@ services:
   postgres:
     image: pgvector/pgvector:pg16
     environment:
-      POSTGRES_USER: ${POSTGRES_USER:-chat}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-chat}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-local-admin-postgres}
       POSTGRES_DB: ${POSTGRES_DB:-support_chat}
     ports:
       - "${POSTGRES_PORT:-55432}:5432"
@@ -23,6 +23,25 @@ services:
       timeout: 5s
       retries: 20
       start_period: 10s
+
+  db-provision:
+    image: pgvector/pgvector:pg16
+    environment:
+      PGHOST: postgres
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-local-admin-postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-support_chat}
+      APP_DB_USER: ${APP_DB_USER:-chat_app}
+      APP_DB_PASSWORD: ${APP_DB_PASSWORD:-local-chat-app}
+      MIGRATION_DB_USER: ${MIGRATION_DB_USER:-chat_migrator}
+      MIGRATION_DB_PASSWORD: ${MIGRATION_DB_PASSWORD:-local-chat-migrator}
+    volumes:
+      - ./deploy/provision-postgres-roles.sh:/provision-postgres-roles.sh:ro
+    command: ["sh", "/provision-postgres-roles.sh"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
 
   redis:
     image: redis:7-alpine
@@ -53,7 +72,7 @@ services:
     environment:
       ENABLE_BACKGROUND_WORKERS: "false"
       # Compose DNS overrides host-local URLs from backend/.env.
-      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-chat}:${POSTGRES_PASSWORD:-chat}@postgres:5432/${POSTGRES_DB:-support_chat}
+      DATABASE_URL: postgresql+asyncpg://${APP_DB_USER:-chat_app}:${APP_DB_PASSWORD:-local-chat-app}@postgres:5432/${POSTGRES_DB:-support_chat}
       REDIS_URL: redis://:${REDIS_PASSWORD:-local-dev-redis}@redis:6379/0
       APP_ENV: ${APP_ENV:-local}
       COOKIE_SECURE: ${COOKIE_SECURE:-false}
@@ -75,8 +94,8 @@ services:
       OPENAI_EMBED_MODEL: ${OPENAI_EMBED_MODEL:-text-embedding-3-small}
       OPENAI_EMBED_DIM: ${OPENAI_EMBED_DIM:-1536}
     depends_on:
-      postgres:
-        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
       redis:
         condition: service_healthy
     healthcheck:
@@ -92,6 +111,25 @@ services:
       retries: 12
       start_period: 40s
 
+  migrate:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    command: ["sh", "/app/docker/migrate.sh"]
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${MIGRATION_DB_USER:-chat_migrator}:${MIGRATION_DB_PASSWORD:-local-chat-migrator}@postgres:5432/${POSTGRES_DB:-support_chat}
+      MIGRATION_DATABASE_URL: postgresql+asyncpg://${MIGRATION_DB_USER:-chat_migrator}:${MIGRATION_DB_PASSWORD:-local-chat-migrator}@postgres:5432/${POSTGRES_DB:-support_chat}
+      REDIS_URL: redis://:${REDIS_PASSWORD:-local-dev-redis}@redis:6379/0
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required}
+      WIDGET_TOKEN_SECRET: ${WIDGET_TOKEN_SECRET:?WIDGET_TOKEN_SECRET is required}
+      RATE_KEY_SECRET: ${RATE_KEY_SECRET:?RATE_KEY_SECRET is required}
+    depends_on:
+      db-provision:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    restart: "no"
+
   worker:
     build:
       context: ./backend
@@ -102,7 +140,7 @@ services:
         required: false
     environment:
       ENABLE_BACKGROUND_WORKERS: "true"
-      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-chat}:${POSTGRES_PASSWORD:-chat}@postgres:5432/${POSTGRES_DB:-support_chat}
+      DATABASE_URL: postgresql+asyncpg://${APP_DB_USER:-chat_app}:${APP_DB_PASSWORD:-local-chat-app}@postgres:5432/${POSTGRES_DB:-support_chat}
       REDIS_URL: redis://:${REDIS_PASSWORD:-local-dev-redis}@redis:6379/0
       APP_ENV: ${APP_ENV:-local}
       JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required}
@@ -116,6 +154,18 @@ services:
         condition: service_healthy
       backend:
         condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import asyncio; from app.redis import get_redis; raise SystemExit(0 if asyncio.run(get_redis().get('worker:healthy')) == '1' else 1)",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
 
   frontend:
     build:
