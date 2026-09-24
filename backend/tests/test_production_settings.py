@@ -17,7 +17,7 @@ _PROD = {
     "staff_app_origin": "https://admin.sample-site.example.com",
     "widget_origin": "https://widget.sample-site.example.com",
     "marketing_host_origin": "https://sample-site.example.com",
-    "redis_url": "rediss://:prod-redis-secret@127.0.0.1:6379/0",
+    "redis_url": "rediss://app:prod-redis-secret@127.0.0.1:6379/0",
 }
 
 
@@ -72,12 +72,33 @@ def test_production_startup_accepts_https_origins_and_secure_cookies() -> None:
         staff_app_origin="https://admin.sample-site.example.com",
         widget_origin="https://widget.sample-site.example.com",
         marketing_host_origin="https://sample-site.example.com",
-        redis_url="rediss://:prod-redis-secret@127.0.0.1:6379/0",
+        redis_url="rediss://app:prod-redis-secret@127.0.0.1:6379/0",
         anthropic_api_key="sk-ant-test-not-a-real-key",
         openai_api_key="sk-test-not-a-real-key",
     )
     assert settings.cookie_secure is True
     assert settings.staff_app_origin == "https://admin.sample-site.example.com"
+
+
+def test_production_startup_rejects_default_redis_identity() -> None:
+    with pytest.raises(ValueError, match="app ACL user"):
+        Settings(
+            **_SECRETS,
+            **{**_PROD, "redis_url": "rediss://:prod-redis-secret@redis:6379/0"},
+            anthropic_api_key="sk-ant-test-not-a-real-key",
+            openai_api_key="sk-test-not-a-real-key",
+        )
+
+
+def test_production_geolocation_provider_must_be_canonical_https() -> None:
+    with pytest.raises(ValueError, match="IP_GEOLOCATION_PROVIDER_URL"):
+        Settings(
+            **_SECRETS,
+            **_PROD,
+            ip_geolocation_provider_url="http://geo.example.test/api?token=secret",
+            anthropic_api_key="sk-ant-test-not-a-real-key",
+            openai_api_key="sk-test-not-a-real-key",
+        )
 
 
 def test_production_startup_rejects_plain_redis_url() -> None:

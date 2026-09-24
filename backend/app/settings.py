@@ -40,6 +40,32 @@ def _origin_key(origin: str) -> tuple[str, int]:
     return host.casefold(), parsed.port or 443
 
 
+def _validate_production_redis(url: str) -> None:
+    if not url.startswith("rediss://"):
+        raise ValueError("REDIS_URL must use rediss:// in production")
+    if urlsplit(url).username != "app":
+        raise ValueError("REDIS_URL must authenticate as the app ACL user in production")
+    if "local-dev-redis" in url:
+        raise ValueError("production redis URL must not use the local-dev-redis password")
+
+
+def _validate_optional_provider_url(name: str, url: str | None) -> None:
+    if not url:
+        return
+    provider = urlsplit(url)
+    invalid = (
+        provider.scheme != "https"
+        or not provider.hostname
+        or provider.username
+        or provider.password
+        or provider.query
+        or provider.fragment
+        or provider.hostname.casefold() in {"localhost", "127.0.0.1"}
+    )
+    if invalid:
+        raise ValueError(f"{name} must be a canonical https URL in production")
+
+
 class AppEnvironment(StrEnum):
     LOCAL = "local"
     TEST = "test"
@@ -110,6 +136,12 @@ class Settings(BaseSettings):
     kb_ingest_source_timeout_seconds: float = 600.0
     kb_llm_extract_concurrency: int = 4
     kb_ingest_retry_sleep: float = 0.0
+    bot_generation_lease_seconds: int = 90
+    bot_generation_recovery_grace_seconds: int = 2
+    background_job_poll_seconds: float = 1.0
+    handoff_summary_max_attempts: int = 3
+    ip_geolocation_provider_url: str | None = None
+    ip_geolocation_retry_hours: int = 24
 
     def trusted_proxy_networks(self) -> list:
         networks = []
@@ -197,6 +229,10 @@ class Settings(BaseSettings):
         "kb_ingest_source_concurrency",
         "kb_ingest_stuck_minutes",
         "kb_llm_extract_concurrency",
+        "bot_generation_lease_seconds",
+        "bot_generation_recovery_grace_seconds",
+        "handoff_summary_max_attempts",
+        "ip_geolocation_retry_hours",
     )
     @classmethod
     def positive_int(cls, value: int) -> int:
@@ -212,6 +248,7 @@ class Settings(BaseSettings):
         "kb_ingest_source_timeout_seconds",
         "fast_path_min_score",
         "fast_path_margin_ratio",
+        "background_job_poll_seconds",
     )
     @classmethod
     def positive_float(cls, value: float) -> float:
@@ -259,10 +296,10 @@ class Settings(BaseSettings):
             raise ValueError(
                 "STAFF_APP_ORIGIN, WIDGET_ORIGIN, and MARKETING_HOST_ORIGIN must be distinct"
             )
-        if not self.redis_url.startswith("rediss://"):
-            raise ValueError("REDIS_URL must use rediss:// in production")
-        if "local-dev-redis" in self.redis_url:
-            raise ValueError("production redis URL must not use the local-dev-redis password")
+        _validate_production_redis(self.redis_url)
+        _validate_optional_provider_url(
+            "IP_GEOLOCATION_PROVIDER_URL", self.ip_geolocation_provider_url
+        )
         _reject_weak_production_secret("JWT_SECRET", self.jwt_secret)
         _reject_weak_production_secret("WIDGET_TOKEN_SECRET", self.widget_token_secret)
         _reject_weak_production_secret("RATE_KEY_SECRET", self.rate_key_secret)
