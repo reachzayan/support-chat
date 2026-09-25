@@ -5,6 +5,8 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.chat.outcome_copy import keep_helping_line
+from app.models.conversation import Conversation
+from app.models.message import Message
 from tests.ws_helpers import (
     AGENT_HELP,
     AGENT_MESSAGE_ID,
@@ -38,6 +40,7 @@ from tests.ws_helpers import (
     page_fields,
     post_bootstrap,
     seed_demo_world,
+    sync_session,
     visitor_contact,
     visitor_count,
 )
@@ -56,6 +59,61 @@ def _boot(client: TestClient) -> dict:
         "visitor_id": claims["visitor_id"],
         "access_token": login_staff(client),
     }
+
+
+def test_widget_bootstrap_and_socket_page_older_messages(client: TestClient) -> None:
+    ctx = _boot(client)
+    conversation_id = uuid.UUID(ctx["conversation_id"])
+    session = next(sync_session())
+    try:
+        conversation = session.get(Conversation, conversation_id)
+        assert conversation is not None
+        session.add_all(
+            Message(
+                conversation_id=conversation_id,
+                site_id=conversation.site_id,
+                role="system",
+                body=f"note {index}",
+            )
+            for index in range(55)
+        )
+        session.commit()
+    finally:
+        session.close()
+
+    response = post_bootstrap(
+        client,
+        {
+            "site_key": DEMO_SITE_KEY,
+            "public_key": DEMO_PUBLIC_KEY,
+            "resume_token": ctx["resume_token"],
+        },
+    )
+    assert response.status_code == 200
+    snapshot = response.json()["conversation"]
+    assert snapshot["has_older"] is True
+    assert len(snapshot["messages"]) == 50
+    assert snapshot["messages"][0]["body"] == "note 5"
+    assert snapshot["messages"][-1]["body"] == "note 54"
+
+    with client.websocket_connect("/ws/visitor", headers={"Origin": WIDGET_ORIGIN}) as visitor:
+        visitor.send_json(
+            {
+                "v": 1,
+                "type": "auth",
+                "bootstrap_token": response.json()["bootstrap_token"],
+                "parent_origin": STAFF_ORIGIN,
+                "last_event_id": snapshot["messages"][-1]["id"],
+            }
+        )
+        assert visitor.receive_json()["type"] == "state"
+        visitor.send_json({"v": 1, "type": "older", "before_id": snapshot["messages"][0]["id"]})
+        page = visitor.receive_json()
+        assert page["type"] == "history_page"
+        assert [message["body"] for message in page["messages"]] == [
+            f"note {index}" for index in range(5)
+        ]
+        assert page["has_older"] is False
 
 
 def test_prechat_dot_question_reaches_subscribed_agent_once_and_agent_reply_is_canonical(

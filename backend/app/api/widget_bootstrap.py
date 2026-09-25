@@ -106,6 +106,7 @@ def _bootstrap_response_body(result: BootstrapResult) -> dict[str, Any]:
             "state": result.conversation_state,
             "assigned_agent": result.assigned_agent,
             "messages": [message_frame(message) for message in (result.messages or [])],
+            "has_older": result.messages_has_older,
         }
     if result.identity is not None:
         body["identity"] = {

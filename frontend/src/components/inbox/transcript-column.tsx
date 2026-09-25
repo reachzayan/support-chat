@@ -35,7 +35,7 @@ type TranscriptColumnProps = {
   onMarkContacted: () => void
   onEnd: () => void
   onTransfer: () => void
-  onSend: (body: string) => void
+  onSend: (body: string) => boolean
   onLoadOlder: () => void
 }
 

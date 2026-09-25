@@ -5,10 +5,10 @@ import { useEffect } from "react"
 import { getAccessToken, staffRequest } from "@/lib/auth-client"
 
 const reportClientLog = async (payload: {
-  level: string
-  event: string
-  message: string
-  detail: Record<string, unknown>
+  event: "ui_window_error" | "ui_unhandled_rejection"
+  error_class: string
+  line?: number
+  column?: number
 }) => {
   if (!getAccessToken()) {
     return
@@ -24,35 +24,39 @@ const reportClientLog = async (payload: {
   }
 }
 
+const ERROR_CLASSES = new Set([
+  "Error",
+  "TypeError",
+  "ReferenceError",
+  "SyntaxError",
+  "RangeError",
+  "URIError",
+  "EvalError",
+  "AggregateError",
+  "DOMException",
+  "AbortError",
+  "NetworkError",
+  "UnhandledRejection",
+])
+
 export const safeClientErrorMessage = (value: unknown, fallback: string): string =>
-  value instanceof Error && value.name ? value.name.slice(0, 128) : fallback
+  value instanceof Error && ERROR_CLASSES.has(value.name) ? value.name : fallback
 
 export const installClientErrorReporting = () => {
   const onError = (event: ErrorEvent) => {
     void reportClientLog({
-      level: "error",
       event: "ui_window_error",
-      message: safeClientErrorMessage(event.error, "Unhandled window error"),
-      detail: {
-        path: window.location.pathname,
-        error_class: event.error?.name ?? "Error",
-        source: event.filename,
-        line: event.lineno,
-        column: event.colno,
-      },
+      error_class: safeClientErrorMessage(event.error, "Error"),
+      line: event.lineno,
+      column: event.colno,
     })
   }
 
   const onRejection = (event: PromiseRejectionEvent) => {
     const reason = event.reason
     void reportClientLog({
-      level: "error",
       event: "ui_unhandled_rejection",
-      message: safeClientErrorMessage(reason, "Unhandled promise rejection"),
-      detail: {
-        path: window.location.pathname,
-        error_class: reason instanceof Error ? reason.name : "UnhandledRejection",
-      },
+      error_class: safeClientErrorMessage(reason, "UnhandledRejection"),
     })
   }
 

@@ -79,6 +79,7 @@ def test_new_bootstrap_snapshot_is_empty_prechat(client: TestClient) -> None:
         "state": "prechat",
         "assigned_agent": None,
         "messages": [],
+        "has_older": False,
     }
 
 

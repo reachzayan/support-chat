@@ -12,7 +12,7 @@ import { Input } from "@/components/ui/input"
 type ComposerProps = {
   disabled: boolean
   sending: boolean
-  onSend: (body: string) => void
+  onSend: (body: string) => boolean
 }
 
 export const Composer = ({ disabled, sending, onSend }: ComposerProps) => {
@@ -29,8 +29,9 @@ export const Composer = ({ disabled, sending, onSend }: ComposerProps) => {
       if (!canSend) {
         return
       }
-      onSend(body)
-      setDraft("")
+      if (onSend(body)) {
+        setDraft("")
+      }
     },
     [canSend, draft, onSend],
   )

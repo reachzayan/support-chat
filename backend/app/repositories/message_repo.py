@@ -85,6 +85,16 @@ class MessageRepository:
         )
         return list(result.scalars().all())
 
+    async def list_before(
+        self, conversation_id: UUID, before_id: int | None, limit: int = 50
+    ) -> tuple[list[Message], bool]:
+        query = select(Message).where(Message.conversation_id == conversation_id)
+        if before_id is not None:
+            query = query.where(Message.id < before_id)
+        result = await self._session.execute(query.order_by(Message.id.desc()).limit(limit + 1))
+        rows = list(result.scalars().all())
+        return list(reversed(rows[:limit])), len(rows) > limit
+
     async def list_for_conversation_with_authors_bounded(
         self,
         conversation_id: UUID,

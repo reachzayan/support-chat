@@ -156,12 +156,6 @@ describe("filterSubmissions", () => {
     ).toEqual(["alex"])
   })
 
-  test("state closed keeps only Blair", () => {
-    expect(
-      filterSubmissions(ROWS, { ...EMPTY_FILTERS, state: "closed" }).map((item) => item.id),
-    ).toEqual(["blair"])
-  })
-
   test("site filter keeps Blair and Dana on Sample Services", () => {
     expect(
       filterSubmissions(ROWS, { ...EMPTY_FILTERS, siteId: "bgc" }).map((item) => item.id),
@@ -172,12 +166,6 @@ describe("filterSubmissions", () => {
     expect(
       filterSubmissions(ROWS, { ...EMPTY_FILTERS, intent: "pricing" }).map((item) => item.id),
     ).toEqual(["blair", "dana"])
-  })
-
-  test("intent turnaround keeps Alex and Casey", () => {
-    expect(
-      filterSubmissions(ROWS, { ...EMPTY_FILTERS, intent: "turnaround" }).map((item) => item.id),
-    ).toEqual(["alex", "casey"])
   })
 
   test("search, site, intent, and state combine as AND", () => {

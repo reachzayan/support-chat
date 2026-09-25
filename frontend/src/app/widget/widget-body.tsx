@@ -17,10 +17,12 @@ type WidgetBodyProps = {
   view: ChatView
   reconnecting: boolean
   sending: boolean
+  loadingOlder: boolean
   privacyVisible: boolean
   onPrechat: (fields: PrechatFields) => void
   onRestart: () => void
-  onSend: (body: string) => void
+  onSend: (body: string) => boolean
+  onLoadOlder: () => void
   onDismissPrivacy: () => void
 }
 
@@ -126,15 +128,32 @@ const PrivacyBanner = ({
   )
 }
 
+const OlderMessagesButton = ({
+  visible,
+  loading,
+  onLoad,
+}: {
+  visible: boolean
+  loading: boolean
+  onLoad: () => void
+}) =>
+  visible ? (
+    <Button type="button" variant="ghost" size="sm" disabled={loading} onClick={onLoad}>
+      {loading ? "Loading older messages…" : "Load older messages"}
+    </Button>
+  ) : null
+
 const ActiveChat = ({
   config,
   view,
   reconnecting,
   sending,
+  loadingOlder,
   privacyVisible,
   state,
   onRestart,
   onSend,
+  onLoadOlder,
   onDismissPrivacy,
 }: WidgetBodyProps & { state: Exclude<ChatView["conversation"], null | "prechat"> }) => {
   const visitorClosed = state === "closed" || (state === "queued" && !config.human_enabled)
@@ -149,6 +168,7 @@ const ActiveChat = ({
         reconnecting={reconnecting}
         systemReason={state === "queued" && !visitorClosed ? systemReason : null}
       />
+      <OlderMessagesButton visible={view.hasOlder} loading={loadingOlder} onLoad={onLoadOlder} />
       <Transcript
         lines={view.lines}
         typing={view.typing}

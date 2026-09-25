@@ -30,15 +30,24 @@ async def purge_expired(
         conversation_count = int(
             await session.scalar(select(func.count()).select_from(Conversation).where(expired)) or 0
         )
-        expired_visitors = set(
-            await session.scalars(select(Conversation.visitor_id).where(expired))
-        )
-        kept_visitors = set(
-            await session.scalars(
-                select(Conversation.visitor_id).where(Conversation.last_message_at >= cutoff)
+        has_expired = exists(
+            select(Conversation.id).where(
+                Conversation.visitor_id == Visitor.id,
+                Conversation.last_message_at < cutoff,
             )
         )
-        visitor_count = len(expired_visitors - kept_visitors)
+        has_kept = exists(
+            select(Conversation.id).where(
+                Conversation.visitor_id == Visitor.id,
+                Conversation.last_message_at >= cutoff,
+            )
+        )
+        visitor_count = int(
+            await session.scalar(
+                select(func.count()).select_from(Visitor).where(has_expired, ~has_kept)
+            )
+            or 0
+        )
         counts = {"conversations": conversation_count, "visitors": visitor_count}
         if dry_run:
             log.info("purge_dry_run", conversations=conversation_count, visitors=visitor_count)

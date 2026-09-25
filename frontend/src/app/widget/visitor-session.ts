@@ -9,6 +9,7 @@ export type ChatView = {
   assignedName: string | null
   lines: TranscriptLine[]
   lastEventId: number
+  hasOlder: boolean
   typing: boolean
 }
 
@@ -18,6 +19,7 @@ export const emptyChat = (): ChatView => ({
   assignedName: null,
   lines: [],
   lastEventId: 0,
+  hasOlder: false,
   typing: false,
 })
 
@@ -28,6 +30,7 @@ export const applyConversationSnapshot = (
     state: ConversationState
     assigned_agent: { id: string; display_name: string } | null
     messages: unknown[]
+    has_older?: boolean
   },
 ): ChatView => {
   let next = view
@@ -39,7 +42,11 @@ export const applyConversationSnapshot = (
     state: snapshot.state,
     assigned_agent: snapshot.assigned_agent,
   })
-  return { ...updated, conversationId: snapshot.id ?? null }
+  return {
+    ...updated,
+    conversationId: snapshot.id ?? null,
+    hasOlder: snapshot.has_older === true,
+  }
 }
 
 const isRecord = (value: unknown): value is Record<string, unknown> => {
@@ -89,6 +96,7 @@ const applyState = (view: ChatView, frame: Record<string, unknown>): ChatView =>
       assignedName: null,
       lines: [],
       lastEventId: 0,
+      hasOlder: false,
       typing: false,
     }
   }
@@ -158,6 +166,10 @@ export const applyVisitorFrame = (view: ChatView, frame: unknown): ChatView => {
   }
   if (frame.type === "message") {
     return applyMessage(view, frame)
+  }
+  if (frame.type === "history_page" && Array.isArray(frame.messages)) {
+    const merged = frame.messages.reduce<ChatView>(applyVisitorFrame, view)
+    return { ...merged, hasOlder: frame.has_older === true }
   }
   if (frame.type === "typing" && typeof frame.active === "boolean") {
     return { ...view, typing: frame.active }

@@ -7,6 +7,7 @@ from sqlalchemy import select
 from app.db import session_maker
 from app.models.kb_page import KbPage
 from app.models.message import Message
+from app.redis import get_redis
 from app.services.conversation_service import ConversationService
 from tests.bot_fixtures import (
     RecordingGroundedResponder,
@@ -17,18 +18,6 @@ from tests.bot_fixtures import (
 from tests.ws_helpers import HOST_ORIGIN
 
 
-class MemoryRedis:
-    def __init__(self) -> None:
-        self.store: dict[str, str] = {}
-
-    async def get(self, key: str):
-        return self.store.get(key)
-
-    async def set(self, key: str, value: str, ex: int | None = None) -> None:
-        del ex
-        self.store[key] = value
-
-
 async def _send(service, conversation, visitor, text):
     accepted = await service.visitor_message(
         conversation.id, visitor.id, HOST_ORIGIN, uuid4(), text
@@ -36,11 +25,7 @@ async def _send(service, conversation, visitor, text):
     await service.run_bot_turn(conversation.id, accepted.generation_id)
 
 
-async def test_exact_response_cache_is_cross_conversation_but_not_used_for_followups(
-    migrated_db, monkeypatch
-):
-    redis = MemoryRedis()
-    monkeypatch.setattr("app.services.response_cache.get_redis", lambda: redis)
+async def test_grounded_reply_stays_in_postgres_and_out_of_redis(migrated_db):
     async with session_maker()() as session:
         site = await insert_site(session, "response-cache", "Data Solutions")
         chunk = await insert_chunk(
@@ -65,15 +50,16 @@ async def test_exact_response_cache_is_cross_conversation_but_not_used_for_follo
         question = "What does SampleMail verify?"
         await _send(service, first_conversation, first_visitor, question)
         await _send(service, second_conversation, second_visitor, question)
-        assert len(responder.calls) == 1
-
-        await _send(service, second_conversation, second_visitor, question)
-        assert len(responder.calls) == 2
         replies = list(
             (
                 await session.scalars(
                     select(Message)
-                    .where(Message.conversation_id == second_conversation.id, Message.role == "bot")
+                    .where(
+                        Message.conversation_id.in_(
+                            [first_conversation.id, second_conversation.id]
+                        ),
+                        Message.role == "bot",
+                    )
                     .order_by(Message.id)
                 )
             ).all()
@@ -83,3 +69,4 @@ async def test_exact_response_cache_is_cross_conversation_but_not_used_for_follo
             "SampleMail verifies mailing addresses.",
         ]
         assert all(row.citations for row in replies)
+        assert [key async for key in get_redis().scan_iter(match="bot:response:*")] == []

@@ -1,3 +1,4 @@
+import asyncio
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
@@ -12,12 +13,14 @@ from app.db import session_maker
 from app.models.conversation import Conversation
 from app.models.message import Message
 from app.models.user import User
+from app.repositories.message_repo import MessageRepository
 from app.repositories.user_repo import UserRepository
 from app.services.conversation_service import ConversationService
 from app.settings import get_settings
 
 log = structlog.get_logger("chat")
 FRAME_MAX = 16384
+SEND_TIMEOUT = 3.0
 
 
 @dataclass
@@ -44,21 +47,26 @@ class ConnectionManager:
         self.suppress_wakeups = False
         self._visitors: dict[int, VisitorConnection] = {}
         self._agents: dict[int, AgentConnection] = {}
+        self._send_locks: dict[int, asyncio.Lock] = {}
 
     def reset(self) -> None:
         self.suppress_wakeups = False
         self._visitors.clear()
         self._agents.clear()
+        self._send_locks.clear()
 
     def register_visitor(self, connection: VisitorConnection) -> None:
         self._visitors[id(connection.websocket)] = connection
+        self._send_locks[id(connection.websocket)] = asyncio.Lock()
 
     def register_agent(self, connection: AgentConnection) -> None:
         self._agents[id(connection.websocket)] = connection
+        self._send_locks[id(connection.websocket)] = asyncio.Lock()
 
     def drop(self, websocket: WebSocket) -> None:
         self._visitors.pop(id(websocket), None)
         self._agents.pop(id(websocket), None)
+        self._send_locks.pop(id(websocket), None)
 
     def visitor_for(self, websocket: WebSocket) -> VisitorConnection | None:
         return self._visitors.get(id(websocket))
@@ -165,86 +173,130 @@ class ConnectionManager:
     async def send_typing(self, websocket: WebSocket, active: bool) -> None:
         await self._send(websocket, {"v": 1, "type": "typing", "active": active})
 
+    async def send_older(self, websocket: WebSocket, conversation_id: UUID, before_id: int) -> None:
+        async with session_maker()() as session:
+            messages, has_older = await MessageRepository(session).list_before(
+                conversation_id, before_id
+            )
+        await self._send(
+            websocket,
+            {
+                "v": 1,
+                "type": "history_page",
+                "messages": [message_frame(message) for message in messages],
+                "has_older": has_older,
+            },
+        )
+
     async def _catch_up_conversation(
         self, conversation_id: UUID, *, site_key: str, inbox: bool
     ) -> None:
         after = self.oldest_message_cursor(conversation_id)
         limit = get_settings().message_replay_limit
-        async with session_maker()() as session:
-            service = ConversationService(session)
-            try:
-                while True:
+        try:
+            while True:
+                async with session_maker()() as session:
+                    service = ConversationService(session)
                     messages, conversation = await service.replay(conversation_id, after)
                     assigned = await service.assigned_agent_view(conversation)
-                    await self._fanout_visitors(service, conversation, messages, assigned)
-                    await self._fanout_agents(
-                        UserRepository(session), conversation, messages, assigned, site_key, inbox
-                    )
-                    if not messages or len(messages) < limit:
-                        break
-                    after = messages[-1].id
-            except Exception:
-                log.info(
-                    "wakeup_catch_up_failed",
-                    conversation_id=str(conversation_id),
-                    role="system",
-                    length=0,
+                    visitors = [
+                        (
+                            visitor,
+                            await service.parent_origin_allowed(
+                                visitor.site_id, visitor.parent_origin
+                            ),
+                        )
+                        for visitor in list(self._visitors.values())
+                        if visitor.conversation_id == conversation.id
+                    ]
+                    users = UserRepository(session)
+                    agents = []
+                    for agent in list(self._agents.values()):
+                        staff = await users.get_by_id(agent.user.id)
+                        agents.append(
+                            (
+                                agent,
+                                bool(
+                                    staff is not None
+                                    and staff.is_active
+                                    and staff.token_version == agent.token_version
+                                ),
+                            )
+                        )
+                await asyncio.gather(
+                    *(
+                        self._fanout_visitor(visitor, allowed, conversation, messages, assigned)
+                        for visitor, allowed in visitors
+                    ),
+                    *(
+                        self._fanout_agent(
+                            agent, valid, conversation, messages, assigned, site_key, inbox
+                        )
+                        for agent, valid in agents
+                    ),
                 )
-                return
+                if not messages or len(messages) < limit:
+                    break
+                after = messages[-1].id
+        except Exception:
+            log.info(
+                "wakeup_catch_up_failed",
+                conversation_id=str(conversation_id),
+                role="system",
+                length=0,
+            )
 
-    async def _fanout_visitors(
+    async def _fanout_visitor(
         self,
-        service: ConversationService,
+        visitor: VisitorConnection,
+        allowed: bool,
         conversation: Conversation,
         messages: list[Message],
         assigned: dict | None,
     ) -> None:
-        for visitor in list(self._visitors.values()):
-            if visitor.conversation_id != conversation.id:
-                continue
-            allowed = await service.parent_origin_allowed(visitor.site_id, visitor.parent_origin)
-            if not allowed:
-                try:
-                    await visitor.websocket.close(code=4403)
-                except Exception:
-                    pass
-                self.drop(visitor.websocket)
-                continue
-            await self._send_new_messages(visitor.websocket, messages, visitor.last_event_id)
-            if messages:
-                visitor.last_event_id = max(visitor.last_event_id, messages[-1].id)
-            await self.send_state(visitor.websocket, conversation, assigned)
+        if not allowed:
+            try:
+                await visitor.websocket.close(code=4403)
+            except Exception:
+                pass
+            self.drop(visitor.websocket)
+            return
+        delivered = await self._send_new_messages(
+            visitor.websocket, messages, visitor.last_event_id
+        )
+        visitor.last_event_id = max(visitor.last_event_id, delivered)
+        await self.send_state(visitor.websocket, conversation, assigned)
 
-    async def _fanout_agents(
+    async def _fanout_agent(
         self,
-        users: UserRepository,
+        agent: AgentConnection,
+        valid: bool,
         conversation: Conversation,
         messages: list[Message],
         assigned: dict | None,
         site_key: str,
         inbox: bool,
     ) -> None:
-        for agent in list(self._agents.values()):
-            staff = await users.get_by_id(agent.user.id)
-            if staff is None or not staff.is_active or staff.token_version != agent.token_version:
-                try:
-                    await agent.websocket.close(code=4401)
-                except Exception:
-                    pass
-                self.drop(agent.websocket)
-                continue
-            if inbox:
-                await self._send(
-                    agent.websocket,
-                    inbox_frame(conversation.id, conversation.state, site_key),
-                )
-            cursor = agent.subscriptions.get(conversation.id)
-            if cursor is None:
-                continue
-            await self._send_new_messages(agent.websocket, messages, cursor)
-            if messages:
-                agent.subscriptions[conversation.id] = max(cursor, messages[-1].id)
-            await self.send_state(agent.websocket, conversation, assigned)
+        if not valid:
+            try:
+                await agent.websocket.close(code=4401)
+            except Exception:
+                pass
+            self.drop(agent.websocket)
+            return
+        if inbox:
+            await self._send(
+                agent.websocket,
+                inbox_frame(conversation.id, conversation.state, site_key),
+            )
+        cursor = agent.subscriptions.get(conversation.id)
+        if cursor is None:
+            return
+        delivered = await self._send_new_messages(agent.websocket, messages, cursor)
+        agent.subscriptions[conversation.id] = max(
+            agent.subscriptions.get(conversation.id, cursor), delivered
+        )
+        await self.send_state(agent.websocket, conversation, assigned)
 
     async def _replay_visitor(self, visitor: VisitorConnection) -> None:
         limit = get_settings().message_replay_limit
@@ -255,10 +307,13 @@ class ConnectionManager:
                 messages, conversation = await service.replay(visitor.conversation_id, cursor)
                 assigned = await service.assigned_agent_view(conversation)
                 await session.close()
-                await self._send_new_messages(visitor.websocket, messages, visitor.last_event_id)
-                if messages:
-                    visitor.last_event_id = messages[-1].id
-                    cursor = messages[-1].id
+                delivered = await self._send_new_messages(
+                    visitor.websocket, messages, visitor.last_event_id
+                )
+                visitor.last_event_id = max(visitor.last_event_id, delivered)
+                cursor = visitor.last_event_id
+                if self.visitor_for(visitor.websocket) is None:
+                    break
                 await self.send_state(visitor.websocket, conversation, assigned)
                 if not messages or len(messages) < limit:
                     break
@@ -277,12 +332,13 @@ class ConnectionManager:
                 messages, conversation = await service.replay(conversation_id, cursor)
                 assigned = await service.assigned_agent_view(conversation)
                 await session.close()
-                await self._send_new_messages(agent.websocket, messages, cursor)
-                if messages:
-                    agent.subscriptions[conversation_id] = messages[-1].id
-                    cursor = messages[-1].id
-                else:
-                    agent.subscriptions[conversation_id] = cursor
+                delivered = await self._send_new_messages(agent.websocket, messages, cursor)
+                agent.subscriptions[conversation_id] = max(
+                    agent.subscriptions.get(conversation_id, cursor), delivered
+                )
+                cursor = agent.subscriptions[conversation_id]
+                if self.agent_for(agent.websocket) is None:
+                    break
                 await self.send_state(agent.websocket, conversation, assigned)
                 if not messages or len(messages) < limit:
                     break
@@ -291,17 +347,32 @@ class ConnectionManager:
 
     async def _send_new_messages(
         self, websocket: WebSocket, messages: list[Message], cursor: int
-    ) -> None:
+    ) -> int:
         for message in messages:
             if message.id <= cursor:
                 continue
-            await self._send(websocket, message_frame(message))
+            if not await self._send(websocket, message_frame(message)):
+                break
+            cursor = message.id
+        return cursor
 
-    async def _send(self, websocket: WebSocket, payload: dict[str, Any]) -> None:
+    async def _send(self, websocket: WebSocket, payload: dict[str, Any]) -> bool:
         try:
-            await websocket.send_json(payload)
+            lock = self._send_locks.get(id(websocket))
+            if lock is None:
+                return False
+            async with lock:
+                if self._send_locks.get(id(websocket)) is not lock:
+                    return False
+                await asyncio.wait_for(websocket.send_json(payload), timeout=SEND_TIMEOUT)
+            return True
         except Exception:
             self.drop(websocket)
+            try:
+                await asyncio.wait_for(websocket.close(code=1011), timeout=SEND_TIMEOUT)
+            except Exception:
+                pass
+            return False
 
 
 def message_frame(message: Message) -> dict[str, Any]:

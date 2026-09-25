@@ -21,6 +21,7 @@ export type ConversationSnapshot = {
   state: "prechat" | "bot" | "queued" | "human" | "closed"
   assigned_agent: { id: string; display_name: string } | null
   messages: Record<string, unknown>[]
+  has_older?: boolean
 }
 
 export type ReturningIdentity = {
@@ -136,6 +137,7 @@ export const parseConversationSnapshot = (value: unknown): ConversationSnapshot 
     state: value.state as ConversationSnapshot["state"],
     assigned_agent: assigned,
     messages: value.messages.filter(isRecord),
+    has_older: value.has_older === true,
   }
 }
 

@@ -456,15 +456,13 @@ class HybridKbSearch:
     async def _dense(
         self, site_id: UUID, query_vector: list[float]
     ) -> tuple[list[UUID], dict[UUID, float]]:
-        await self._session.execute(text("SET LOCAL hnsw.iterative_scan = strict_order"))
-        distance = KbChunk.embedding.cosine_distance(query_vector)
-        result = await self._session.execute(
+        eligible = (
             select(
                 KbChunk.id,
                 KbChunk.site_id,
                 KbChunk.heading,
                 KbChunk.answer_verbatim,
-                (1 - distance).label("cosine"),
+                KbChunk.embedding,
             )
             .join(KbPage, KbPage.id == KbChunk.page_id)
             .join(KbSnapshot, KbSnapshot.id == KbChunk.snapshot_id)
@@ -478,7 +476,19 @@ class HybridKbSearch:
                 KbSnapshot.state == "live",
                 KbChunk.embedding.is_not(None),
             )
-            .order_by(distance, KbChunk.id)
+            .cte("eligible_chunks")
+            .prefix_with("MATERIALIZED")
+        )
+        distance = eligible.c.embedding.cosine_distance(query_vector)
+        result = await self._session.execute(
+            select(
+                eligible.c.id,
+                eligible.c.site_id,
+                eligible.c.heading,
+                eligible.c.answer_verbatim,
+                (1 - distance).label("cosine"),
+            )
+            .order_by(distance, eligible.c.id)
             .limit(DENSE_LIMIT)
         )
         ids: list[UUID] = []

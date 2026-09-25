@@ -59,6 +59,7 @@ describe("host to widget frames", () => {
       state: "prechat",
       assigned_agent: null,
       messages: [],
+      has_older: false,
     })
   })
 

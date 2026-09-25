@@ -1,4 +1,4 @@
-"""Prepare a grounded reply from history, cached answers, evidence and provider output.
+"""Prepare a grounded reply from history, evidence and provider output.
 
 ConversationService alone owns generation leases, transitions and persistence.
 """
@@ -17,7 +17,6 @@ from app.llm.intent import (
 from app.llm.prompts import document_body
 from app.models.conversation import Conversation
 from app.models.kb_chunk import KbChunk
-from app.models.kb_snapshot import KbSnapshot
 from app.models.message import Message
 from app.models.site import Site
 from app.repositories.kb_chunk_repo import live_chunks_query
@@ -38,7 +37,6 @@ from app.services.grounded_response import (
 from app.services.kb_embedder import default_embedder
 from app.services.kb_hybrid import HybridKbSearch
 from app.services.pii_redactor import redact_for_model
-from app.services.response_cache import load_response, response_cache_key
 from app.services.route_decision import live_snapshots_for_site
 from app.settings import get_settings
 
@@ -50,7 +48,6 @@ MAX_CARRIED_EVIDENCE = 2
 class PreparedBotReply:
     decision: ResponseDecision
     stage_timings: dict[str, int]
-    cache_key: str | None = None
 
 
 class BotTurnService:
@@ -113,12 +110,6 @@ class BotTurnService:
             ]
             return PreparedBotReply(source_followup_decision(citations), stage_timings)
         record_trace("history", prior_messages=prior_messages)
-        snapshots = await live_snapshots_for_site(self._session, site.id)
-        cache_key, cached = await self._load_cached_first_turn(
-            site, snapshots, visitor_text, prior_messages
-        )
-        if cached is not None:
-            return PreparedBotReply(cached, stage_timings)
         # Retrieval answers the current message exactly as written. Conversation
         # continuity comes from live evidence cited by the previous bot answer,
         # not from guessing whether this wording looks like a follow-up.
@@ -153,7 +144,7 @@ class BotTurnService:
             ),
             stage_timings=stage_timings,
         )
-        return PreparedBotReply(decision, stage_timings, cache_key)
+        return PreparedBotReply(decision, stage_timings)
 
     async def _load_carried_evidence(
         self,
@@ -250,24 +241,6 @@ class BotTurnService:
                     return await repair_draft(turn, units, draft, stage_timings=stage_timings)
 
         return GroundedResponseEngine(complete=complete, repair=repair)
-
-    async def _load_cached_first_turn(
-        self,
-        site: Site,
-        snapshots: list[KbSnapshot],
-        visitor_text: str,
-        prior_messages: tuple[dict[str, str], ...],
-    ) -> tuple[str | None, ResponseDecision | None]:
-        if prior_messages or not snapshots:
-            return None, None
-        key = response_cache_key(
-            site.id,
-            site.name,
-            [item.id for item in snapshots],
-            visitor_text,
-            off_brand_blocklist=site.off_brand_blocklist,
-        )
-        return key, await load_response(key)
 
     async def retrieve_evidence(
         self,

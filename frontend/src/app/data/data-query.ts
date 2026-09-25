@@ -34,18 +34,8 @@ export const STATE_FILTER_OPTIONS = [
   { value: "prechat", label: STATE_LABEL.prechat },
 ] as const
 
-export const hasActiveFilters = (filters: DataFilters) => {
-  if (filters.search.trim().length > 0) {
-    return true
-  }
-  if (filters.siteId) {
-    return true
-  }
-  if (filters.intent) {
-    return true
-  }
-  return filters.state !== "all"
-}
+export const hasActiveFilters = (filters: DataFilters) =>
+  Boolean(filters.search.trim() || filters.siteId || filters.intent || filters.state !== "all")
 
 export const siteOptionsFromRows = (rows: SubmissionRow[]) => {
   const seen = new Set<string>()

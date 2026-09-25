@@ -22,11 +22,10 @@ return current
 """
 
 RESERVE_LOGIN = """
-local budget = tonumber(ARGV[1])
-local window = tonumber(ARGV[2])
-for _, key in ipairs(KEYS) do
+local window = tonumber(ARGV[3])
+for index, key in ipairs(KEYS) do
     local current = tonumber(redis.call("get", key) or "0")
-    if current >= budget then
+    if current >= tonumber(ARGV[index]) then
         return 0
     end
 end
@@ -145,6 +144,7 @@ class RateLimiter:
                     len(keys),
                     *keys,
                     str(settings.rate_login_failure),
+                    str(settings.rate_login_ip_failure),
                     str(settings.rate_login_failure_window),
                 )
             )

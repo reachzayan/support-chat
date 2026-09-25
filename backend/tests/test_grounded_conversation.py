@@ -15,6 +15,7 @@ from app.services.grounded_response import (
     ResponseOutcome,
 )
 from app.services.kb_embedder import FakeEmbedder
+from app.services.site_admin import SiteAdminService
 from tests.bot_fixtures import (
     RecordingGroundedResponder,
     insert_bot_conversation,
@@ -267,6 +268,61 @@ async def test_stale_source_at_commit_discards_draft(migrated_db) -> None:
     assert message.body == TECH_FAIL_HUMAN
     assert message.system_reason == "tech_fail"
     assert citations == []
+
+
+async def test_bot_disabled_during_generation_never_saves_draft(migrated_db) -> None:
+    async with session_maker()() as session:
+        site = await insert_site(session, "bot-off-site", "Bot Off Site")
+        chunk = await insert_chunk(
+            session, site, "Do you provide DOT drug and alcohol testing?", ANSWER_VERBATIM
+        )
+        page = await session.get(KbPage, chunk.page_id)
+        visitor, conversation = await insert_bot_conversation(session, site)
+        await session.commit()
+        site_id = site.id
+        conversation_id = conversation.id
+        visitor_id = visitor.id
+
+    class DisableBotResponder(RecordingGroundedResponder):
+        async def generate_grounded_draft(self, turn, documents, **kwargs):
+            async with session_maker()() as other:
+                await SiteAdminService(other).update_site(
+                    site_id,
+                    name=None,
+                    greeting=None,
+                    privacy_url=None,
+                    origins=None,
+                    bot_enabled=False,
+                )
+            return await super().generate_grounded_draft(turn, documents, **kwargs)
+
+    responder = DisableBotResponder(
+        body=PARAPHRASE_BODY,
+        evidence_id=chunk.id,
+        snapshot_id=chunk.snapshot_id,
+        source_title=page.title,
+        source_url=page.url,
+        cited_text=ANSWER_VERBATIM,
+    )
+    async with session_maker()() as session:
+        service = ConversationService(session, responder=responder, embedder=FakeEmbedder())
+        accepted = await service.visitor_message(
+            conversation_id, visitor_id, HOST_ORIGIN, uuid.uuid4(), "Do you provide drug screening?"
+        )
+        assert accepted.generation_id is not None
+        await service.run_bot_turn(conversation_id, accepted.generation_id)
+
+    async with session_maker()() as session:
+        saved = list(
+            (
+                await session.scalars(
+                    select(Message).where(
+                        Message.conversation_id == conversation_id, Message.role == "bot"
+                    )
+                )
+            ).all()
+        )
+    assert saved == []
 
 
 async def test_finalizer_state_guard_drops_stale_generation(migrated_db) -> None:

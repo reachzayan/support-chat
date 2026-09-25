@@ -25,6 +25,7 @@ describe("widget bootstrap payload", () => {
       state: "prechat",
       assigned_agent: null,
       messages: [],
+      has_older: false,
     })
   })
 

@@ -62,8 +62,11 @@ export const useWidgetActions = (
   )
   const handleSend = useCallback(
     (body: string) => {
+      if (socketRef.current === null) {
+        return false
+      }
       setSending(true)
-      socketRef.current?.sendMessage(crypto.randomUUID(), body)
+      return socketRef.current.sendMessage(crypto.randomUUID(), body)
     },
     [setSending, socketRef],
   )

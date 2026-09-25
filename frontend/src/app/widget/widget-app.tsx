@@ -94,13 +94,16 @@ const applyBootstrapConversation = (
     state: ConversationState
     assigned_agent: { id: string; display_name: string } | null
     messages: unknown[]
+    has_older?: boolean
   },
   viewRef: RefObject<ChatView>,
   setView: (updater: (current: ChatView) => ChatView) => void,
+  setLoadingOlder: (loading: boolean) => void,
 ) => {
   if (shouldKeepClosedView(viewRef.current, snapshot)) {
     return
   }
+  setLoadingOlder(false)
   setView(() => {
     const next = applyConversationSnapshot(emptyChat(), snapshot)
     viewRef.current = next
@@ -116,6 +119,7 @@ const applyHostBootstrap = (
   setConfig: (config: PublicWidgetConfig) => void,
   setPage: (page: { page_url: string; page_title: string; referrer: string }) => void,
   setView: (updater: (current: ChatView) => ChatView) => void,
+  setLoadingOlder: (loading: boolean) => void,
   setReturning: (view: ReturningView) => void,
 ) => {
   if (event.source !== window.parent) {
@@ -145,7 +149,7 @@ const applyHostBootstrap = (
   if (snapshot === undefined) {
     return
   }
-  applyBootstrapConversation(snapshot, viewRef, setView)
+  applyBootstrapConversation(snapshot, viewRef, setView, setLoadingOlder)
 }
 
 export const WidgetApp = () => {
@@ -155,6 +159,7 @@ export const WidgetApp = () => {
   const [view, setView] = useState<ChatView>(emptyChat)
   const [reconnecting, setReconnecting] = useState(false)
   const [sending, setSending] = useState(false)
+  const [loadingOlder, setLoadingOlder] = useState(false)
   const [privacyVisible, setPrivacyVisible] = useState(true)
   const [returning, setReturning] = useState<ReturningView>(null)
   const socketRef = useRef<SocketApi | null>(null)
@@ -180,6 +185,7 @@ export const WidgetApp = () => {
         setConfig,
         setPage,
         setView,
+        setLoadingOlder,
         setReturning,
       )
     },
@@ -194,7 +200,24 @@ export const WidgetApp = () => {
 
   usePaintedSignal(returning !== null || view.conversation !== null, config, parentRef, paintedRef)
 
-  useVisitorConnection(page, setView, setReconnecting, setSending, socketRef, viewRef)
+  useVisitorConnection(
+    page,
+    setView,
+    setReconnecting,
+    setSending,
+    setLoadingOlder,
+    socketRef,
+    viewRef,
+  )
+
+  const loadOlder = useCallback(() => {
+    const oldest = view.lines[0]?.id
+    if (!oldest || !view.hasOlder || loadingOlder || socketRef.current === null) {
+      return
+    }
+    setLoadingOlder(true)
+    socketRef.current.loadOlder(oldest)
+  }, [view.lines, view.hasOlder, loadingOlder])
 
   if (config === null) {
     return <div className="bg-paper h-dvh" />
@@ -230,10 +253,12 @@ export const WidgetApp = () => {
           view={view}
           reconnecting={reconnecting}
           sending={sending}
+          loadingOlder={loadingOlder}
           privacyVisible={privacyVisible}
           onPrechat={actions.handlePrechat}
           onRestart={actions.handleRestart}
           onSend={actions.handleSend}
+          onLoadOlder={loadOlder}
           onDismissPrivacy={actions.handleDismissPrivacy}
         />
       )}
