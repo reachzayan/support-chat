@@ -14,10 +14,13 @@ log = structlog.get_logger("fanout")
 WAKEUP_CHANNEL = "chat:wakeup"
 RETRY_SLEEP = 1.0
 PUBLISH_TIMEOUT = 2.0
+MAX_ACTIVE_DELIVERIES = 32
 INSTANCE_ID = uuid.uuid4().hex
 
 _subscriber_task: asyncio.Task | None = None
 _subscriber_client: redis.Redis | None = None
+_delivery_tasks: dict[str, asyncio.Task] = {}
+_pending_wakeups: dict[str, dict[str, Any]] = {}
 
 
 async def publish_wakeup(payload: dict[str, Any]) -> None:
@@ -47,6 +50,12 @@ async def stop_fanout() -> None:
         except asyncio.CancelledError:
             pass
         _subscriber_task = None
+    active_deliveries = list(_delivery_tasks.values())
+    for task in active_deliveries:
+        task.cancel()
+    await asyncio.gather(*active_deliveries, return_exceptions=True)
+    _delivery_tasks.clear()
+    _pending_wakeups.clear()
     await _close_subscriber_client()
     connection_manager.reset()
 
@@ -96,8 +105,28 @@ async def _handle_wakeup_message(message: dict[str, Any]) -> None:
         payload = json.loads(data)
     except json.JSONDecodeError:
         return
-    if "conversation_id" not in payload:
+    if not isinstance(payload, dict):
+        return
+    try:
+        conversation_id = str(uuid.UUID(str(payload["conversation_id"])))
+    except (KeyError, ValueError, TypeError):
         return
     if payload.get("origin_instance") == INSTANCE_ID:
         return
-    await connection_manager.deliver_wakeup(payload)
+    _pending_wakeups[conversation_id] = payload
+    if conversation_id in _delivery_tasks:
+        return
+    if len(_delivery_tasks) >= MAX_ACTIVE_DELIVERIES:
+        await asyncio.wait(_delivery_tasks.values(), return_when=asyncio.FIRST_COMPLETED)
+    _delivery_tasks[conversation_id] = asyncio.create_task(_deliver_pending(conversation_id))
+
+
+async def _deliver_pending(conversation_id: str) -> None:
+    try:
+        while payload := _pending_wakeups.pop(conversation_id, None):
+            try:
+                await connection_manager.deliver_wakeup(payload)
+            except Exception:
+                log.info("wakeup_delivery_failed", conversation_id=conversation_id)
+    finally:
+        _delivery_tasks.pop(conversation_id, None)

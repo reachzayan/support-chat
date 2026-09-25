@@ -25,7 +25,7 @@ type AgentComposerProps = {
   closed?: boolean
   canned: CannedReply[]
   inputId: string
-  onSend: (body: string) => void
+  onSend: (body: string) => boolean
 }
 
 export const expandCanned = (draft: string, canned: CannedReply[]) => {
@@ -266,8 +266,9 @@ export const AgentComposer = ({
       if (body === "") {
         return
       }
-      onSend(body)
-      setDraft("")
+      if (onSend(body)) {
+        setDraft("")
+      }
     },
     [canned, disabled, draft, onSend],
   )

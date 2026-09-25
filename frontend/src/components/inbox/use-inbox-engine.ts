@@ -472,9 +472,10 @@ export const useInboxActions = (
   }, [refs.selectedRef, socketRef])
   const handleSend = useCallback(
     (body: string) => {
-      if (refs.selectedRef.current !== null) {
-        socketRef.current?.sendMessage(refs.selectedRef.current, crypto.randomUUID(), body)
+      if (refs.selectedRef.current !== null && socketRef.current !== null) {
+        return socketRef.current.sendMessage(refs.selectedRef.current, crypto.randomUUID(), body)
       }
+      return false
     },
     [refs.selectedRef, socketRef],
   )

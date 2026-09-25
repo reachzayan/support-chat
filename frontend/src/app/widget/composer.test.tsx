@@ -23,7 +23,7 @@ describe("visitor composer", () => {
 
   test("sends the visitor's trimmed message once", async () => {
     const user = userEvent.setup()
-    const sendMessage = vi.fn()
+    const sendMessage = vi.fn(() => true)
     renderWithProviders(<Composer disabled={false} sending={false} onSend={sendMessage} />)
 
     await user.type(screen.getByLabelText("Message"), "  How fast are results?  ")

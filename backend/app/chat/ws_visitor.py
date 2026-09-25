@@ -20,6 +20,7 @@ from app.settings import get_settings
 log = structlog.get_logger("ws_visitor")
 
 router = APIRouter()
+MAX_MESSAGE_ID = (1 << 63) - 1
 
 
 async def _idle_watch(websocket: WebSocket, last_seen: dict[str, float]) -> None:
@@ -74,7 +75,7 @@ async def visitor_socket(websocket: WebSocket) -> None:
         return
     connection_manager.register_visitor(connection)
     try:
-        await connection_manager.catch_up_socket(websocket, last_event_id=0)
+        await connection_manager.catch_up_socket(websocket, last_event_id=connection.last_event_id)
     except Exception:
         await websocket.send_json(
             {"v": 1, "type": "state", "state": "prechat", "assigned_agent": None}
@@ -105,6 +106,14 @@ async def _authenticate_visitor(websocket: WebSocket, settings) -> VisitorConnec
     if claims.get("parent_origin") != parent_origin:
         await websocket.close(code=4403)
         return None
+    last_event_id = frame.get("last_event_id", 0)
+    if (
+        not isinstance(last_event_id, int)
+        or isinstance(last_event_id, bool)
+        or not 0 <= last_event_id <= MAX_MESSAGE_ID
+    ):
+        await websocket.close(code=4401)
+        return None
     site_id = UUID(str(claims["site_id"]))
     parent = str(parent_origin)
     async with session_maker()() as session:
@@ -118,6 +127,7 @@ async def _authenticate_visitor(websocket: WebSocket, settings) -> VisitorConnec
         visitor_id=UUID(str(claims["visitor_id"])),
         site_id=site_id,
         parent_origin=parent,
+        last_event_id=last_event_id,
     )
 
 
@@ -193,7 +203,7 @@ async def _handle_visitor_resume(
     websocket: WebSocket, connection: VisitorConnection, frame: dict
 ) -> None:
     cursor = frame.get("last_event_id")
-    if not isinstance(cursor, int) or cursor < 0:
+    if not isinstance(cursor, int) or isinstance(cursor, bool) or not 0 <= cursor <= MAX_MESSAGE_ID:
         await connection_manager.send_error(websocket, "invalid")
         return
     if not await _parent_still_allowed(websocket, connection):
@@ -218,6 +228,18 @@ async def _handle_visitor_frame(
         return
     if frame_type == "resume":
         await _handle_visitor_resume(websocket, connection, frame)
+        return
+    if frame_type == "older":
+        before_id = frame.get("before_id")
+        if (
+            not isinstance(before_id, int)
+            or isinstance(before_id, bool)
+            or not 1 <= before_id <= MAX_MESSAGE_ID
+        ):
+            await connection_manager.send_error(websocket, "invalid")
+            return
+        if await _parent_still_allowed(websocket, connection):
+            await connection_manager.send_older(websocket, connection.conversation_id, before_id)
         return
     if frame_type in {"hello", "prechat", "message", "escalate"}:
         await _run_visitor_command(websocket, connection, frame_type, frame)

@@ -23,11 +23,18 @@ type Page = { page_url: string; page_title: string; referrer: string }
 type SetView = (updater: (current: ChatView) => ChatView) => void
 type SchedulerRef = { current: ReturnType<typeof createReconnectScheduler> | null }
 
+const snapshotCursor = (messages: Record<string, unknown>[] | undefined) =>
+  Math.max(
+    0,
+    ...(messages ?? []).map((message) => (typeof message.id === "number" ? message.id : 0)),
+  )
+
 export const useVisitorConnection = (
   page: Page,
   setView: SetView,
   setReconnecting: (value: boolean) => void,
   setSending: (value: boolean) => void,
+  setLoadingOlder: (value: boolean) => void,
   socketRef: SocketRef,
   viewRef: ViewRef,
 ) => {
@@ -43,8 +50,6 @@ export const useVisitorConnection = (
           return
         }
         socket.reconnect()
-        socket.resume(viewRef.current.lastEventId)
-        socket.flushUnacked()
       },
       isDisposed: () => disposedRef.current,
     })
@@ -67,15 +72,24 @@ export const useVisitorConnection = (
       window.removeEventListener("online", handleResume)
       document.removeEventListener("visibilitychange", handleResume)
     }
-  }, [socketRef, viewRef])
+  }, [socketRef])
 
   useEffect(() => {
     const onMessage = (event: MessageEvent) => {
-      handleBootstrap(event, setView, setReconnecting, setSending, socketRef, viewRef, schedulerRef)
+      handleBootstrap(
+        event,
+        setView,
+        setReconnecting,
+        setSending,
+        setLoadingOlder,
+        socketRef,
+        viewRef,
+        schedulerRef,
+      )
     }
     window.addEventListener("message", onMessage)
     return () => window.removeEventListener("message", onMessage)
-  }, [setReconnecting, setSending, setView, socketRef, viewRef])
+  }, [setReconnecting, setSending, setLoadingOlder, setView, socketRef, viewRef])
 
   useEffect(() => {
     const socket = socketRef.current
@@ -91,6 +105,7 @@ const handleBootstrap = (
   setView: SetView,
   setReconnecting: (value: boolean) => void,
   setSending: (value: boolean) => void,
+  setLoadingOlder: (value: boolean) => void,
   socketRef: SocketRef,
   viewRef: ViewRef,
   schedulerRef: SchedulerRef,
@@ -103,20 +118,27 @@ const handleBootstrap = (
     return
   }
   const existing = socketRef.current
+  const bootstrapCursor = Math.max(
+    snapshotCursor(frame.conversation?.messages),
+    viewRef.current.lastEventId,
+  )
   if (existing !== null) {
     existing.setBootstrapToken(frame.bootstrap_token)
+    existing.setConversationId(frame.conversation?.id ?? null)
+    existing.setBootstrapCursor(bootstrapCursor)
     existing.reconnect()
-    existing.resume(viewRef.current.lastEventId)
-    existing.flushUnacked()
     return
   }
   socketRef.current = openSocket(
     frame.bootstrap_token,
+    bootstrapCursor,
+    frame.conversation?.id ?? null,
     event.origin,
     { page_url: frame.page_url, page_title: frame.page_title, referrer: frame.referrer },
     setView,
     setReconnecting,
     setSending,
+    setLoadingOlder,
     socketRef,
     viewRef,
     schedulerRef,
@@ -125,11 +147,14 @@ const handleBootstrap = (
 
 const openSocket = (
   token: string,
+  lastEventId: number,
+  conversationId: string | null,
   origin: string,
   page: Page,
   setView: SetView,
   setReconnecting: (value: boolean) => void,
   setSending: (value: boolean) => void,
+  setLoadingOlder: (value: boolean) => void,
   socketRef: SocketRef,
   viewRef: ViewRef,
   schedulerRef: SchedulerRef,
@@ -137,6 +162,8 @@ const openSocket = (
   const socket = createVisitorSocket({
     url: visitorSocketUrl(),
     bootstrapToken: token,
+    lastEventId,
+    conversationId,
     parentOrigin: origin,
     onFrame: (frame) => {
       schedulerRef.current?.markAuthenticated()
@@ -152,9 +179,19 @@ const openSocket = (
       if (isAck(frame) || isErrorFrame(frame)) {
         setSending(false)
       }
+      if (
+        typeof frame === "object" &&
+        frame !== null &&
+        "type" in frame &&
+        (frame.type === "history_page" || frame.type === "error")
+      ) {
+        setLoadingOlder(false)
+      }
     },
-    onClose: (code) =>
-      handleSocketClose(code, origin, socketRef, viewRef, setReconnecting, schedulerRef),
+    onClose: (code) => {
+      setLoadingOlder(false)
+      handleSocketClose(code, origin, socketRef, viewRef, setReconnecting, schedulerRef)
+    },
   })
   socket.sendHello(page.page_url, page.page_title, page.referrer)
   return socket

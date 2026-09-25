@@ -156,7 +156,7 @@ describe("widget socket expiry", () => {
     await waitFor(() => {
       const frames = sentFrames(FakeSocket.instances[1])
       expect(frames.find((frame) => frame.type === "auth")?.bootstrap_token).toBe("boot-2")
-      expect(frames.find((frame) => frame.type === "resume")?.last_event_id).toBe(12)
+      expect(frames.find((frame) => frame.type === "auth")?.last_event_id).toBe(12)
     })
   })
 })

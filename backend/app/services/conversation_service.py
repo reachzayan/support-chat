@@ -28,6 +28,9 @@ from app.llm.intent import (
 from app.llm.safety_markers import SensitiveCategory
 from app.models.conversation import Conversation
 from app.models.kb_chunk import KbChunk
+from app.models.kb_page import KbPage
+from app.models.kb_snapshot import KbSnapshot
+from app.models.kb_source import KbSource
 from app.models.message import Message
 from app.models.message_citation import MessageCitation
 from app.models.site import Site
@@ -77,7 +80,6 @@ from app.services.handoff_service import EscalationReason, HandoffService, Hando
 from app.services.pii_redactor import redact_for_log
 from app.services.rate_limit import RateLimiter, RateLimitExceeded, RateLimitUnavailable
 from app.services.refusal_library import fallback_refusal_body, lookup_refusal
-from app.services.response_cache import store_response
 from app.settings import get_settings
 
 log = structlog.get_logger("chat")
@@ -271,7 +273,7 @@ class ConversationService:
         parent_origin: str,
         resume_token: str | None,
     ) -> BootstrapResult:
-        messages, _ = await self.replay(conversation.id, 0)
+        messages, has_older = await self._messages.list_before(conversation.id, None)
         assigned = await self.assigned_agent_view(conversation)
         return self._bootstrap_result(
             site,
@@ -283,6 +285,7 @@ class ConversationService:
             conversation_state=conversation.state,
             assigned_agent=assigned,
             messages=messages,
+            messages_has_older=has_older,
         )
 
     async def _history_bootstrap(
@@ -1018,7 +1021,6 @@ class ConversationService:
             site.id,
             prepared.decision,
             stage_timings=prepared.stage_timings,
-            response_cache_key=prepared.cache_key,
         )
 
     async def _retrieve_evidence(
@@ -1034,7 +1036,6 @@ class ConversationService:
         decision: ResponseDecision,
         *,
         stage_timings: dict[str, int] | None = None,
-        response_cache_key: str | None = None,
     ) -> CommandResult | None:
         timings = stage_timings if stage_timings is not None else {}
         record_trace("decision", decision=decision, stage_timings=timings)
@@ -1047,6 +1048,10 @@ class ConversationService:
             or conversation.active_generation_id != generation_id
         ):
             await self._session.commit()
+            return CommandResult(conversation=conversation, site_key=site_key)
+        if not site.enabled or not site.bot_enabled:
+            await self._enter_callback(conversation)
+            await self._commit_and_schedule()
             return CommandResult(conversation=conversation, site_key=site_key)
         if decision.citations:
             started = time.perf_counter_ns()
@@ -1061,8 +1066,6 @@ class ConversationService:
         inserted = await self._persist_grounded_reply(conversation, decision)
         await self._session.commit()
         record_trace("decision", decision=decision, persisted=True)
-        if response_cache_key is not None and decision.reason_code is None:
-            await store_response(response_cache_key, decision)
         timings["commit"] = (time.perf_counter_ns() - started) // 1_000_000
         snapshot_id = None
         if decision.citations and decision.citations[0].snapshot_id is not None:
@@ -1162,13 +1165,15 @@ class ConversationService:
         return "insufficient"
 
     async def _grounded_citations_live(self, site_id: UUID, citations: list[Citation]) -> bool:
-        cited_chunk_ids = list(dict.fromkeys(citation.chunk_id for citation in citations))
+        cited_chunk_ids = sorted(set(citation.chunk_id for citation in citations))
         if not cited_chunk_ids:
             return True
         result = await self._session.execute(
             live_chunks_query(site_id)
             .with_only_columns(KbChunk.id, KbChunk.snapshot_id, KbChunk.site_id)
             .where(KbChunk.id.in_(cited_chunk_ids))
+            .order_by(KbChunk.id)
+            .with_for_update(read=True, of=[KbChunk, KbPage, KbSource, KbSnapshot])
         )
         rows = result.all()
         by_id = {row.id: row for row in rows}
@@ -1206,13 +1211,13 @@ class ConversationService:
     async def _lock_finalize_context(
         self, conversation_id: UUID, site_id: UUID
     ) -> tuple[Conversation | None, Site | None, str]:
+        site = await self._sites.lock_by_id(site_id)
         cached = await self._conversations.get_by_id(conversation_id)
         if cached is not None:
             self._session.expire(cached)
         conversation = await self._conversations.lock_by_id(conversation_id)
         if conversation is None:
             return None, None, ""
-        site = await self._sites.get_by_id(site_id)
         site_key = site.key if site is not None else ""
         return conversation, site, site_key
 

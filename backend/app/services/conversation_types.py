@@ -65,6 +65,7 @@ class BootstrapResult:
     conversation_state: str | None = None
     assigned_agent: dict | None = None
     messages: list[Message] | None = None
+    messages_has_older: bool = False
     identity: ReturningIdentity | None = None
     conversations: list[VisitorConversationSummary] | None = None
     changed_conversations: list[Conversation] = field(default_factory=list)
