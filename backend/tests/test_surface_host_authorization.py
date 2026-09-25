@@ -137,3 +137,16 @@ def test_staff_host_cannot_open_visitor_socket_even_with_widget_origin(
             pass
 
     assert closed.value.code == 4403
+
+
+def test_loopback_proxy_host_cannot_open_visitor_socket_even_with_widget_origin(
+    production_client: TestClient,
+) -> None:
+    with pytest.raises(WebSocketDisconnect) as closed:
+        with production_client.websocket_connect(
+            "/ws/visitor",
+            headers={"Host": "127.0.0.1:8000", "Origin": WIDGET_ORIGIN},
+        ):
+            pass
+
+    assert closed.value.code == 4403
