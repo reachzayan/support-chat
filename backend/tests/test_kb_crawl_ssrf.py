@@ -1,9 +1,18 @@
 import ipaddress
+from typing import ClassVar
 from unittest.mock import patch
 
 import httpx
+import pytest
 
-from app.services.kb_crawl import FetchError, allowed_fetch_url, fetch_html, robots_allows
+from app.services.kb_crawl import (
+    MAX_HOPS,
+    FetchError,
+    allowed_fetch_url,
+    fetch_html,
+    pinned_get,
+    robots_allows,
+)
 
 _PUBLIC = ipaddress.ip_address("1.1.1.1")
 _PRIVATE = ipaddress.ip_address("10.0.0.4")
@@ -34,9 +43,12 @@ class _RedirectStreamClient:
         return False
 
     def stream(self, method, url, **kwargs):
-        if url == "https://sample-site.example.com/start":
+        host = (kwargs.get("headers") or {}).get("Host")
+        if host == "sample-site.example.com" and str(url).endswith("/start"):
             return _FakeStream(self._redirect)
-        if url == "https://evil.internal/private":
+        if url == "https://evil.internal/private" or (
+            host == "evil.internal" and str(url).endswith("/private")
+        ):
             return _FakeStream(
                 httpx.Response(
                     200,
@@ -152,3 +164,75 @@ def test_robots_disallow_blocks_path() -> None:
     url = "https://sample-site.example.com/faq"
     assert robots_allows(url, blocked) is False
     assert robots_allows(url, open_all) is True
+
+
+def test_pinned_get_stops_redirect_loops(monkeypatch) -> None:
+    calls = 0
+
+    class LoopingClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def get(self, url, **kwargs):
+            nonlocal calls
+            calls += 1
+            if calls > MAX_HOPS + 1:
+                raise AssertionError("redirect limit was not enforced")
+            return httpx.Response(
+                302,
+                headers={"location": "/loop"},
+                request=httpx.Request("GET", url),
+            )
+
+        def stream(self, method, url, **kwargs):
+            return _FakeStream(self.get(url, **kwargs))
+
+    monkeypatch.setattr("app.services.kb_crawl.httpx.Client", LoopingClient)
+    monkeypatch.setattr("app.services.kb_crawl._resolve_ips", lambda _host: [_PUBLIC])
+
+    with pytest.raises(FetchError) as caught:
+        pinned_get("https://sample-site.example.com/loop", {"sample-site.example.com"})
+
+    assert caught.value.code == "http"
+    assert calls == MAX_HOPS + 1
+
+
+def test_pinned_get_rejects_oversized_stream_before_buffering(monkeypatch) -> None:
+    class ChunkedResponse:
+        status_code = 200
+        headers: ClassVar = {"content-type": "text/html"}
+
+        def iter_bytes(self):
+            yield b"1234"
+            yield b"5"
+
+    class StreamingClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def get(self, *_args, **_kwargs):
+            raise AssertionError("response bodies must not be buffered by Client.get")
+
+        def stream(self, *_args, **_kwargs):
+            return _FakeStream(ChunkedResponse())
+
+    monkeypatch.setattr("app.services.kb_crawl.MAX_BYTES", 4)
+    monkeypatch.setattr("app.services.kb_crawl.httpx.Client", StreamingClient)
+    monkeypatch.setattr("app.services.kb_crawl._resolve_ips", lambda _host: [_PUBLIC])
+
+    with pytest.raises(FetchError) as caught:
+        pinned_get("https://sample-site.example.com/large", {"sample-site.example.com"})
+
+    assert caught.value.code == "too_large"

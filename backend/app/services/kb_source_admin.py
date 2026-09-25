@@ -1,4 +1,4 @@
-from uuid import NAMESPACE_URL, UUID, uuid4, uuid5
+from uuid import UUID, uuid4
 
 from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -9,22 +9,20 @@ from app.models.kb_page_job import KbPageJob
 from app.models.kb_page_llm_extract import KbPageLlmExtract
 from app.models.kb_smoke_assertion import KbSmokeAssertion
 from app.models.kb_snapshot import KbSnapshot
-from app.models.kb_source import KbSource
+from app.models.kb_source import KbSource, general_tab_id_for
 from app.models.site import Site
 from app.models.user import User
 from app.repositories.kb_snapshot_repo import KbSnapshotRepository
 from app.repositories.kb_source_repo import KbSourceRepository
-from app.services.full_context import clear_units_cache
 from app.services.kb_embedder import configured_embedder_id
 from app.services.kb_ingest import CanonicalError, canonical_fetch_url, enqueue_wakeup, host_allowed
 from app.services.site_admin import AdminError
 
 SAMPLESITE_SMOKE = ["24-48", "MRO", "rapid"]
-GENERAL_TAB_KEY = "supportchat.kb.general."
 
 
 def general_tab_id(source_id: UUID) -> UUID:
-    return uuid5(NAMESPACE_URL, f"{GENERAL_TAB_KEY}{source_id}")
+    return general_tab_id_for(source_id)
 
 
 def _origin_count():
@@ -222,8 +220,6 @@ class KbSourceService:
                 source.stage = "idle"
                 source.error_code = None
         await self._session.commit()
-        if enabled is not None:
-            clear_units_cache()
         if text_changed:
             await enqueue_wakeup(source.id)
         return source
@@ -281,7 +277,6 @@ class KbSourceService:
         )
         await self._session.delete(source)
         await self._session.commit()
-        clear_units_cache()
 
     async def list_pages(self, source_id: UUID) -> list[tuple[KbPage, int]]:
         source = await self._session.get(KbSource, source_id)
@@ -332,7 +327,6 @@ class KbSourceService:
             raise AdminError("not_found")
         page.enabled = enabled
         await self._session.commit()
-        clear_units_cache()
         return page
 
     async def patch_chunk(self, chunk_id: UUID, *, enabled: bool) -> KbChunk:
@@ -348,29 +342,19 @@ class KbSourceService:
             raise AdminError("stale")
         chunk.enabled = enabled
         await self._session.commit()
-        clear_units_cache()
         return chunk
 
-    async def list_snapshots(self, source_id: UUID) -> list[KbSnapshot]:
+    async def list_snapshots(self, source_id: UUID, *, limit: int = 50) -> list[KbSnapshot]:
         source = await self._session.get(KbSource, source_id)
         if source is None:
             raise AdminError("not_found")
-        return await KbSnapshotRepository(self._session).list_for_source(source_id)
+        return await KbSnapshotRepository(self._session).list_for_source(source_id, limit=limit)
 
     async def latest_snapshot(self, source_id: UUID) -> KbSnapshot | None:
-        rows = await KbSnapshotRepository(self._session).list_for_source(source_id)
-        return rows[0] if rows else None
+        return await KbSnapshotRepository(self._session).latest_for_source(source_id)
 
     async def status_snapshot(self, source_id: UUID) -> KbSnapshot | None:
-        rows = await KbSnapshotRepository(self._session).list_for_source(source_id)
-        for state in ("building", "validated"):
-            match = next((row for row in rows if row.state == state), None)
-            if match is not None:
-                return match
-        live = next((row for row in rows if row.state == "live"), None)
-        if live is not None:
-            return live
-        return rows[0] if rows else None
+        return await KbSnapshotRepository(self._session).status_for_source(source_id)
 
     async def diff_snapshots(
         self, source_id: UUID, from_id: UUID | None, to_id: UUID | None
@@ -379,9 +363,8 @@ class KbSourceService:
         if source is None:
             raise AdminError("not_found")
         repo = KbSnapshotRepository(self._session)
-        snapshots = await repo.list_for_source(source_id)
-        live = next((row for row in snapshots if row.state == "live"), None)
-        previous = next((row for row in snapshots if row.state == "superseded"), None)
+        live = await repo.get_live(source_id)
+        previous = await repo.previous_superseded(source_id)
         start = from_id or (previous.id if previous is not None else None)
         end = to_id or (live.id if live is not None else None)
         if start is None or end is None:
@@ -420,10 +403,8 @@ class KbSourceService:
         )
 
     async def _source_for_general_tab(self, page_id: UUID) -> KbSource | None:
-        result = await self._session.execute(select(KbSource))
-        return next(
-            (source for source in result.scalars().all() if general_tab_id(source.id) == page_id),
-            None,
+        return await self._session.scalar(
+            select(KbSource).where(KbSource.general_tab_id == page_id)
         )
 
     async def _shared_chunk_count(self, source_id: UUID) -> int:

@@ -11,8 +11,11 @@ import {
   useMemo,
   useState,
   type ComponentProps,
+  type MouseEvent,
   type ReactNode,
 } from "react"
+
+import { Button } from "./button"
 
 type CollapsibleProps = {
   defaultOpen?: boolean
@@ -58,17 +61,29 @@ const Collapsible = ({
   )
 }
 
-const CollapsibleTrigger = ({ className, children, ...props }: ComponentProps<"button">) => {
+const CollapsibleTrigger = ({
+  className,
+  children,
+  onClick,
+  ...props
+}: ComponentProps<"button">) => {
   const ctx = useContext(CollapsibleContext)
-  const handleToggle = useCallback(() => {
-    ctx?.setOpen(!(ctx?.open ?? false))
-  }, [ctx])
+  const handleToggle = useCallback(
+    (event: MouseEvent<HTMLButtonElement>) => {
+      onClick?.(event)
+      if (!event.defaultPrevented) {
+        ctx?.setOpen(!(ctx?.open ?? false))
+      }
+    },
+    [ctx, onClick],
+  )
   if (ctx === null) {
     return null
   }
   return (
-    <button
+    <Button
       type="button"
+      variant="ghost"
       data-slot="collapsible-trigger"
       aria-expanded={ctx.open}
       onClick={handleToggle}
@@ -79,12 +94,17 @@ const CollapsibleTrigger = ({ className, children, ...props }: ComponentProps<"b
       {...props}
     >
       {children}
-    </button>
+    </Button>
   )
 }
 
-// Quiet, functional motion: height + opacity only, matching the theme's 150-200ms guidance.
-const COLLAPSE_TRANSITION = { duration: 0.2, ease: [0.23, 1, 0.32, 1] } as const
+// Quiet height + opacity spring: stays in the 150–250ms feel without snapping.
+const COLLAPSE_SPRING = {
+  type: "spring",
+  stiffness: 320,
+  damping: 32,
+  mass: 0.75,
+} as const
 
 const CollapsibleContent = ({ className, children, ...props }: ComponentProps<"div">) => {
   const ctx = useContext(CollapsibleContext)
@@ -92,7 +112,7 @@ const CollapsibleContent = ({ className, children, ...props }: ComponentProps<"d
   if (ctx === null) {
     return null
   }
-  const transition = reducedMotion ? { duration: 0 } : COLLAPSE_TRANSITION
+  const transition = reducedMotion ? { duration: 0 } : COLLAPSE_SPRING
   return (
     <AnimatePresence initial={false}>
       {ctx.open ? (

@@ -10,7 +10,6 @@ import {
   originFromWebsiteUrl,
 } from "@/lib/validation"
 
-import { copyManageSnippet } from "./manage-site-save"
 import { useLeaveGuard } from "./sites-form"
 import { useSiteValidation } from "./use-site-validation"
 
@@ -46,7 +45,6 @@ export const useAddSiteForm = (
   const [errors, setErrors] = useState<Record<string, string>>({})
   const [created, setCreated] = useState<SiteRecord | null>(null)
   const [checking, setChecking] = useState(false)
-  const [copyNotice, setCopyNotice] = useState<string | null>(null)
   const lockedOrigin = originFromWebsiteUrl(websiteUrl)
   const dirty =
     created === null &&
@@ -168,10 +166,6 @@ export const useAddSiteForm = (
       setChecking(false)
     }
   }, [created, onError, onSaved])
-  const handleCopy = useCallback(async (snippet: string) => {
-    await copyManageSnippet(snippet, setCopyNotice)
-  }, [])
-
   return {
     name,
     greeting,
@@ -183,7 +177,6 @@ export const useAddSiteForm = (
     errors,
     created,
     checking,
-    copyNotice,
     leaveOpen,
     requestClose,
     handleStay,
@@ -202,6 +195,5 @@ export const useAddSiteForm = (
     handleOpenChange,
     handleSubmit,
     handleCheckInstall,
-    handleCopy,
   }
 }

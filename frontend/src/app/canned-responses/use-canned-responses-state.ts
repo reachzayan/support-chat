@@ -1,6 +1,15 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react"
+import {
+  useCallback,
+  useDeferredValue,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type FormEvent,
+} from "react"
 
 import { staffRead, staffWrite, type SiteRecord } from "@/components/admin/staff-api"
+import { matchesSearchQuery } from "@/lib/search"
 
 import {
   scopeLabel,
@@ -83,6 +92,7 @@ export const useCannedResponsesState = () => {
   const [pendingIds, setPendingIds] = useState<string[]>([])
   const [announcement, setAnnouncement] = useState("")
   const shortcutRef = useRef<HTMLInputElement>(null)
+  const deferredQuery = useDeferredValue(query)
 
   const load = useCallback(async () => {
     setLoadError("")
@@ -172,6 +182,13 @@ export const useCannedResponsesState = () => {
     [updateUrl],
   )
 
+  const clearSearchFilters = useCallback(() => {
+    setQuery("")
+    setStatus("all")
+    setPage(1)
+    updateUrl({ q: "", status: "all", page: 1 })
+  }, [updateUrl])
+
   const scoped = useMemo(
     () =>
       (records ?? []).filter((row) =>
@@ -180,12 +197,11 @@ export const useCannedResponsesState = () => {
     [records, scope],
   )
   const filtered = useMemo(() => {
-    const needle = query.trim().toLowerCase()
     return scoped.filter((row) => {
-      const matchesQuery = !needle || `${row.shortcut} ${row.body}`.toLowerCase().includes(needle)
+      const matchesQuery = matchesSearchQuery([row.shortcut, row.body], deferredQuery)
       return matchesQuery && (status === "all" || (status === "enabled") === row.enabled)
     })
-  }, [query, scoped, status])
+  }, [deferredQuery, scoped, status])
   const visible = useMemo(
     () => filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE),
     [filtered, page],
@@ -355,6 +371,7 @@ export const useCannedResponsesState = () => {
     selectScope,
     updateQuery,
     updateStatus,
+    clearSearchFilters,
     visible,
     totalPages,
     summary,

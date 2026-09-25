@@ -7,11 +7,15 @@ from sqlalchemy import (
     CheckConstraint,
     DateTime,
     ForeignKey,
+    ForeignKeyConstraint,
     Identity,
     Index,
     String,
     Text,
+    UniqueConstraint,
+    event,
     func,
+    select,
     text,
 )
 from sqlalchemy.dialects.postgresql import ARRAY
@@ -27,6 +31,18 @@ if TYPE_CHECKING:
 class Message(Base):
     __tablename__ = "messages"
     __table_args__ = (
+        ForeignKeyConstraint(
+            ["conversation_id", "site_id"],
+            ["conversations.id", "conversations.site_id"],
+            name="fk_messages_conversation_site",
+            ondelete="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ["snapshot_id", "site_id"],
+            ["kb_snapshots.id", "kb_snapshots.site_id"],
+            name="fk_messages_snapshot_site",
+            ondelete="SET NULL (snapshot_id)",
+        ),
         CheckConstraint("role IN ('visitor','bot','agent','system')", name="ck_messages_role"),
         CheckConstraint(
             "(role IN ('visitor','agent') AND client_message_id IS NOT NULL) OR "
@@ -58,6 +74,7 @@ class Message(Base):
             postgresql_where=text("client_message_id IS NOT NULL"),
         ),
         Index("ix_messages_conversation_id", "conversation_id", "id"),
+        UniqueConstraint("id", "site_id", name="uq_messages_id_site"),
         CheckConstraint(
             "system_reason IS NULL OR system_reason IN ("
             "'answer','clarify','escalate','tech_fail','policy_boundary',"
@@ -76,9 +93,8 @@ class Message(Base):
     )
 
     id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)
-    conversation_id: Mapped[UUID] = mapped_column(
-        ForeignKey("conversations.id", ondelete="CASCADE")
-    )
+    conversation_id: Mapped[UUID] = mapped_column()
+    site_id: Mapped[UUID] = mapped_column(ForeignKey("sites.id"))
     client_message_id: Mapped[UUID | None] = mapped_column(nullable=True)
     role: Mapped[str] = mapped_column(String)
     author_user_id: Mapped[UUID | None] = mapped_column(ForeignKey("users.id"), nullable=True)
@@ -89,9 +105,7 @@ class Message(Base):
     source_chunk_ids: Mapped[list[UUID] | None] = mapped_column(
         ARRAY(PGUUID(as_uuid=True)), nullable=True
     )
-    snapshot_id: Mapped[UUID | None] = mapped_column(
-        ForeignKey("kb_snapshots.id", ondelete="SET NULL"), nullable=True
-    )
+    snapshot_id: Mapped[UUID | None] = mapped_column(nullable=True)
     system_reason: Mapped[str | None] = mapped_column(String, nullable=True)
     source_urls: Mapped[list[str] | None] = mapped_column(ARRAY(Text), nullable=True)
     display_locator: Mapped[str | None] = mapped_column(String, nullable=True)
@@ -102,3 +116,15 @@ class Message(Base):
         back_populates="message", cascade="all, delete-orphan", lazy="selectin"
     )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+@event.listens_for(Message, "before_insert")
+def _fill_message_site_id(_mapper, connection, target: "Message") -> None:
+    if target.site_id is not None:
+        return
+    from app.models.conversation import Conversation
+
+    site_id = connection.execute(
+        select(Conversation.site_id).where(Conversation.id == target.conversation_id)
+    ).scalar_one()
+    target.site_id = site_id

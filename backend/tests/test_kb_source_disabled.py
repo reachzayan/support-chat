@@ -5,7 +5,7 @@ from sqlalchemy import select
 from app.db import session_maker
 from app.models.kb_snapshot import KbSnapshot
 from app.models.kb_source import KbSource
-from app.services.full_context import clear_units_cache, load_live_units
+from app.services.full_context import load_live_units
 from app.services.kb_embedder import FakeEmbedder, configured_embedder_id
 from app.services.kb_ingest import ingest_source
 from app.services.kb_source_admin import KbSourceService
@@ -41,8 +41,7 @@ async def _ready_source(session) -> KbSource:
     return source
 
 
-async def test_disabled_source_excluded_from_live_snapshots_and_cache(migrated_db) -> None:
-    clear_units_cache()
+async def test_disabled_source_excluded_from_live_snapshots_and_context(migrated_db) -> None:
     async with session_maker()() as session:
         source = await _ready_source(session)
         source_id = source.id

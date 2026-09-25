@@ -61,6 +61,7 @@
   --radius-2xl: calc(var(--radius) * 1.8);
   --radius-3xl: calc(var(--radius) * 2.2);
   --radius-4xl: calc(var(--radius) * 2.6);
+  --radius-card: var(--surface-radius);
 }
 
 body {
@@ -237,7 +238,7 @@ body {
   --card-foreground: var(--ink);
   --popover: var(--paper);
   --popover-foreground: var(--ink);
-  --primary: var(--navy);
+  --primary: var(--ember);
   --primary-foreground: #ffffff;
   --secondary: var(--ice-2);
   --secondary-foreground: var(--ink);
@@ -254,7 +255,10 @@ body {
   --chart-3: #67b587;
   --chart-4: #788291;
   --chart-5: #18335c;
-  --radius: 0.5rem;
+  /* Controls (buttons, selects, inputs) */
+  --radius: 0.625rem;
+  /* Cards / modals: slightly less than prior sign-in 28px */
+  --surface-radius: 1.5rem;
   --sidebar: var(--paper);
   --sidebar-foreground: var(--ink);
   --sidebar-primary: var(--navy);
@@ -287,7 +291,7 @@ body {
   --popover: var(--paper);
   --popover-foreground: var(--ink);
   --primary: var(--ember);
-  --primary-foreground: #08090b;
+  --primary-foreground: #ffffff;
   --secondary: var(--ice-2);
   --secondary-foreground: var(--ink);
   --muted: var(--ice-2);

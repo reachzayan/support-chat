@@ -2,7 +2,7 @@
 # Send pinned deploy script to EC2 via SSM and poll until completion.
 #
 # Required env:
-#   INSTANCE_ID, DEPLOY_SHA, GITHUB_TOKEN, REPO_DIR, GITHUB_REPO, BRANCH
+#   INSTANCE_ID, DEPLOY_SHA, REPO_DIR, GITHUB_REPO, BRANCH
 # Optional:
 #   SSM_POLL_ITERATIONS (default 180), SSM_POLL_INTERVAL_SECONDS (default 10),
 #   COMPOSE_FILE, COMPOSE_PROD_FILE, COMPOSE_APP_SERVICES, POSTGRES_VOLUME_FILTER,
@@ -11,7 +11,6 @@ set -euo pipefail
 
 INSTANCE_ID="${INSTANCE_ID:?INSTANCE_ID required}"
 DEPLOY_SHA="${DEPLOY_SHA:?DEPLOY_SHA required}"
-GITHUB_TOKEN="${GITHUB_TOKEN:?GITHUB_TOKEN required}"
 REPO_DIR="${REPO_DIR:?REPO_DIR required}"
 GITHUB_REPO="${GITHUB_REPO:?GITHUB_REPO required}"
 BRANCH="${BRANCH:?BRANCH required}"
@@ -23,12 +22,11 @@ REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 {
   echo "export DEPLOY_SHA='${DEPLOY_SHA}'"
   echo "export BRANCH='${BRANCH}'"
-  echo "export GITHUB_TOKEN='${GITHUB_TOKEN}'"
   echo "export REPO_DIR='${REPO_DIR}'"
   echo "export GITHUB_REPO='${GITHUB_REPO}'"
   echo "export COMPOSE_FILE='${COMPOSE_FILE:-docker-compose.yml}'"
   echo "export COMPOSE_PROD_FILE='${COMPOSE_PROD_FILE:-docker-compose.prod.yml}'"
-  echo "export COMPOSE_APP_SERVICES='${COMPOSE_APP_SERVICES:-backend frontend}'"
+  echo "export COMPOSE_APP_SERVICES='${COMPOSE_APP_SERVICES:-backend worker frontend}'"
   echo "export POSTGRES_VOLUME_FILTER='${POSTGRES_VOLUME_FILTER:-postgres_data}'"
   cat "${REPO_ROOT}/deploy/ssm-deploy.sh"
 } > /tmp/ssm-deploy-pinned.sh

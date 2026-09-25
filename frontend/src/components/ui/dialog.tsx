@@ -15,7 +15,7 @@ const DIALOG_RESIZE_TRANSITION = { duration: 0.2, ease: [0.23, 1, 0.32, 1] } as 
 const REDUCED_MOTION_TRANSITION = { duration: 0 } as const
 
 const DIALOG_FRAME =
-  "border-line bg-paper text-ink pointer-events-auto isolate z-50 flex max-h-[min(92vh,48rem)] w-[calc(100%-2rem)] max-w-lg flex-col overflow-hidden rounded-2xl border shadow-[0_16px_48px_rgba(13,31,58,0.22)] transition-[opacity,scale] duration-200 ease-[cubic-bezier(0.23,1,0.32,1)] data-ending-style:scale-[0.97] data-ending-style:opacity-0 data-starting-style:scale-[0.97] data-starting-style:opacity-0"
+  "border-line bg-paper text-ink pointer-events-auto relative isolate z-50 flex max-h-[min(92vh,48rem)] w-[calc(100%-2rem)] max-w-lg flex-col overflow-hidden rounded-card border shadow-[0_16px_48px_rgba(13,31,58,0.22)] transition-[opacity,scale] duration-200 ease-[cubic-bezier(0.23,1,0.32,1)] data-ending-style:scale-[0.97] data-ending-style:opacity-0 data-starting-style:scale-[0.97] data-starting-style:opacity-0"
 
 const Dialog = ({ ...props }: DialogPrimitive.Root.Props) => {
   return <DialogPrimitive.Root data-slot="dialog" {...props} />
@@ -62,10 +62,16 @@ const DialogContent = ({
           {showCloseButton ? (
             <DialogPrimitive.Close
               data-slot="dialog-close"
-              render={<Button variant="ghost" className="absolute top-3 right-3" size="icon-sm" />}
+              render={
+                <Button
+                  variant="ghost"
+                  className="absolute top-3 right-3"
+                  size="icon-sm"
+                  aria-label="Close dialog"
+                />
+              }
             >
-              <XIcon />
-              <span className="sr-only">Close</span>
+              <XIcon aria-hidden="true" />
             </DialogPrimitive.Close>
           ) : null}
         </DialogPrimitive.Popup>
@@ -131,7 +137,10 @@ const DialogFooter = ({ className, ...props }: React.ComponentProps<"div">) => {
   return (
     <div
       data-slot="dialog-footer"
-      className={cn("border-line mt-auto flex flex-col gap-2 border-t px-5 py-4", className)}
+      className={cn(
+        "border-line mt-auto flex flex-col items-center gap-2 border-t px-5 py-4",
+        className,
+      )}
       {...props}
     />
   )

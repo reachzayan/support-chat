@@ -6,7 +6,7 @@ import { agentSocketUrl, createAgentSocket } from "@/lib/agent-ws"
 import { getAccessToken, refreshSession } from "@/lib/auth-client"
 import { createReconnectScheduler } from "@/lib/ws-reconnect"
 
-import { fetchInboxDetail, fetchInboxList } from "./inbox-api"
+import { fetchInboxDetail, fetchInboxList, mergeInboxMessages } from "./inbox-api"
 import { applyAgentFrame, emptyLive, maxMessageId, type InboxLive } from "./inbox-session"
 import {
   INBOX_LIST_POLL_MS,
@@ -138,8 +138,8 @@ const handleAgentSocketClose = async (
     return
   }
   if (code === 4401) {
-    const user = await refreshSession()
-    if (user === null) {
+    const result = await refreshSession()
+    if (result.status !== "authenticated") {
       return
     }
     socket.setAccessToken(getAccessToken() ?? "")
@@ -162,17 +162,29 @@ const applyFetchedDetail = (
 ) => {
   const assigned = next.detail.assigned_agent
   const winner = assigned && assigned.id !== userId ? assigned.display_name : null
+  const previous = liveRef.current.detail?.id === conversationId ? liveRef.current.detail : null
+  const lines = previous
+    ? mergeInboxMessages(previous.messages, next.detail.messages)
+    : next.detail.messages
+  const detail = previous
+    ? {
+        ...next.detail,
+        messages: lines,
+        has_older: previous.has_older,
+        older_before_id: previous.older_before_id,
+      }
+    : next.detail
   const nextLive: InboxLive = {
-    chatState: next.detail.state,
+    chatState: detail.state,
     assigned,
     joinPending: false,
     winnerName: winner,
-    detail: next.detail,
-    lines: next.detail.messages,
+    detail,
+    lines,
   }
   liveRef.current = nextLive
   setCanned(next.canned)
-  lastIdRef.current = maxMessageId(next.detail.messages)
+  lastIdRef.current = maxMessageId(lines)
   setLive(nextLive)
   socketRef.current?.subscribe(conversationId, lastIdRef.current)
 }

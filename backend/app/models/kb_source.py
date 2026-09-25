@@ -1,5 +1,5 @@
 from datetime import datetime
-from uuid import UUID, uuid4
+from uuid import NAMESPACE_URL, UUID, uuid4, uuid5
 
 from sqlalchemy import (
     Boolean,
@@ -10,6 +10,7 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
+    event,
     func,
     text,
 )
@@ -20,6 +21,11 @@ from app.models.base import Base
 
 # Schema default only. Runtime sources use configured_embedder_id() from settings.
 DEFAULT_EMBEDDER_ID = "openai:text-embedding-3-small:1536"
+GENERAL_TAB_KEY = "supportchat.kb.general."
+
+
+def general_tab_id_for(source_id: UUID) -> UUID:
+    return uuid5(NAMESPACE_URL, f"{GENERAL_TAB_KEY}{source_id}")
 
 
 class KbSource(Base):
@@ -27,6 +33,7 @@ class KbSource(Base):
     __table_args__ = (
         UniqueConstraint("id", "site_id", name="uq_kb_sources_id_site"),
         UniqueConstraint("site_id", "start_url", name="uq_kb_sources_site_start_url"),
+        UniqueConstraint("general_tab_id", name="uq_kb_sources_general_tab_id"),
         CheckConstraint("mode IN ('prefix','list')", name="ck_kb_sources_mode"),
         CheckConstraint("max_depth >= 1 AND max_depth <= 5", name="ck_kb_sources_depth"),
         CheckConstraint("max_pages >= 1 AND max_pages <= 200", name="ck_kb_sources_pages"),
@@ -46,6 +53,7 @@ class KbSource(Base):
         primary_key=True, default=uuid4, server_default=text("gen_random_uuid()")
     )
     site_id: Mapped[UUID] = mapped_column(ForeignKey("sites.id"))
+    general_tab_id: Mapped[UUID] = mapped_column()
     start_url: Mapped[str] = mapped_column(String)
     mode: Mapped[str] = mapped_column(String, server_default=text("'list'"))
     seed_urls: Mapped[list] = mapped_column(JSONB, server_default=text("'[]'::jsonb"))
@@ -85,3 +93,11 @@ class KbSource(Base):
         server_default=func.now(),
         onupdate=func.now(),
     )
+
+
+@event.listens_for(KbSource, "before_insert")
+def _fill_general_tab_id(_mapper, _connection, target: KbSource) -> None:
+    if target.id is None:
+        target.id = uuid4()
+    if getattr(target, "general_tab_id", None) is None:
+        target.general_tab_id = general_tab_id_for(target.id)

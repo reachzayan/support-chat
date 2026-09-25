@@ -57,7 +57,7 @@ export const SitePicker = ({
       >
         <SelectTrigger
           aria-label="Site"
-          className={`border-line bg-ice text-ink w-full min-w-0 cursor-pointer rounded-[9px] border px-3 text-sm ${compact ? "h-9 data-[size=default]:h-9" : "h-10 data-[size=default]:h-10"}`}
+          className={`border-line bg-ice text-ink w-full min-w-0 cursor-pointer border px-3 text-sm ${compact ? "h-9 data-[size=default]:h-9" : "h-10 data-[size=default]:h-10"}`}
         >
           <SelectValue placeholder="Select a site" />
         </SelectTrigger>

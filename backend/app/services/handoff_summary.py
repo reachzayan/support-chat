@@ -9,7 +9,6 @@ import structlog
 from anthropic import AsyncAnthropic
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db import session_maker
 from app.llm.prompts import HANDOFF_SUMMARY_PROMPT
 from app.repositories.handoff_repo import HandoffRepository
 from app.repositories.message_repo import MessageRepository
@@ -86,40 +85,6 @@ async def generate(
         output_len=len(summary),
     )
     return summary
-
-
-async def generate_in_background(
-    handoff_id: UUID,
-    conversation_id: UUID,
-    original_question: str,
-    escalation_reason: str,
-) -> None:
-    try:
-        async with session_maker()() as session:
-            await generate(
-                session,
-                handoff_id=handoff_id,
-                conversation_id=conversation_id,
-                original_question=original_question,
-                escalation_reason=escalation_reason,
-            )
-            await session.commit()
-            record_trace("handoff_summary", persisted=True)
-    except Exception as exc:
-        record_trace(
-            "handoff_summary",
-            status="failed",
-            persisted=False,
-            error_class=type(exc).__name__,
-        )
-        log.info(
-            "handoff_summary",
-            handoff_id=str(handoff_id),
-            model="",
-            elapsed_ms=0,
-            output_len=0,
-            error_class=type(exc).__name__,
-        )
 
 
 async def _transcript_block(session: AsyncSession, conversation_id: UUID) -> str:

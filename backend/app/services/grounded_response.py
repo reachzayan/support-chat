@@ -194,77 +194,11 @@ _LIMITATION_RE = re.compile(
     r"(?:confirmar|verificar|revisar|proporcionar)\b)",
     re.I,
 )
-_FOLLOWUP_RE = re.compile(r"\b(?:it|its|that|those|these|both|either|they|them)\b", re.I)
-_GENERIC_FOLLOWUP_TERMS = frozenset(
-    {
-        "pricing",
-        "price",
-        "cost",
-        "costs",
-        "about",
-        "turnaround",
-        "timing",
-        "result",
-        "available",
-        "availability",
-        "standard",
-        "setup",
-        "start",
-        "getting",
-        "started",
-        "yes",
-        "no",
-        "huh",
-        "say",
-        "said",
-        "again",
-        "mean",
-        "means",
-        "more",
-        "details",
-    }
-)
 _UNRELATED_TASK_RE = re.compile(
     r"\b(?:malware|ransomware|steal (?:passwords|credentials)|weather forecast|"
     r"write (?:a poem|a song)|recipe for|cook (?:pasta|a meal))\b",
     re.I,
 )
-
-
-def contextual_grounding_query(
-    visitor_text: str,
-    prior_messages: tuple[dict[str, str], ...],
-    *,
-    source_subject: str = "",
-) -> str:
-    """Add a bounded subject only for fragments or explicit references.
-
-    Full, self-contained questions must not inherit an unrelated old answer.
-    The provider receives the conversation separately from this search query.
-    """
-    if len(visitor_text.split()) > 6 and not _FOLLOWUP_RE.search(visitor_text):
-        return visitor_text
-    if (
-        not _FOLLOWUP_RE.search(visitor_text)
-        and set(tokenize(visitor_text)) - _GENERIC_FOLLOWUP_TERMS
-    ):
-        return visitor_text
-    if source_subject:
-        return f"{source_subject[:200]} {visitor_text}"
-    for message in reversed(prior_messages):
-        if message.get("role") != "assistant":
-            continue
-        body = (message.get("content") or "").strip()
-        if body:
-            # A missing-information reply is not a new product subject, though
-            # a request to restate that reply still needs its actual wording.
-            if _LIMITATION_RE.search(body) and visitor_text.strip().casefold() not in {
-                "huh?",
-                "huh",
-            }:
-                continue
-            return f"{body[:160]} {visitor_text}"
-    return visitor_text
 
 
 def _eligible(units: list[EvidenceUnit]) -> list[EvidenceUnit]:

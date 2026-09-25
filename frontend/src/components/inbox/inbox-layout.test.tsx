@@ -7,11 +7,14 @@ import { InboxConsole } from "./inbox-console"
 import {
   ALEX,
   FakeSocket,
+  adaDetail,
   emit,
   emitAlexJoined,
   openQueuedAda,
   resetInboxHarness,
+  setDetails,
   setListItems,
+  setOlderDetails,
 } from "./inbox-test-harness"
 
 describe("inbox layout", () => {
@@ -86,11 +89,58 @@ describe("inbox layout", () => {
     })
     await waitFor(() => expect(screen.getByText("I can help with that.")).toBeInTheDocument())
     const transcript = screen.getByRole("log", { name: "Transcript" })
+    expect(within(transcript).queryByRole("img")).not.toBeInTheDocument()
     expect(
-      within(transcript).getByText("How fast are DOT results?").closest(".widget-bubble"),
-    ).toHaveClass("rounded-[20px]", "mr-auto", "bg-paper")
+      within(transcript).getByText("How fast are DOT results?").closest('[data-slot="message"]'),
+    ).toHaveAttribute("data-align", "start")
     expect(
-      within(transcript).getByText("I can help with that.").closest(".widget-bubble"),
-    ).toHaveClass("rounded-[20px]", "ml-auto", "bg-steel/15")
+      within(transcript).getByText("I can help with that.").closest('[data-slot="message"]'),
+    ).toHaveAttribute("data-align", "end")
+  })
+})
+
+describe("inbox transcript pagination", () => {
+  beforeEach(() => {
+    resetInboxHarness()
+  })
+
+  test("loads older transcript messages only when requested", async () => {
+    setDetails({
+      ["aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"]: {
+        ...structuredClone(adaDetail),
+        messages: [
+          {
+            ...adaDetail.messages[0],
+            id: 501,
+            body: "Newest answer",
+          },
+        ],
+        has_older: true,
+        older_before_id: 501,
+      },
+    })
+    setOlderDetails({
+      ["aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa:501"]: {
+        ...structuredClone(adaDetail),
+        messages: [
+          {
+            ...adaDetail.messages[0],
+            id: 1,
+            body: "Oldest question",
+          },
+        ],
+        has_older: false,
+        older_before_id: null,
+      },
+    })
+
+    const user = await openQueuedAda()
+    await waitFor(() => expect(screen.getByText("Newest answer")).toBeInTheDocument())
+    expect(screen.queryByText("Oldest question")).not.toBeInTheDocument()
+
+    await user.click(screen.getByRole("button", { name: "Load older messages" }))
+
+    await waitFor(() => expect(screen.getByText("Oldest question")).toBeInTheDocument())
+    expect(screen.queryByRole("button", { name: "Load older messages" })).not.toBeInTheDocument()
   })
 })

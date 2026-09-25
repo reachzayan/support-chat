@@ -21,44 +21,12 @@ services:
     restart: unless-stopped
     ports: !reset []
     environment:
-      REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD is required}
-    command:
-      [
-        "redis-server",
-        "--port",
-        "0",
-        "--tls-port",
-        "6379",
-        "--tls-cert-file",
-        "/run/tls/redis.crt",
-        "--tls-key-file",
-        "/run/tls/redis.key",
-        "--tls-ca-cert-file",
-        "/run/tls/ca.crt",
-        "--tls-auth-clients",
-        "no",
-        "--requirepass",
-        "${REDIS_PASSWORD}",
-        "--appendonly",
-        "yes",
-        "--rename-command",
-        "FLUSHALL",
-        "",
-        "--rename-command",
-        "FLUSHDB",
-        "",
-        "--rename-command",
-        "DEBUG",
-        "",
-        "--rename-command",
-        "KEYS",
-        "",
-        "--rename-command",
-        "CONFIG",
-        "",
-      ]
+      REDIS_APP_PASSWORD: ${REDIS_APP_PASSWORD:?REDIS_APP_PASSWORD is required}
+      REDIS_ADMIN_PASSWORD: ${REDIS_ADMIN_PASSWORD:?REDIS_ADMIN_PASSWORD is required}
+    command: ["sh", "/usr/local/bin/redis-secure-entrypoint.sh"]
     volumes: !override
       - redis_data:/data
+      - ./deploy/redis-secure-entrypoint.sh:/usr/local/bin/redis-secure-entrypoint.sh:ro
       - ${REDIS_TLS_DIR:-./deploy/redis-tls}/redis.crt:/run/tls/redis.crt:ro
       - ${REDIS_TLS_DIR:-./deploy/redis-tls}/redis.key:/run/tls/redis.key:ro
       - ${REDIS_TLS_DIR:-./deploy/redis-tls}/ca.crt:/run/tls/ca.crt:ro
@@ -66,19 +34,42 @@ services:
       test:
         [
           "CMD-SHELL",
-          'redis-cli --tls --cacert /run/tls/ca.crt -h redis -a "$$REDIS_PASSWORD" --no-auth-warning ping | grep PONG',
+          'redis-cli --tls --cacert /run/tls/ca.crt -h redis --user app -a "$$REDIS_APP_PASSWORD" --no-auth-warning ping | grep PONG',
         ]
 
   backend:
     restart: unless-stopped
     env_file: !override
-      - ./backend/.env.prod
+      - ${BACKEND_ENV_FILE:-./backend/.env.prod}
     environment: !override
       APP_ENV: production
+      ENABLE_BACKGROUND_WORKERS: "false"
     volumes:
       - ${REDIS_TLS_DIR:-./deploy/redis-tls}/ca.crt:/run/secrets/redis-ca.crt:ro
     ports: !override
       - "127.0.0.1:${BACKEND_PORT:-8000}:8000"
+
+  migrate:
+    env_file: !override
+      - ${BACKEND_ENV_FILE:-./backend/.env.prod}
+    environment: !override
+      APP_ENV: production
+      DATABASE_URL: postgresql+asyncpg://${MIGRATION_DB_USER:?MIGRATION_DB_USER is required}:${MIGRATION_DB_PASSWORD:?MIGRATION_DB_PASSWORD is required}@postgres:5432/${POSTGRES_DB:?POSTGRES_DB is required}
+      MIGRATION_DATABASE_URL: postgresql+asyncpg://${MIGRATION_DB_USER:?MIGRATION_DB_USER is required}:${MIGRATION_DB_PASSWORD:?MIGRATION_DB_PASSWORD is required}@postgres:5432/${POSTGRES_DB:?POSTGRES_DB is required}
+
+  worker:
+    restart: unless-stopped
+    env_file: !override
+      - ${BACKEND_ENV_FILE:-./backend/.env.prod}
+    environment: !override
+      APP_ENV: production
+      ENABLE_BACKGROUND_WORKERS: "true"
+    volumes:
+      - ${REDIS_TLS_DIR:-./deploy/redis-tls}/ca.crt:/run/secrets/redis-ca.crt:ro
+    cap_drop: ["ALL"]
+    security_opt:
+      - no-new-privileges:true
+    shm_size: 1gb
 
   frontend:
     restart: unless-stopped

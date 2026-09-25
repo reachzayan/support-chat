@@ -17,7 +17,7 @@ def _production_settings() -> Settings:
     return Settings(
         app_env="production",
         database_url="postgresql://chat:chat@postgres:5432/support_chat",
-        redis_url="rediss://:strong-redis-password@redis:6379/0",
+        redis_url="rediss://app:strong-redis-password@redis:6379/0",
         jwt_secret="a8f3c1e9b2d64750c4a1f8e3b6d9027c5e1a4b8f3c6d9e2a7b0c5d8e1f4a7b3c",
         widget_token_secret=("d1e4a7b0c3f6d9e2a5b8c1d4e7f0a3b6c9d2e5f8a1b4c7d0e3f6a9b2c5d8e1f4"),
         rate_key_secret=("9c2f5a8d1e4b7c0f3a6d9e2b5c8f1a4d7e0b3c6f9a2d5e8b1c4f7a0d3e6b9c2f"),
@@ -96,6 +96,21 @@ def test_public_hosts_cannot_reach_internal_widget_csp_route(
 
     assert response.status_code == 404
     assert response.json() == {"detail": "Not found"}
+
+
+@pytest.mark.parametrize("path", ["/api/internal/dev/chat", "/api/internal/dev/trace"])
+def test_temporary_chat_workbench_is_not_registered_in_production(
+    production_client: TestClient,
+    path: str,
+) -> None:
+    response = production_client.post(
+        path,
+        headers={"Host": "backend:8000"},
+        json={"site_key": "samplesite", "message": "hello"},
+    )
+
+    assert response.status_code == 404
+    assert response.json() == {"detail": "Not Found"}
 
 
 def test_widget_host_cannot_open_agent_socket_even_with_staff_origin(

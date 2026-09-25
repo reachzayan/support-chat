@@ -38,6 +38,19 @@ async def test_lookup_location_returns_city_region_and_country_from_a_public_ip(
 ) -> None:
     monkeypatch.setattr(httpx, "AsyncClient", _LocationClient)
 
-    location = await lookup_location("8.8.8.8")
+    location = await lookup_location("8.8.8.8", provider_url="https://geo.example.test/api/v1/json")
 
     assert location == "Mountain View, California, United States"
+
+
+@pytest.mark.asyncio
+async def test_lookup_location_makes_no_outbound_request_without_explicit_provider(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class _ForbiddenClient:
+        def __init__(self, **_kwargs: Any) -> None:
+            raise AssertionError("IP addresses must not leave the service by default")
+
+    monkeypatch.setattr(httpx, "AsyncClient", _ForbiddenClient)
+
+    assert await lookup_location("8.8.8.8", provider_url=None) is None

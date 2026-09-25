@@ -15,11 +15,12 @@ from app.models.visitor import Visitor
 from app.repositories.conversation_repo import ConversationRepository
 from app.repositories.message_repo import MessageRepository
 from app.services.conversation_types import CommandError
+from app.settings import get_settings
 
 PREVIEW_MAX = 80
 INBOX_PAGE = 50
 INBOX_STATES = frozenset({"bot", "queued", "human", "closed"})
-SUBMISSIONS_PAGE = 200
+SUBMISSIONS_PAGE = 50
 
 
 class ConversationQueries:
@@ -51,19 +52,36 @@ class ConversationQueries:
         counts = await self._conversations.count_inbox_by_state()
         return items, next_cursor, counts
 
-    async def list_submissions(self) -> list[dict]:
-        rows = await self._conversations.list_submissions(limit=SUBMISSIONS_PAGE)
-        return [
+    async def list_submissions(self, offset: int, limit: int | None) -> tuple[list[dict], bool]:
+        page_size = SUBMISSIONS_PAGE if limit is None else min(max(limit, 1), SUBMISSIONS_PAGE)
+        start = max(offset, 0)
+        rows = await self._conversations.list_submissions(
+            offset=start,
+            limit=page_size + 1,
+        )
+        extra = rows[page_size:]
+        page = rows[:page_size]
+        items = [
             _submission_item(conversation, visitor, site, agent, opening)
-            for conversation, visitor, site, agent, opening in rows
+            for conversation, visitor, site, agent, opening in page
         ]
+        return items, bool(extra)
 
-    async def get_inbox_detail(self, conversation_id: UUID) -> dict:
+    async def get_inbox_detail(
+        self, conversation_id: UUID, *, before_id: int | None = None
+    ) -> dict:
         packed = await self._conversations.get_inbox_detail(conversation_id)
         if packed is None:
             raise CommandError("not_found")
         conversation, visitor, site, agent = packed
-        rows = await self._messages.list_for_conversation_with_authors(conversation.id)
+        limit = get_settings().message_replay_limit
+        rows = await self._messages.list_for_conversation_with_authors_bounded(
+            conversation.id, limit=limit + 1, before_id=before_id
+        )
+        has_older = len(rows) > limit
+        if has_older:
+            rows = rows[1:]
+        oldest_id = rows[0][0].id if rows else None
         return {
             "id": str(conversation.id),
             "site_id": str(site.id),
@@ -90,6 +108,8 @@ class ConversationQueries:
                 "referrer": conversation.referrer,
             },
             "messages": [self._inbox_message(message, author) for message, author in rows],
+            "has_older": has_older,
+            "older_before_id": oldest_id if has_older else None,
         }
 
     @staticmethod

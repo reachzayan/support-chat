@@ -1,12 +1,14 @@
 "use client"
 
 import { RefreshCw } from "lucide-react"
-import { useCallback } from "react"
 
 import type { SiteRecord } from "@/components/admin/staff-api"
+import { Button } from "@/components/ui/button"
 import { Field, FieldDescription, FieldLabel } from "@/components/ui/field"
+import { Spinner } from "@/components/ui/spinner"
 import { Textarea } from "@/components/ui/textarea"
 
+import { CopyButton } from "./copy-button"
 import { BTN_SECONDARY } from "./sites-shared"
 
 const STEPS = [
@@ -38,23 +40,12 @@ const installClass = (site: SiteRecord) => {
 export const AddSiteInstallPanel = ({
   site,
   checking,
-  copyNotice,
-  onCopy,
   onCheckInstall,
 }: {
   site: SiteRecord
   checking: boolean
-  copyNotice: string | null
-  onCopy: (snippet: string) => void
   onCheckInstall: () => void
 }) => {
-  const handleCopy = useCallback(() => {
-    onCopy(site.snippet)
-  }, [onCopy, site.snippet])
-  const handleCheck = useCallback(() => {
-    onCheckInstall()
-  }, [onCheckInstall])
-
   return (
     <div className="flex flex-col gap-5">
       <ol className="flex flex-col gap-2">
@@ -77,10 +68,7 @@ export const AddSiteInstallPanel = ({
           className="border-navy-mid bg-navy-deep min-h-32 w-full rounded-lg border p-3 font-mono text-[11px] leading-5 text-white"
           rows={6}
         />
-        <button type="button" onClick={handleCopy} className={`${BTN_SECONDARY} w-fit`}>
-          Copy snippet
-        </button>
-        {copyNotice ? <output className="text-steel text-xs">{copyNotice}</output> : null}
+        <CopyButton value={site.snippet} className="w-fit" />
       </Field>
 
       <Field>
@@ -94,20 +82,18 @@ export const AddSiteInstallPanel = ({
           <span className={`rounded-md px-1.5 py-0.5 text-[10px] font-bold ${installClass(site)}`}>
             {installLabel(site)}
           </span>
-          <button
+          <Button
             type="button"
-            onClick={handleCheck}
+            variant="outline"
+            onClick={onCheckInstall}
             disabled={checking}
             aria-label={`Recheck install status for ${site.name}`}
             title="Recheck install status"
             className={`${BTN_SECONDARY} inline-flex items-center gap-1.5`}
           >
-            <RefreshCw
-              className={`size-3.5 ${checking ? "animate-spin" : ""}`}
-              aria-hidden="true"
-            />
-            Recheck
-          </button>
+            {checking ? <Spinner data-icon="inline-start" /> : <RefreshCw aria-hidden="true" />}
+            {checking ? "Checking…" : "Recheck"}
+          </Button>
         </div>
         <FieldDescription>We look for the public key on the live website.</FieldDescription>
       </Field>

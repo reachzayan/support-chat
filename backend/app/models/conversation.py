@@ -10,6 +10,7 @@ from sqlalchemy import (
     Index,
     Integer,
     String,
+    UniqueConstraint,
     func,
     text,
 )
@@ -37,6 +38,7 @@ ESCALATION_REASONS = (
 class Conversation(Base):
     __tablename__ = "conversations"
     __table_args__ = (
+        UniqueConstraint("id", "site_id", name="uq_conversations_id_site"),
         ForeignKeyConstraint(
             ["visitor_id", "site_id"],
             ["visitors.id", "visitors.site_id"],
@@ -90,6 +92,12 @@ class Conversation(Base):
     visitor_id: Mapped[UUID]
     state: Mapped[str] = mapped_column(String)
     active_generation_id: Mapped[UUID | None] = mapped_column(nullable=True)
+    generation_created_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    generation_lease_expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     prechat_submission_id: Mapped[UUID | None] = mapped_column(nullable=True)
     prechat_payload_hash: Mapped[str | None] = mapped_column(String, nullable=True)
     inquiry_type: Mapped[str | None] = mapped_column(String, nullable=True)

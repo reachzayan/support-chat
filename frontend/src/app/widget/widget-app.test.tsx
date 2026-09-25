@@ -429,7 +429,9 @@ describe("widget lifecycle", () => {
     emit(FakeSocket.instances[0], { v: 1, type: "state", state: "closed", assigned_agent: null })
 
     await waitFor(() => expect(screen.getByText("This chat is closed")).toBeInTheDocument())
-    expect(screen.getByText("This chat is closed").closest("p")).toHaveClass("mx-auto")
+    expect(
+      screen.getByText("This chat is closed").closest("[data-slot='marker-content']"),
+    ).toBeInTheDocument()
     expect(screen.getByRole("button", { name: "Start a new chat" })).toBeInTheDocument()
   })
 

@@ -197,13 +197,17 @@ async def test_latest_visitor_body_is_the_second_visitor_row(migrated_db) -> Non
         _visitor, conversation = await insert_bot_conversation(session, easy)
         messages = MessageRepository(session)
         await messages.create(
-            conversation.id, "visitor", "first question", client_message_id=uuid.uuid4()
+            conversation.id,
+            easy.id,
+            "visitor",
+            "first question",
+            client_message_id=uuid.uuid4(),
         )
         await messages.create(
-            conversation.id, "bot", SCRIPTED_ANSWER, source_article_ids=[timing.id]
+            conversation.id, easy.id, "bot", SCRIPTED_ANSWER, source_article_ids=[timing.id]
         )
         await messages.create(
-            conversation.id, "visitor", FAST_QUERY, client_message_id=uuid.uuid4()
+            conversation.id, easy.id, "visitor", FAST_QUERY, client_message_id=uuid.uuid4()
         )
         await session.commit()
         body = await messages.latest_visitor_body(conversation.id)

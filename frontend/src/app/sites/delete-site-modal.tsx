@@ -3,6 +3,7 @@
 import { useCallback, useState } from "react"
 
 import { staffWrite, type SiteRecord } from "@/components/admin/staff-api"
+import { Button } from "@/components/ui/button"
 import {
   Dialog,
   DialogContent,
@@ -63,13 +64,25 @@ export const DeleteSiteModal = ({
             {error}
           </p>
         ) : null}
-        <DialogFooter className="flex-row justify-end gap-2">
-          <button type="button" onClick={handleCancel} className={BTN_SECONDARY}>
+        <DialogFooter className="flex-row items-center justify-end gap-2">
+          <Button
+            type="button"
+            variant="outline"
+            size="lg"
+            onClick={handleCancel}
+            className={BTN_SECONDARY}
+          >
             Cancel
-          </button>
-          <button type="button" onClick={handleDelete} className={BTN_DANGER}>
+          </Button>
+          <Button
+            type="button"
+            variant="destructive"
+            size="lg"
+            onClick={handleDelete}
+            className={BTN_DANGER}
+          >
             Delete site
-          </button>
+          </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

@@ -5,6 +5,7 @@
 import { motion, useReducedMotion } from "motion/react"
 import type { ReactNode } from "react"
 
+import { BrandMark } from "@/components/brand-mark"
 import { ThemeToggle } from "@/components/theme-toggle"
 
 const EASE = [0.22, 1, 0.36, 1] as const
@@ -62,9 +63,14 @@ const CaseRoom = ({ reducedMotion }: { reducedMotion: boolean }) => (
 
 const CaseHeader = () => (
   <div className="flex items-start justify-between gap-4">
-    <div>
-      <p className="text-[11px] font-semibold tracking-[0.2em] text-white/70 uppercase">SupportChat</p>
-      <p className="mt-1 text-sm font-medium tracking-wide text-white/85">Screening operations</p>
+    <div className="flex items-center gap-3">
+      <BrandMark size={36} className="size-9" />
+      <div>
+        <p className="text-[11px] font-semibold tracking-[0.2em] text-white/70 uppercase">
+          SupportChat
+        </p>
+        <p className="mt-1 text-sm font-medium tracking-wide text-white/85">Screening operations</p>
+      </div>
     </div>
     <div className="lg:hidden">
       <ThemeToggle compact />

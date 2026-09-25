@@ -40,7 +40,4 @@ if [ "$i" -eq 60 ]; then
   exit 1
 fi
 
-echo "Running migrations..."
-alembic upgrade head
-
 exec "$@"

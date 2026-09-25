@@ -16,13 +16,15 @@ depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
-    op.create_index(
-        "ix_conversations_visitor_site_last_message",
-        "conversations",
-        ["visitor_id", "site_id", "last_message_at"],
-        unique=False,
-    )
+    with op.get_context().autocommit_block():
+        op.execute(
+            """
+            CREATE INDEX CONCURRENTLY IF NOT EXISTS ix_conversations_visitor_site_last_message
+            ON conversations (visitor_id, site_id, last_message_at)
+            """
+        )
 
 
 def downgrade() -> None:
-    op.drop_index("ix_conversations_visitor_site_last_message", table_name="conversations")
+    with op.get_context().autocommit_block():
+        op.execute("DROP INDEX CONCURRENTLY IF EXISTS ix_conversations_visitor_site_last_message")

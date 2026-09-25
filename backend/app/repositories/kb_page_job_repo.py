@@ -4,6 +4,7 @@ from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.models.kb_page import KbPage
 from app.models.kb_page_job import KbPageJob
 from app.settings import get_settings
 
@@ -38,6 +39,26 @@ class KbPageJobRepository:
             .order_by(KbPageJob.created_at.desc(), KbPageJob.id)
         )
         return list(result.scalars().all())
+
+    async def progress_for_source(
+        self,
+        source_id: UUID,
+        *,
+        current_limit: int = 100,
+        recent_limit: int = 20,
+    ) -> tuple[list[tuple[KbPageJob, KbPage]], list[tuple[KbPageJob, KbPage]]]:
+        base = select(KbPageJob, KbPage).join(KbPage, KbPage.id == KbPageJob.page_id)
+        current_result = await self._session.execute(
+            base.where(KbPageJob.source_id == source_id, KbPageJob.state == "running")
+            .order_by(KbPageJob.started_at, KbPageJob.id)
+            .limit(current_limit)
+        )
+        recent_result = await self._session.execute(
+            base.where(KbPageJob.source_id == source_id, KbPageJob.finished_at.is_not(None))
+            .order_by(KbPageJob.finished_at.desc(), KbPageJob.created_at.desc())
+            .limit(recent_limit)
+        )
+        return list(current_result.all()), list(recent_result.all())
 
     async def get_for_page_snapshot(self, page_id: UUID, snapshot_id: UUID) -> KbPageJob | None:
         return await self._session.scalar(

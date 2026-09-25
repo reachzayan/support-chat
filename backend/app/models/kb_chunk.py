@@ -13,6 +13,7 @@ from sqlalchemy import (
     Integer,
     String,
     Text,
+    UniqueConstraint,
     text,
 )
 from sqlalchemy.dialects.postgresql import JSONB, TSVECTOR
@@ -44,6 +45,13 @@ class KbChunk(Base):
             name="fk_kb_chunks_snapshot_site",
             ondelete="CASCADE",
         ),
+        ForeignKeyConstraint(
+            ["page_id", "site_id"],
+            ["kb_pages.id", "kb_pages.site_id"],
+            name="fk_kb_chunks_page_site",
+            ondelete="CASCADE",
+        ),
+        UniqueConstraint("id", "site_id", name="uq_kb_chunks_id_site"),
     )
 
     id: Mapped[UUID] = mapped_column(

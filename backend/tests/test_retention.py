@@ -67,7 +67,7 @@ async def test_purge_removes_only_expired_transcript_and_orphan_visitor(migrated
 
 
 def test_production_startup_rejects_missing_retention() -> None:
-    with pytest.raises(ValueError, match="CHAT_RETENTION_DAYS"):
+    with pytest.raises(ValueError, match="must be a positive integer"):
         Settings(
             database_url="postgresql://chat:chat@127.0.0.1:55432/support_chat_test",
             jwt_secret="j" * 64,

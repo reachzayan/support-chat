@@ -5,7 +5,6 @@ from typing import Any
 
 import httpx
 
-FREE_IP_API_URL = "https://free.freeipapi.com/api/v1/json"
 LOOKUP_TIMEOUT_SECONDS = 1.0
 
 
@@ -17,8 +16,10 @@ def _location_from_payload(payload: Any) -> str | None:
     return ", ".join(values) if values else None
 
 
-async def lookup_location(raw_ip: str | None) -> str | None:
+async def lookup_location(raw_ip: str | None, *, provider_url: str | None) -> str | None:
     """Return city, region, country for a routable address without preventing chat creation."""
+    if not provider_url:
+        return None
     try:
         address = ip_address(raw_ip or "")
     except ValueError:
@@ -28,7 +29,7 @@ async def lookup_location(raw_ip: str | None) -> str | None:
 
     try:
         async with httpx.AsyncClient(timeout=LOOKUP_TIMEOUT_SECONDS) as client:
-            response = await client.get(f"{FREE_IP_API_URL}/{address.compressed}")
+            response = await client.get(f"{provider_url.rstrip('/')}/{address.compressed}")
             response.raise_for_status()
             return _location_from_payload(response.json())
     except (httpx.HTTPError, ValueError):

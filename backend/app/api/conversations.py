@@ -80,6 +80,8 @@ class ConversationDetailOut(BaseModel):
     visitor: VisitorFactsOut
     page: PageFactsOut
     messages: list[MessageOut]
+    has_older: bool = False
+    older_before_id: int | None = None
 
 
 class SubmissionVisitorOut(BaseModel):
@@ -114,6 +116,7 @@ class SubmissionItemOut(BaseModel):
 
 class SubmissionListOut(BaseModel):
     items: list[SubmissionItemOut]
+    has_more: bool
 
 
 def _map_command_error(exc: CommandError) -> HTTPException:
@@ -143,10 +146,12 @@ async def list_conversations(
 async def list_submissions(
     session: SessionDep,
     _staff: CurrentUser,
+    offset: Annotated[int, Query(ge=0)] = 0,
+    limit: Annotated[int | None, Query(ge=1, le=50)] = None,
 ) -> SubmissionListOut:
     service = ConversationQueries(session)
-    items = await service.list_submissions()
-    return SubmissionListOut.model_validate({"items": items})
+    items, has_more = await service.list_submissions(offset, limit)
+    return SubmissionListOut.model_validate({"items": items, "has_more": has_more})
 
 
 @router.get("/api/conversations/{conversation_id}", response_model=ConversationDetailOut)
@@ -154,10 +159,11 @@ async def get_conversation(
     conversation_id: UUID,
     session: SessionDep,
     _staff: CurrentUser,
+    before_id: int | None = None,
 ) -> ConversationDetailOut:
     service = ConversationQueries(session)
     try:
-        detail = await service.get_inbox_detail(conversation_id)
+        detail = await service.get_inbox_detail(conversation_id, before_id=before_id)
     except CommandError as exc:
         raise _map_command_error(exc) from exc
     return ConversationDetailOut.model_validate(detail)
@@ -270,8 +276,11 @@ async def regenerate_handoff_summary(
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail="Rate limited"
         ) from exc
-    except RateLimitUnavailable:
-        pass
+    except RateLimitUnavailable as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Rate limit store unavailable",
+        ) from exc
     service = HandoffService(session)
     try:
         await service.regenerate_summary(handoff_id)

@@ -41,12 +41,3 @@ export const saveManageSite = async (
   onError(null)
   onSaved((await response.json()) as SiteRecord)
 }
-
-export const copyManageSnippet = async (snippet: string, onNotice: (message: string) => void) => {
-  try {
-    await navigator.clipboard.writeText(snippet)
-    onNotice("Snippet copied.")
-  } catch {
-    onNotice("Could not copy the snippet.")
-  }
-}

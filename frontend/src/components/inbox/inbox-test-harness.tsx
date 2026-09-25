@@ -130,6 +130,7 @@ let details: Record<string, ConversationDetail> = {
   [CONVO_ID]: adaDetail,
   [OTHER_CONVO]: bgDetail,
 }
+let olderDetails: Record<string, ConversationDetail> = {}
 
 export const setListCursor = (next: string | null) => {
   listCursor = next
@@ -141,6 +142,10 @@ export const setListItems = (next: typeof listItems) => {
 
 export const setDetails = (next: Record<string, ConversationDetail>) => {
   details = next
+}
+
+export const setOlderDetails = (next: Record<string, ConversationDetail>) => {
+  olderDetails = next
 }
 
 const jsonResponse = (body: Json, status = 200) => {
@@ -163,8 +168,12 @@ export const staffFetch = vi.fn<
     return jsonResponse({ items: [] })
   }
   const detailMatch = /\/api\/conversations\/([0-9a-f-]+)/i.exec(url)
-  if (detailMatch?.[1] && !url.includes("?")) {
-    const detail = details[detailMatch[1]]
+  if (detailMatch?.[1]) {
+    const parsed = new URL(url, "http://localhost")
+    const beforeId = parsed.searchParams.get("before_id")
+    const detail = beforeId
+      ? olderDetails[`${detailMatch[1]}:${beforeId}`]
+      : details[detailMatch[1]]
     if (detail === undefined) {
       return jsonResponse({ detail: "Not found" }, 404)
     }
@@ -216,6 +225,7 @@ export const resetInboxHarness = () => {
     [CONVO_ID]: structuredClone(adaDetail),
     [OTHER_CONVO]: structuredClone(bgDetail),
   })
+  setOlderDetails({})
   vi.stubGlobal("WebSocket", FakeSocket)
   vi.stubGlobal("fetch", staffFetch)
   vi.stubGlobal("crypto", { ...crypto, randomUUID: () => CLIENT_ID })

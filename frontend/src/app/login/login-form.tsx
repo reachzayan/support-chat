@@ -5,6 +5,7 @@ import { useCallback, useState, type ChangeEvent, type FormEvent } from "react"
 
 import { Button } from "@/components/ui/button"
 import { FieldError } from "@/components/ui/field"
+import { Spinner } from "@/components/ui/spinner"
 import { login } from "@/lib/auth-client"
 import { parseStaffEmail } from "@/lib/staff-email"
 import { emailError, requiredError } from "@/lib/validation"
@@ -45,7 +46,7 @@ export const LoginForm = ({ onSuccess }: { onSuccess: () => void }) => {
       method="post"
       action="/login"
       onSubmit={form.handleSubmit}
-      className="border-line/80 bg-paper w-full rounded-[28px] border px-7 py-8 shadow-[0_24px_60px_rgba(13,31,58,0.10)] sm:px-9 sm:py-9"
+      className="border-line/80 bg-paper rounded-card w-full border px-7 py-8 shadow-[0_24px_60px_rgba(13,31,58,0.10)] sm:px-9 sm:py-9"
     >
       <h1 className="text-navy heading text-[1.65rem]">Sign in</h1>
       <p className="text-mute mt-1.5 mb-7 text-sm">Invited specialists only.</p>
@@ -64,11 +65,13 @@ export const LoginForm = ({ onSuccess }: { onSuccess: () => void }) => {
         <FieldError>{form.error ?? undefined}</FieldError>
         <Button
           type="submit"
+          variant="default"
           disabled={form.pending}
           aria-busy={form.pending}
-          className="bg-ember hover:bg-ember-mid disabled:bg-ember-soft dark:text-navy-deep h-12 rounded-2xl px-4 text-sm font-semibold text-white shadow-[0_10px_24px_rgba(196,85,22,0.28)]"
+          className="h-12 px-5 text-sm font-semibold shadow-[0_10px_24px_rgba(196,85,22,0.28)]"
         >
-          Sign in
+          {form.pending ? <Spinner data-icon="inline-start" /> : null}
+          {form.pending ? "Signing in…" : "Sign in"}
         </Button>
       </div>
     </form>

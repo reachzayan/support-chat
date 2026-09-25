@@ -10,8 +10,13 @@ type LoginResponse = {
   user: StaffUser
 }
 
+export type RefreshSessionResult =
+  | { status: "authenticated"; user: StaffUser }
+  | { status: "unauthenticated" }
+  | { status: "unavailable" }
+
 let accessToken: string | null = null
-let refreshInFlight: Promise<StaffUser | null> | null = null
+let refreshInFlight: Promise<RefreshSessionResult> | null = null
 
 export const getAccessToken = () => accessToken
 
@@ -61,30 +66,36 @@ export const login = async (email: string, password: string) => {
   return body.user
 }
 
-export const refreshSession = async () => {
+export const refreshSession = async (): Promise<RefreshSessionResult> => {
   if (refreshInFlight !== null) {
     return refreshInFlight
   }
-  refreshInFlight = (async () => {
-    const response = await fetch("/auth/refresh", {
-      method: "POST",
-      credentials: "include",
-      headers: csrfHeaders(),
-    })
-    if (response.status === 401) {
-      accessToken = null
-      return null
+  const pending = (async (): Promise<RefreshSessionResult> => {
+    try {
+      const response = await fetch("/auth/refresh", {
+        method: "POST",
+        credentials: "include",
+        headers: csrfHeaders(),
+      })
+      if (response.status === 401) {
+        accessToken = null
+        return { status: "unauthenticated" }
+      }
+      if (!response.ok) {
+        return { status: "unavailable" }
+      }
+      const body = (await response.json()) as LoginResponse
+      accessToken = body.access_token
+      return { status: "authenticated", user: body.user }
+    } catch {
+      return { status: "unavailable" }
     }
-    if (!response.ok) {
-      return null
-    }
-    const body = (await response.json()) as LoginResponse
-    accessToken = body.access_token
-    return body.user
-  })().finally(() => {
+  })()
+  refreshInFlight = pending
+  void pending.finally(() => {
     refreshInFlight = null
   })
-  return refreshInFlight
+  return pending
 }
 
 export const fetchMe = async () => {
@@ -120,8 +131,8 @@ export const staffRequest = async (path: string, init: RequestInit = {}) => {
   if (response.status !== 401) {
     return response
   }
-  const user = await refreshSession()
-  if (user === null) {
+  const refresh = await refreshSession()
+  if (refresh.status !== "authenticated") {
     return response
   }
   return send()

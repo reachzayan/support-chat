@@ -1,3 +1,4 @@
+import asyncio
 import uuid
 
 import pytest
@@ -22,8 +23,11 @@ from tests.ws_helpers import (
 
 
 def _set_budgets(monkeypatch, **values: str) -> None:
+    from app.settings import reset_settings_cache
+
     for key, value in values.items():
         monkeypatch.setenv(key, value)
+    reset_settings_cache()
 
 
 def test_third_new_visitor_is_429_and_creates_zero_rows(client: TestClient, monkeypatch) -> None:
@@ -159,3 +163,31 @@ async def test_bootstrap_rate_key_hashes_site_key_and_sets_ttl(migrated_db) -> N
     assert all(site_key not in key for key in keys)
     ttl = await get_redis().ttl(keys[0])
     assert ttl > 0
+
+
+async def test_login_budget_admission_is_atomic_under_concurrency(migrated_db, monkeypatch) -> None:
+    from app.services.rate_limit import RateLimiter, RateLimitExceeded
+
+    _set_budgets(monkeypatch, RATE_LOGIN_FAILURE="2")
+    limiter = RateLimiter()
+
+    async def reserve() -> str:
+        try:
+            await limiter.reserve_login("parallel@example.com", "203.0.113.9")
+        except RateLimitExceeded:
+            return "rejected"
+        return "admitted"
+
+    outcomes = await asyncio.gather(*(reserve() for _ in range(8)))
+    assert outcomes.count("admitted") == 2
+    assert outcomes.count("rejected") == 6
+
+
+async def test_successful_login_releases_reserved_failure_budget(migrated_db, monkeypatch) -> None:
+    from app.services.rate_limit import RateLimiter
+
+    _set_budgets(monkeypatch, RATE_LOGIN_FAILURE="1")
+    limiter = RateLimiter()
+    await limiter.reserve_login("success@example.com", "203.0.113.10")
+    await limiter.release_login("success@example.com", "203.0.113.10")
+    await limiter.reserve_login("success@example.com", "203.0.113.10")

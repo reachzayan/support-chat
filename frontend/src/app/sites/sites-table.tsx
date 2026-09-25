@@ -1,12 +1,15 @@
 "use client"
 
-import { RefreshCw } from "lucide-react"
-import { useCallback, useEffect, useMemo, useState } from "react"
+import { RefreshCw, Settings2 } from "lucide-react"
+import { useCallback, useMemo } from "react"
 
 import type { SiteRecord } from "@/components/admin/staff-api"
+import { Button } from "@/components/ui/button"
+import { Spinner } from "@/components/ui/spinner"
 
+import { CopyButton } from "./copy-button"
 import { useSitesColumnWidths } from "./sites-column-widths"
-import { BTN_SECONDARY, COLUMNS, LABEL, type ColumnLabel } from "./sites-shared"
+import { COLUMNS, LABEL, type ColumnLabel } from "./sites-shared"
 
 type ResizeHandlers = {
   onResizeStart: (label: ColumnLabel, event: React.PointerEvent<HTMLButtonElement>) => void
@@ -40,8 +43,9 @@ const SitesColumnHeader = ({
       }`}
     >
       <span className="pr-3">{label}</span>
-      <button
+      <Button
         type="button"
+        variant="ghost"
         aria-label={`Resize ${label} column`}
         title="Drag to resize. Arrow keys adjust. Double-click resets."
         onPointerDown={handlePointerDown}
@@ -50,7 +54,7 @@ const SitesColumnHeader = ({
         className="focus-visible:ring-steel absolute top-0 right-0 z-10 h-full w-3 cursor-col-resize touch-none border-0 bg-transparent p-0 focus-visible:ring-2 focus-visible:outline-none"
       >
         <span className="bg-line hover:bg-steel focus-visible:bg-steel absolute top-1.5 right-0 bottom-1.5 w-px" />
-      </button>
+      </Button>
     </th>
   )
 }
@@ -91,16 +95,22 @@ const InstalledCell = ({
         {pillLabel}
       </span>
       {isAdmin ? (
-        <button
+        <Button
           type="button"
+          variant="ghost"
+          size="icon-sm"
           onClick={handleRefresh}
           disabled={checking}
           aria-label={`Recheck install status for ${site.name}`}
           title="Recheck install status"
-          className="text-mute hover:text-steel focus-visible:ring-steel cursor-pointer rounded-[6px] p-1 focus-visible:ring-2 focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-50"
+          className="text-mute hover:text-steel focus-visible:ring-steel focus-visible:ring-2 focus-visible:outline-none"
         >
-          <RefreshCw className={`size-3.5 ${checking ? "animate-spin" : ""}`} />
-        </button>
+          {checking ? (
+            <Spinner data-icon="inline-start" />
+          ) : (
+            <RefreshCw aria-hidden="true" className="size-3.5" />
+          )}
+        </Button>
       ) : null}
     </div>
   )
@@ -119,28 +129,10 @@ const SiteRow = ({
   checking: boolean
   onCheckInstall: (siteId: string) => void
 }) => {
-  const [copied, setCopied] = useState(false)
   const publicPreview = `${site.public_key.slice(0, 6)}…${site.public_key.slice(-4)}`
   const originLabel = site.origins.length === 1 ? "1 origin" : `${site.origins.length} origins`
   const handleManage = useCallback(() => onManage(site.id), [onManage, site.id])
   const siteOn = site.enabled !== false
-
-  useEffect(() => {
-    if (!copied) {
-      return
-    }
-    const timer = window.setTimeout(() => setCopied(false), 1000)
-    return () => window.clearTimeout(timer)
-  }, [copied])
-
-  const handleCopy = useCallback(async () => {
-    try {
-      await navigator.clipboard.writeText(site.snippet)
-      setCopied(true)
-    } catch {
-      setCopied(false)
-    }
-  }, [site.snippet])
 
   return (
     <tr className="border-line hover:bg-ice/60 border-b last:border-b-0">
@@ -172,18 +164,18 @@ const SiteRow = ({
         />
       </td>
       <td className="px-3 py-2.5">
-        <div className="flex flex-nowrap items-center justify-end gap-1.5">
-          <button
+        <div className="inline-flex items-center justify-end">
+          <CopyButton value={site.snippet} className="rounded-r-none" />
+          <Button
             type="button"
-            onClick={handleCopy}
-            aria-label={copied ? "Copied" : "Copy snippet"}
-            className={`${BTN_SECONDARY} min-w-[6.75rem] shrink-0`}
+            variant="outline"
+            size="default"
+            onClick={handleManage}
+            className="rounded-l-none border-l-0"
           >
-            {copied ? "Copied" : "Copy snippet"}
-          </button>
-          <button type="button" onClick={handleManage} className={`${BTN_SECONDARY} shrink-0`}>
+            <Settings2 data-icon="inline-start" aria-hidden="true" />
             Manage
-          </button>
+          </Button>
         </div>
       </td>
     </tr>

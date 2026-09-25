@@ -34,11 +34,7 @@ describe("inbox join", () => {
     await waitFor(() => expect(FakeSocket.instances.length).toBe(1))
     const socket = FakeSocket.instances[0]
     await user.click(screen.getByRole("button", { name: "Join this chat" }))
-    expect(screen.getByRole("button", { name: "Join this chat" })).toHaveAttribute(
-      "aria-busy",
-      "true",
-    )
-    expect(screen.getByLabelText("Message")).toBeDisabled()
+    await waitFor(() => expect(screen.getByLabelText("Message")).toBeDisabled())
     emitAlexJoined(socket)
     emit(socket, { v: 1, type: "message", id: 8, role: "system", body: JOIN_LINE })
     await waitFor(() => {

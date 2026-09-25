@@ -1,5 +1,6 @@
 "use client"
 
+/* oxlint-disable react-perf/jsx-no-jsx-as-prop -- Base UI composes shadcn buttons through render. */
 /* oxlint-disable react-perf/jsx-no-new-function-as-prop -- callbacks are scoped to a tiny list */
 /* oxlint-disable max-lines-per-function -- the compact history surface is one cohesive state */
 
@@ -15,6 +16,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
+import { Button } from "@/components/ui/button"
 import type { ConversationHistoryItem, ReturningIdentity } from "@/lib/postmessage"
 
 const INQUIRY_LABELS: Record<string, string> = {
@@ -41,7 +43,10 @@ type ReturningHomeProps =
     }
 
 const PRIMARY =
-  "bg-ember hover:bg-ember-mid focus-visible:ring-ember/30 min-h-11 w-full cursor-pointer rounded-2xl px-4 text-sm font-bold text-white shadow-[0_10px_24px_rgba(196,85,22,0.22)] focus-visible:ring-4 focus-visible:outline-none"
+  "border-steel/15 bg-ice-2 text-navy hover:!bg-[#e6eefc] hover:!text-navy focus-visible:ring-steel/30 min-h-11 w-full border px-4 text-sm font-bold leading-none shadow-[0_8px_20px_rgba(36,86,160,0.12)] focus-visible:ring-4"
+
+const QUIET =
+  "text-steel hover:!bg-ice-2/80 hover:!text-navy focus-visible:ring-steel min-h-11 w-full cursor-pointer rounded-2xl text-sm font-bold focus-visible:ring-2 focus-visible:outline-none"
 
 export const ReturningHome = (props: ReturningHomeProps) => {
   if (props.mode === "identity") {
@@ -69,16 +74,17 @@ export const ReturningHome = (props: ReturningHomeProps) => {
           </p>
         </div>
         <div className="mt-auto space-y-2 pt-6">
-          <button type="button" className={PRIMARY} onClick={props.onShowHistory}>
-            Yes, show my chats
-          </button>
-          <button
+          <Button
             type="button"
-            className="text-steel focus-visible:ring-steel min-h-11 w-full cursor-pointer rounded-2xl text-sm font-bold focus-visible:ring-2 focus-visible:outline-none"
-            onClick={props.onStartFresh}
+            variant="secondary"
+            className={PRIMARY}
+            onClick={props.onShowHistory}
           >
+            Yes, show my chats
+          </Button>
+          <Button type="button" variant="ghost" className={QUIET} onClick={props.onStartFresh}>
             No, start fresh
-          </button>
+          </Button>
         </div>
       </section>
     )
@@ -127,8 +133,9 @@ const HistoryList = ({
           const status = conversation.is_current ? "Current chat" : "Past chat"
           return (
             <li key={conversation.id}>
-              <button
+              <Button
                 type="button"
+                variant="ghost"
                 aria-label={`${label}, ${status}, ${formatter.format(new Date(conversation.last_message_at))}`}
                 aria-pressed={selectedRow}
                 onClick={() => setSelectedId(conversation.id)}
@@ -150,22 +157,29 @@ const HistoryList = ({
                 {selectedRow ? (
                   <Check aria-hidden="true" className="text-steel size-5 shrink-0" />
                 ) : null}
-              </button>
+              </Button>
             </li>
           )
         })}
       </ul>
       <div className="mt-3 space-y-1.5">
-        <button type="button" className={PRIMARY} disabled={!selected} onClick={openSelected}>
-          {selected?.is_current ? "Continue chat" : "Resume chat"}
-        </button>
-        <button
+        <Button
           type="button"
-          className="text-steel focus-visible:ring-steel min-h-10 w-full cursor-pointer rounded-xl text-xs font-bold focus-visible:ring-2 focus-visible:outline-none"
+          variant="secondary"
+          className={PRIMARY}
+          disabled={!selected}
+          onClick={openSelected}
+        >
+          {selected?.is_current ? "Continue chat" : "Resume chat"}
+        </Button>
+        <Button
+          type="button"
+          variant="ghost"
+          className="text-steel hover:!bg-ice-2/80 hover:!text-navy focus-visible:ring-steel min-h-10 w-full cursor-pointer rounded-xl text-xs font-bold focus-visible:ring-2 focus-visible:outline-none"
           onClick={onStartFresh}
         >
           Start fresh instead
-        </button>
+        </Button>
       </div>
       <AlertDialog open={confirmReplace} onOpenChange={setConfirmReplace}>
         <AlertDialogContent>
@@ -176,11 +190,13 @@ const HistoryList = ({
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogClose className="min-h-10 rounded-xl bg-white px-4 text-sm font-bold">
+            <AlertDialogClose
+              render={<Button variant="outline" className="min-h-10 px-4 font-bold" />}
+            >
               Cancel
             </AlertDialogClose>
             <AlertDialogClose
-              className="bg-ember min-h-10 rounded-xl px-4 text-sm font-bold text-white"
+              render={<Button variant="default" className="min-h-10 px-4 font-bold" />}
               onClick={() => selected && onOpen(selected.id, true)}
             >
               Resume chat

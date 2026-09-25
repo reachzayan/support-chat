@@ -64,6 +64,12 @@ def pytest_sessionstart(session: pytest.Session) -> None:
     if not _postgres_is_up():
         if os.environ.get("CI"):
             raise RuntimeError("Postgres is required in CI")
+        if os.environ.get("ALLOW_DB_TEST_SKIP") != "1":
+            session.exitstatus = 1
+            pytest.exit(
+                "Postgres is required. Set ALLOW_DB_TEST_SKIP=1 to skip the backend suite.",
+                returncode=1,
+            )
         session.exitstatus = 0
         pytest.exit("Postgres is down; skipping backend suite", returncode=0)
     _ensure_test_database()
@@ -110,6 +116,15 @@ def _flush_redis() -> None:
         client.flushdb()
     finally:
         client.close()
+
+
+@pytest.fixture(autouse=True)
+def _reset_settings_cache() -> None:
+    from app.settings import reset_settings_cache
+
+    reset_settings_cache()
+    yield
+    reset_settings_cache()
 
 
 @pytest.fixture(autouse=True)

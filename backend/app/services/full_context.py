@@ -15,7 +15,6 @@ from app.services.faq_fastpath import is_marketing_cta, normalize_fast_query
 from app.services.kb_tokens import GENERIC_NOISE, WEAK_OVERLAP, is_overview_query, tokenize
 from app.settings import get_settings
 
-_UNITS_CACHE: dict[tuple[UUID, ...], list[EvidenceDoc]] = {}
 CONVERSATION_CHAR_BUDGET = 12_000
 
 
@@ -72,10 +71,6 @@ def prior_provider_messages(rows: list[Message], visitor_text: str) -> list[dict
 async def load_live_units(session: AsyncSession, snapshot_ids: list[UUID]) -> list[EvidenceDoc]:
     if not snapshot_ids:
         return []
-    cache_key = tuple(sorted(snapshot_ids))
-    cached = _UNITS_CACHE.get(cache_key)
-    if cached is not None:
-        return list(cached)
     result = await session.execute(
         select(KbChunk, KbPage)
         .join(KbPage, KbPage.id == KbChunk.page_id)
@@ -112,7 +107,6 @@ async def load_live_units(session: AsyncSession, snapshot_ids: list[UUID]) -> li
                 answer_mode=chunk.answer_mode,
             )
         )
-    _UNITS_CACHE[cache_key] = list(units)
     return units
 
 
@@ -193,7 +187,3 @@ def units_matching_query(units: list[EvidenceDoc], visitor_text: str) -> list[Ev
     if not matched:
         return list(units)
     return matched
-
-
-def clear_units_cache() -> None:
-    _UNITS_CACHE.clear()

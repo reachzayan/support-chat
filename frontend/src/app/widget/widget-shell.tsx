@@ -1,4 +1,5 @@
 /* oxlint-disable react-perf/jsx-no-new-object-as-prop */
+/* oxlint-disable react-perf/jsx-no-jsx-as-prop -- Base UI composes shadcn buttons through render. */
 /* oxlint-disable react-perf/jsx-no-new-function-as-prop -- menu callbacks are local UI state */
 /* oxlint-disable max-lines-per-function -- menu and confirmations form one keyboard interaction */
 
@@ -25,6 +26,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
+import { Button } from "@/components/ui/button"
 import {
   WIDGET_DEFAULT_HEIGHT,
   WIDGET_DEFAULT_WIDTH,
@@ -170,9 +172,15 @@ const WidgetTopbar = ({
       </motion.div>
       <div className="flex items-center gap-1">
         <ConversationMenu onResetCurrent={onResetCurrent} onDeleteAll={onDeleteAll} />
-        <button type="button" aria-label="Close chat" onClick={onClose} className={ICON_BUTTON}>
+        <Button
+          type="button"
+          variant="ghost"
+          aria-label="Close chat"
+          onClick={onClose}
+          className={ICON_BUTTON}
+        >
           <X aria-hidden="true" className="size-5" strokeWidth={2.4} />
-        </button>
+        </Button>
       </div>
     </motion.div>
   )
@@ -181,7 +189,7 @@ const WidgetTopbar = ({
 const MENU_ITEM =
   "text-ink data-highlighted:bg-ice flex min-h-10 cursor-pointer items-center gap-2.5 px-3 text-sm font-semibold outline-none data-highlighted:text-navy"
 const DIALOG_BUTTON =
-  "focus-visible:ring-steel min-h-10 cursor-pointer rounded-xl px-4 text-sm font-bold focus-visible:ring-2 focus-visible:outline-none"
+  "focus-visible:ring-steel min-h-10 px-4 text-sm font-bold leading-none focus-visible:ring-2 focus-visible:outline-none"
 
 const ConversationMenu = ({
   onResetCurrent,
@@ -213,9 +221,10 @@ const ConversationMenu = ({
   return (
     <>
       <div ref={containerRef} className="relative">
-        <button
+        <Button
           ref={triggerRef}
           type="button"
+          variant="ghost"
           aria-label="More options"
           aria-haspopup="menu"
           aria-expanded={open}
@@ -229,7 +238,7 @@ const ConversationMenu = ({
           }}
         >
           <Ellipsis aria-hidden="true" className="size-5" strokeWidth={2.4} />
-        </button>
+        </Button>
         {open ? (
           <div
             role="menu"
@@ -258,9 +267,10 @@ const ConversationMenu = ({
               }
             }}
           >
-            <button
+            <Button
               ref={firstItemRef}
               type="button"
+              variant="ghost"
               role="menuitem"
               className={`${MENU_ITEM} w-full`}
               onClick={() => {
@@ -270,9 +280,10 @@ const ConversationMenu = ({
             >
               <RotateCcw aria-hidden="true" className="size-4" />
               Reset current chat
-            </button>
-            <button
+            </Button>
+            <Button
               type="button"
+              variant="ghost"
               role="menuitem"
               className={`${MENU_ITEM} w-full text-red-700 data-highlighted:text-red-800`}
               onClick={() => {
@@ -282,7 +293,7 @@ const ConversationMenu = ({
             >
               <Trash2 aria-hidden="true" className="size-4" />
               Delete all chats
-            </button>
+            </Button>
           </div>
         ) : null}
       </div>
@@ -309,11 +320,11 @@ const ConversationMenu = ({
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogClose className={`${DIALOG_BUTTON} text-ink bg-white`}>
+            <AlertDialogClose render={<Button variant="outline" className={DIALOG_BUTTON} />}>
               Cancel
             </AlertDialogClose>
             <AlertDialogClose
-              className={`${DIALOG_BUTTON} bg-ember text-white`}
+              render={<Button variant="default" className={DIALOG_BUTTON} />}
               onClick={confirmation === "delete" ? onDeleteAll : onResetCurrent}
             >
               {confirmation === "delete" ? "Delete all chats" : "Reset chat"}
@@ -341,8 +352,9 @@ const ResizeHandle = ({ onResize }: { onResize: (size: WidgetSize) => void }) =>
   }, [onResize])
 
   return (
-    <button
+    <Button
       type="button"
+      variant="ghost"
       aria-label={expanded ? "Shrink chat" : "Expand chat"}
       aria-pressed={expanded}
       onClick={handleToggle}
@@ -361,6 +373,6 @@ const ResizeHandle = ({ onResize }: { onResize: (size: WidgetSize) => void }) =>
           <Maximize2 aria-hidden="true" className="size-[18px]" strokeWidth={2.2} />
         )}
       </motion.span>
-    </button>
+    </Button>
   )
 }

@@ -206,6 +206,9 @@ async def test_default_responder_persists_recorded_anthropic_answer(
 ) -> None:
     captured: dict = {}
     monkeypatch.setenv("ANTHROPIC_MODEL", "claude-opus-4-8")
+    from app.settings import reset_settings_cache
+
+    reset_settings_cache()
     monkeypatch.setattr(
         "app.llm.bot_responder.AsyncAnthropic", _fake_anthropic(captured), raising=False
     )
@@ -249,6 +252,9 @@ async def test_default_responder_persists_recorded_anthropic_answer(
 async def test_sdk_model_id_comes_from_anthropic_model_env(migrated_db, monkeypatch) -> None:
     captured: dict = {}
     monkeypatch.setenv("ANTHROPIC_MODEL", "claude-sonnet-4-6")
+    from app.settings import reset_settings_cache
+
+    reset_settings_cache()
     monkeypatch.setattr(
         "app.llm.bot_responder.AsyncAnthropic", _fake_anthropic(captured), raising=False
     )

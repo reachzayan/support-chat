@@ -1,33 +1,21 @@
+import path from "node:path"
+import { fileURLToPath } from "node:url"
+
 import type { NextConfig } from "next"
 
 const apiOrigin = process.env.API_ORIGIN ?? "http://127.0.0.1:8000"
-const wsOrigin = apiOrigin.replace(/^http/, "ws")
+const frontendRoot = path.dirname(fileURLToPath(import.meta.url))
 
 const nosniff = { key: "X-Content-Type-Options", value: "nosniff" }
 const referrer = { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" }
 const widgetReferrer = { key: "Referrer-Policy", value: "no-referrer" }
-// HSTS is enforced at the edge in production.
-// Next App Router boots with inline scripts; a static CSP without script-src
-// (falling back to default-src 'self') blocks hydration and the login form
-// degrades to a native GET that puts credentials in the query string.
-// Prefer nonce middleware later; until then allow Next's inline/eval bootstrap.
-const staffCsp = {
-  key: "Content-Security-Policy",
-  value: [
-    "default-src 'self'",
-    "script-src 'self' 'unsafe-inline' 'unsafe-eval'",
-    "style-src 'self' 'unsafe-inline'",
-    "object-src 'none'",
-    "base-uri 'self'",
-    "form-action 'self'",
-    "font-src 'self'",
-    `connect-src 'self' ${apiOrigin} ${wsOrigin}`,
-    "frame-ancestors 'none'",
-  ].join("; "),
-}
+// Staff CSP (nonce + strict-dynamic) is applied per-request in src/proxy.ts.
 
 const nextConfig: NextConfig = {
   output: "standalone",
+  turbopack: {
+    root: frontendRoot,
+  },
   allowedDevOrigins: ["widget.localhost", "host.localhost", "localhost", "127.0.0.1"],
   async headers() {
     return [
@@ -37,28 +25,24 @@ const nextConfig: NextConfig = {
       },
       {
         source: "/admin/:path*",
-        headers: [staffCsp, nosniff, referrer],
-      },
-      {
-        source: "/inbox",
-        headers: [staffCsp, nosniff, referrer],
+        headers: [nosniff, referrer],
       },
       {
         source: "/login",
-        headers: [staffCsp, nosniff, referrer],
+        headers: [nosniff, referrer],
       },
-      {
-        source: "/sites",
-        headers: [staffCsp, nosniff, referrer],
-      },
-      {
-        source: "/knowledge",
-        headers: [staffCsp, nosniff, referrer],
-      },
-      {
-        source: "/settings",
-        headers: [staffCsp, nosniff, referrer],
-      },
+    ]
+  },
+  async redirects() {
+    return [
+      { source: "/inbox", destination: "/admin/inbox", permanent: true },
+      { source: "/inbox/:path*", destination: "/admin/inbox/:path*", permanent: true },
+      { source: "/sites", destination: "/admin/sites", permanent: true },
+      { source: "/sites/:path*", destination: "/admin/sites/:path*", permanent: true },
+      { source: "/knowledge", destination: "/admin/knowledge", permanent: true },
+      { source: "/knowledge/:path*", destination: "/admin/knowledge/:path*", permanent: true },
+      { source: "/settings", destination: "/admin/settings", permanent: true },
+      { source: "/settings/:path*", destination: "/admin/settings/:path*", permanent: true },
     ]
   },
   async rewrites() {

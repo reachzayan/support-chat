@@ -3,6 +3,9 @@
 import { ArrowLeftRight, CheckCircle2, LogOut, UserPlus } from "lucide-react"
 import { motion } from "motion/react"
 
+import { Button } from "@/components/ui/button"
+import { Spinner } from "@/components/ui/spinner"
+
 import { AgentComposer } from "./agent-composer"
 import { HandoffCard } from "./handoff-card"
 import { TranscriptPane } from "./transcript-pane"
@@ -20,6 +23,8 @@ type TranscriptColumnProps = {
   mine: boolean
   joinedBy: string | null
   lines: ReturnType<typeof useInboxLive>["live"]["lines"]
+  hasOlder: boolean
+  loadingOlder: boolean
   composerEnabled: boolean
   canned: CannedReply[]
   inputId: string
@@ -31,6 +36,7 @@ type TranscriptColumnProps = {
   onEnd: () => void
   onTransfer: () => void
   onSend: (body: string) => void
+  onLoadOlder: () => void
 }
 
 const TAP_SCALE = { scale: 0.96 }
@@ -38,6 +44,8 @@ const BANNER_INITIAL = { opacity: 0, height: 0 }
 const BANNER_ANIMATE = { opacity: 1, height: "auto" }
 
 const avatarClass = "bg-ice-2 text-steel"
+
+const MotionButton = motion.create(Button)
 
 const META_PILL =
   "bg-ice-2 text-mute inline-flex shrink-0 items-center rounded-full px-2 py-1 text-[10px] font-bold"
@@ -67,37 +75,44 @@ const TranscriptHeader = ({
 )
 
 const toolbarButtonBase =
-  "focus-visible:ring-steel inline-flex h-9 items-center gap-1.5 rounded-full px-3.5 text-[13px] font-bold focus-visible:ring-2 focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-60"
+  "focus-visible:ring-steel inline-flex h-9 items-center gap-1.5 px-3.5 text-[13px] font-bold leading-none focus-visible:ring-2 focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-60"
 
 const JoinButton = ({
   joinPending,
   onJoin,
 }: Pick<TranscriptColumnProps, "joinPending" | "onJoin">) => (
-  <motion.button
+  <MotionButton
     type="button"
+    variant="default"
+    size="lg"
     aria-busy={joinPending}
     disabled={joinPending}
     onClick={onJoin}
     whileTap={TAP_SCALE}
-    className={`${toolbarButtonBase} bg-ember hover:bg-ember-mid disabled:bg-ember-soft dark:text-navy-deep text-white shadow-[0_2px_8px_rgba(196,85,22,0.25)]`}
+    className={`${toolbarButtonBase} shadow-[0_2px_8px_rgba(196,85,22,0.25)]`}
   >
-    <UserPlus aria-hidden="true" className="size-3.5" strokeWidth={2.4} />
-    Join this chat
-  </motion.button>
+    {joinPending ? (
+      <Spinner data-icon="inline-start" />
+    ) : (
+      <UserPlus aria-hidden="true" className="size-3.5" strokeWidth={2.4} />
+    )}
+    {joinPending ? "Joining…" : "Join this chat"}
+  </MotionButton>
 )
 
 const MarkContactedButton = ({
   onMarkContacted,
 }: Pick<TranscriptColumnProps, "onMarkContacted">) => (
-  <motion.button
+  <MotionButton
     type="button"
+    variant="ghost"
     onClick={onMarkContacted}
     whileTap={TAP_SCALE}
-    className={`${toolbarButtonBase} bg-steel hover:bg-navy dark:text-navy-deep text-white`}
+    className={`${toolbarButtonBase} bg-steel hover:bg-navy text-white hover:text-white`}
   >
     <CheckCircle2 aria-hidden="true" className="size-3.5" strokeWidth={2.4} />
     Mark contacted
-  </motion.button>
+  </MotionButton>
 )
 
 const MineActions = ({
@@ -107,25 +122,27 @@ const MineActions = ({
 }: Pick<TranscriptColumnProps, "showTransfer" | "onTransfer" | "onEnd">) => (
   <>
     {showTransfer ? (
-      <motion.button
+      <MotionButton
         type="button"
+        variant="ghost"
         onClick={onTransfer}
         whileTap={TAP_SCALE}
         className={`${toolbarButtonBase} border-line text-ink hover:bg-ice-2 border`}
       >
         <ArrowLeftRight aria-hidden="true" className="size-3.5" strokeWidth={2.2} />
         Transfer to assistant
-      </motion.button>
+      </MotionButton>
     ) : null}
-    <motion.button
+    <MotionButton
       type="button"
+      variant="ghost"
       onClick={onEnd}
       whileTap={TAP_SCALE}
       className={`${toolbarButtonBase} border-line text-ink hover:bg-ice-2 border`}
     >
       <LogOut aria-hidden="true" className="size-3.5" strokeWidth={2.2} />
       End chat
-    </motion.button>
+    </MotionButton>
   </>
 )
 
@@ -193,12 +210,27 @@ export const TranscriptColumn = (props: TranscriptColumnProps) => {
   } = props
 
   return (
-    <section className="bg-ice flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+    <section className="bg-paper flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
       <div className="border-line bg-paper flex h-16 shrink-0 items-center justify-between gap-3 border-b px-5">
         <TranscriptHeader visitorName={visitorName} siteName={siteName} closed={closed} />
         <TranscriptActions {...props} />
       </div>
       {props.joinedBy ? <JoinedByBanner joinedBy={props.joinedBy} /> : null}
+      {props.hasOlder ? (
+        <div className="border-line bg-paper flex shrink-0 justify-center border-b px-4 py-2">
+          <Button
+            type="button"
+            variant="ghost"
+            disabled={props.loadingOlder}
+            aria-busy={props.loadingOlder}
+            onClick={props.onLoadOlder}
+            className="text-steel focus-visible:ring-steel hover:bg-ice-2 px-3 py-1 text-xs font-bold focus-visible:ring-2 focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {props.loadingOlder ? <Spinner data-icon="inline-start" /> : null}
+            {props.loadingOlder ? "Loading older messages…" : "Load older messages"}
+          </Button>
+        </div>
+      ) : null}
       <div className="flex min-h-0 flex-1 flex-col">
         <TranscriptPane lines={lines} muted={closed} />
       </div>

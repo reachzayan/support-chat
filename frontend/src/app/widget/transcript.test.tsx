@@ -73,42 +73,49 @@ describe("transcript typing indicator", () => {
 
     expect(screen.queryByText("Agent")).not.toBeInTheDocument()
     expect(
-      screen.getByText("This chat was reset by the visitor.").closest(".widget-bubble"),
-    ).toHaveClass("mx-auto", "rounded-full")
-    expect(screen.getByText("This chat has been resumed.").closest(".widget-bubble")).toHaveClass(
-      "mx-auto",
-      "rounded-full",
-    )
+      screen.getByText("This chat was reset by the visitor.").closest('[data-slot="marker"]'),
+    ).toHaveAttribute("data-variant", "separator")
+    expect(
+      screen.getByText("This chat has been resumed.").closest('[data-slot="marker"]'),
+    ).toHaveAttribute("data-variant", "separator")
   })
 
   test("keeps lifecycle notices centered while treating other system copy as an agent message", () => {
     renderWithProviders(<Transcript lines={MIXED_LINES} />)
 
     expect(screen.queryByText("You")).not.toBeInTheDocument()
-    expect(screen.getByText(VISITOR_LINE).closest(".widget-bubble")).toHaveClass("ml-auto")
+    expect(screen.queryByRole("img")).not.toBeInTheDocument()
+    expect(document.querySelector('[data-slot="message-avatar"]')).toBeNull()
+    expect(screen.getByText(VISITOR_LINE).closest('[data-slot="message"]')).toHaveAttribute(
+      "data-align",
+      "end",
+    )
     expect(screen.getByText("Agent")).toBeInTheDocument()
     expect(
-      screen.getByText("Your application is being reviewed.").closest(".widget-bubble"),
-    ).toHaveClass("mr-auto")
-    expect(screen.getByText("A human has joined.").closest(".widget-bubble")).toHaveClass("mx-auto")
+      screen.getByText("Your application is being reviewed.").closest('[data-slot="message"]'),
+    ).toHaveAttribute("data-align", "start")
+    expect(screen.getByText("A human has joined.").closest('[data-slot="marker"]')).toHaveAttribute(
+      "data-variant",
+      "separator",
+    )
   })
 
   test("keeps paragraph breaks in agent replies", () => {
     renderWithProviders(<Transcript lines={AGENT_REPLY_LINES} />)
 
-    expect(screen.getByText(/Random programs nationwide/).closest(".widget-bubble")).toHaveClass(
-      "whitespace-pre-wrap",
-    )
+    expect(
+      screen.getByText(/Random programs nationwide/).closest('[data-slot="bubble-content"]'),
+    ).toHaveClass("whitespace-pre-wrap")
   })
 
-  test("follows a newly received message to the latest point in the transcript", () => {
+  test("follows a newly received message inside the messages region", () => {
     const { rerender } = renderWithProviders(<Transcript autoFollow lines={VISITOR_LINES} />)
-    const scrollIntoView = HTMLElement.prototype.scrollIntoView as ReturnType<typeof vi.fn>
-    scrollIntoView.mockClear()
 
     rerender(<Transcript autoFollow lines={FOLLOW_UP_LINES} />)
 
-    expect(scrollIntoView).toHaveBeenCalledWith({ behavior: "smooth", block: "end" })
+    const reply = screen.getByText("Your result is ready.")
+    expect(screen.getByRole("region", { name: "Messages" })).toContainElement(reply)
+    expect(reply.closest('[data-slot="message"]')).toHaveAttribute("data-align", "start")
   })
 })
 

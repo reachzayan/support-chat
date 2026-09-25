@@ -2,6 +2,7 @@
 
 import { useCallback } from "react"
 
+import { Button } from "@/components/ui/button"
 import type { PublicWidgetConfig } from "@/lib/postmessage"
 
 import { ChatStatus } from "./chat-status"
@@ -74,13 +75,15 @@ const ClosedFooter = ({
         </div>
       ) : null}
     </section>
-    <button
+    <Button
       type="button"
+      variant="secondary"
+      size="lg"
       onClick={onRestart}
-      className="bg-ember hover:bg-ember-mid focus-visible:ring-ember/30 min-h-11 w-full cursor-pointer rounded-[22px] px-4 py-2 text-sm font-bold text-white shadow-[0_10px_24px_rgba(196,85,22,0.22)] transition-[background-color,box-shadow] duration-200 ease-out hover:shadow-[0_14px_28px_rgba(196,85,22,0.28)] focus-visible:ring-4 focus-visible:outline-none active:scale-[0.98]"
+      className="border-steel/15 bg-ice-2 text-navy hover:!text-navy focus-visible:ring-steel/30 min-h-11 w-full border px-4 text-sm leading-none font-bold shadow-[0_8px_20px_rgba(36,86,160,0.12)] hover:!bg-[#e6eefc] focus-visible:ring-4"
     >
       Start a new chat
-    </button>
+    </Button>
   </div>
 )
 
@@ -100,23 +103,25 @@ const PrivacyBanner = ({
       <p className="text-mute min-w-0 flex-1 text-xs leading-5">
         By chatting here, you agree that we and authorized partners may process and monitor this
         conversation in line with our{" "}
-        <button
+        <Button
           type="button"
+          variant="link"
           className="text-steel cursor-pointer font-bold"
           onClick={handleOpenPrivacy}
         >
           Privacy notice
-        </button>
+        </Button>
         .
       </p>
-      <button
+      <Button
         type="button"
+        variant="ghost"
         aria-label="Dismiss privacy notice"
         onClick={onDismiss}
         className="text-mute text-ink focus-visible:ring-steel flex size-8 shrink-0 items-center justify-center rounded-full hover:bg-white focus-visible:ring-2 focus-visible:outline-none"
       >
         <span aria-hidden="true">×</span>
-      </button>
+      </Button>
     </div>
   )
 }
@@ -151,6 +156,7 @@ const ActiveChat = ({
         muted={visitorClosed}
         notice={notice}
         conversationState={state}
+        agentName={view.assignedName}
       />
       {visitorClosed ? (
         <ClosedFooter contactInfo={config.contact_info} onRestart={onRestart} />

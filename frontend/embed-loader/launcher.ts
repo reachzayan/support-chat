@@ -1,12 +1,15 @@
-const NAVY = "#0B2347"
-const STEEL = "#2456A0"
-const PAPER = "#FFFFFF"
 const INK = "#0D1F3A"
+const PAPER = "#FFFFFF"
+const STEEL = "#2456A0"
 
-export const mountLauncher = (doc: Document, handleOpen: () => void): HTMLButtonElement => {
+export const mountLauncher = (
+  doc: Document,
+  handleOpen: () => void,
+  _widgetOrigin: string,
+): HTMLButtonElement => {
   const style = doc.createElement("style")
   style.textContent =
-    "[data-supportchat-launcher]{transition:transform 180ms ease,box-shadow 180ms ease}[data-supportchat-launcher]:hover{transform:translateY(-2px);box-shadow:0 12px 28px rgba(11,35,71,0.4)}[data-supportchat-launcher]:active{transform:translateY(0) scale(.96)}[data-supportchat-launcher]:focus-visible{outline:2px solid #2456A0;outline-offset:2px}@media (prefers-reduced-motion: reduce){[data-supportchat-launcher]{transition:none}}"
+    "[data-supportchat-launcher]{transition:transform 180ms ease,box-shadow 180ms ease}[data-supportchat-launcher]:hover{transform:translateY(-2px);box-shadow:0 12px 28px rgba(11,35,71,0.28)}[data-supportchat-launcher]:active{transform:translateY(0) scale(.96)}[data-supportchat-launcher]:focus-visible{outline:2px solid #2456A0;outline-offset:2px}@media (prefers-reduced-motion: reduce){[data-supportchat-launcher]{transition:none}}"
   doc.head.appendChild(style)
 
   const button = doc.createElement("button")
@@ -19,30 +22,27 @@ export const mountLauncher = (doc: Document, handleOpen: () => void): HTMLButton
     "bottom:24px",
     "width:56px",
     "height:56px",
+    "padding:0",
     "border:0",
     "border-radius:50%",
-    `background:${NAVY}`,
+    "background:#0B0B0B",
     "cursor:pointer",
     "z-index:2147483646",
     "touch-action:manipulation",
     "display:flex",
     "align-items:center",
     "justify-content:center",
-    "box-shadow:0 8px 24px rgba(11,35,71,0.35)",
+    "overflow:hidden",
+    "box-shadow:0 8px 24px rgba(11,35,71,0.28)",
   ].join(";")
-  const icon = doc.createElementNS("http://www.w3.org/2000/svg", "svg")
-  icon.setAttribute("viewBox", "0 0 24 24")
-  icon.setAttribute("width", "28")
-  icon.setAttribute("height", "28")
+  const icon = doc.createElement("span")
+  icon.textContent = "Chat"
+
   icon.setAttribute("aria-hidden", "true")
-  icon.setAttribute("focusable", "false")
-  const bubble = doc.createElementNS("http://www.w3.org/2000/svg", "path")
-  bubble.setAttribute(
-    "d",
-    "M5 4h14a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-6l-4 3v-3H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2z",
-  )
-  bubble.setAttribute("fill", PAPER)
-  icon.appendChild(bubble)
+
+
+  icon.style.cssText =
+    "color:white;font:600 12px/1 system-ui,sans-serif"
   button.appendChild(icon)
   button.addEventListener("click", handleOpen)
   doc.body.appendChild(button)

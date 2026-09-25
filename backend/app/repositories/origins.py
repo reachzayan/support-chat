@@ -46,8 +46,6 @@ def canonicalize_origin(raw: str) -> str:
         host = parsed.hostname.encode("idna").decode("ascii").lower()
     except UnicodeError as exc:
         raise InvalidOrigin("invalid host") from exc
-    if host.startswith("www."):
-        host = host.removeprefix("www.")
     return _format_origin(parsed, host)
 
 

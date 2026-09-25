@@ -1,7 +1,8 @@
-import { useMemo, useState } from "react"
+import { useDeferredValue, useMemo, useState } from "react"
 
 import type { KbPageRecord, KbSourceRecord } from "@/components/admin/staff-api"
 import { ScrollArea } from "@/components/ui/scroll-area"
+import { matchesSearchQuery } from "@/lib/search"
 
 import { PaneSearch } from "./knowledge-pane-search"
 import { SourceRow } from "./knowledge-source-row"
@@ -27,12 +28,10 @@ const sourceMatchesQuery = (
   if (!needle) {
     return true
   }
-  if (`${source.display_name ?? ""} ${source.start_url}`.toLocaleLowerCase().includes(needle)) {
+  if (matchesSearchQuery([source.display_name, source.start_url], needle)) {
     return true
   }
-  return sourcePages.some((page) =>
-    `${page.title} ${page.url}`.toLocaleLowerCase().includes(needle),
-  )
+  return sourcePages.some((page) => matchesSearchQuery([page.title, page.url], needle))
 }
 export const SourcePane = ({
   isAdmin,
@@ -48,13 +47,13 @@ export const SourcePane = ({
   onViewChanges,
 }: SourcePaneProps) => {
   const [query, setQuery] = useState("")
+  const deferredQuery = useDeferredValue(query)
   const pagesBySource = useMemo(() => groupPagesBySource(pages), [pages])
   const filtered = useMemo(() => {
-    const needle = query.trim().toLocaleLowerCase()
     return sources.filter((source) =>
-      sourceMatchesQuery(source, pagesBySource[source.id] ?? EMPTY_PAGES, needle),
+      sourceMatchesQuery(source, pagesBySource[source.id] ?? EMPTY_PAGES, deferredQuery),
     )
-  }, [pagesBySource, query, sources])
+  }, [deferredQuery, pagesBySource, sources])
   return (
     <section className="border-line bg-paper flex min-h-0 w-full flex-col border-b lg:w-[28rem] lg:shrink-0 lg:border-r lg:border-b-0">
       <div className="flex h-14 items-center justify-between gap-3 px-5">
@@ -79,19 +78,26 @@ export const SourcePane = ({
             />
           </div>
           <ScrollArea className="min-h-0 flex-1">
-            <SourceList
-              sources={filtered}
-              pagesBySource={pagesBySource}
-              selectedSourceId={selectedSourceId}
-              selectedPageId={selectedPageId}
-              isAdmin={isAdmin}
-              onSelect={onSelect}
-              onSync={onSync}
-              onToggle={onToggle}
-              onDelete={onDelete}
-              onSelectPage={onSelectPage}
-              onViewChanges={onViewChanges}
-            />
+            {filtered.length === 0 ? (
+              <div className="px-6 py-10 text-center">
+                <p className="text-ink heading text-sm">No sources match “{query.trim()}”</p>
+                <p className="text-mute mt-1 text-xs">Try fewer words or a page URL.</p>
+              </div>
+            ) : (
+              <SourceList
+                sources={filtered}
+                pagesBySource={pagesBySource}
+                selectedSourceId={selectedSourceId}
+                selectedPageId={selectedPageId}
+                isAdmin={isAdmin}
+                onSelect={onSelect}
+                onSync={onSync}
+                onToggle={onToggle}
+                onDelete={onDelete}
+                onSelectPage={onSelectPage}
+                onViewChanges={onViewChanges}
+              />
+            )}
           </ScrollArea>
         </>
       )}

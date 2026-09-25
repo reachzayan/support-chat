@@ -27,7 +27,7 @@ def test_settings_read_embed_model_and_generation_knobs_from_explicit_values() -
     )
     assert settings.openai_embed_model == "text-embedding-3-large"
     assert settings.openai_embed_dim == 3072
-    assert settings.anthropic_max_tokens == 500
+    assert settings.anthropic_max_tokens == 400
 
 
 def test_openai_embedder_id_follows_embed_model_env(monkeypatch) -> None:
@@ -96,7 +96,7 @@ async def test_bot_responder_uses_supported_sdk_parameters_and_fixed_token_cap(m
     )
     answer = await BotResponder().generate(SimpleNamespace(name="SampleSite"), "how fast", [hit])
     assert captured["model"] == "claude-haiku-4-5-20251001"
-    assert captured["max_tokens"] == 500
+    assert captured["max_tokens"] == 400
     assert answer.accepted is True
 
 

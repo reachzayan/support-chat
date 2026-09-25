@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 
 import { StaffHeader } from "@/components/admin/staff-nav"
 import { staffGet } from "@/lib/auth-client"
@@ -9,45 +9,107 @@ import { DataConsoleBody } from "./data-console-body"
 import { SubmissionDetailSheet } from "./data-detail-sheet"
 import type { SubmissionRow } from "./data-shared"
 
-export const DataConsole = () => {
+const PAGE_SIZE = 50
+
+const submissionsPath = (offset: number) =>
+  `/api/conversations/submissions?offset=${offset}&limit=${PAGE_SIZE}`
+
+const useSubmissionsFeed = () => {
   const [rows, setRows] = useState<SubmissionRow[] | null>(null)
+  const [hasMore, setHasMore] = useState(false)
   const [loadError, setLoadError] = useState(false)
-  const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [loadingMore, setLoadingMore] = useState(false)
+  const [loadMoreError, setLoadMoreError] = useState(false)
+  const loadingMoreRef = useRef(false)
+  const nextOffsetRef = useRef(0)
+
+  const loadPage = useCallback(async (offset: number, append: boolean) => {
+    try {
+      const response = await staffGet(submissionsPath(offset))
+      if (!response.ok) {
+        if (append) {
+          setLoadMoreError(true)
+        } else {
+          setLoadError(true)
+          setRows(null)
+          setHasMore(false)
+        }
+        return false
+      }
+      const body = (await response.json()) as {
+        items: SubmissionRow[]
+        has_more?: boolean
+      }
+      nextOffsetRef.current = offset + body.items.length
+      setLoadError(false)
+      setLoadMoreError(false)
+      setRows((current) => {
+        if (!append || current === null) {
+          return body.items
+        }
+        const byId = new Map(current.map((row) => [row.id, row]))
+        for (const row of body.items) {
+          byId.set(row.id, row)
+        }
+        return Array.from(byId.values())
+      })
+      setHasMore(Boolean(body.has_more) && body.items.length > 0)
+      return true
+    } catch {
+      if (append) {
+        setLoadMoreError(true)
+      } else {
+        setLoadError(true)
+        setRows(null)
+        setHasMore(false)
+      }
+      return false
+    }
+  }, [])
 
   useEffect(() => {
     let ignore = false
-    const load = async () => {
-      const response = await staffGet("/api/conversations/submissions")
-      if (!response.ok) {
-        if (!ignore) {
-          setLoadError(true)
-          setRows(null)
-        }
+    const boot = async () => {
+      const ok = await loadPage(0, false)
+      if (ignore || ok) {
         return
       }
-      const body = (await response.json()) as { items: SubmissionRow[] }
-      if (!ignore) {
-        setLoadError(false)
-        setRows(body.items)
-      }
+      setLoadError(true)
     }
-    void load()
+    void boot()
     return () => {
       ignore = true
     }
-  }, [])
+  }, [loadPage])
 
-  const handleOpenTranscript = useCallback((id: string) => {
-    setSelectedId(id)
-  }, [])
+  const handleLoadMore = async () => {
+    if (!hasMore || loadingMoreRef.current) {
+      return
+    }
+    loadingMoreRef.current = true
+    setLoadingMore(true)
+    try {
+      await loadPage(nextOffsetRef.current, true)
+    } finally {
+      loadingMoreRef.current = false
+      setLoadingMore(false)
+    }
+  }
+
+  return { rows, hasMore, loadError, loadMoreError, loadingMore, handleLoadMore }
+}
+
+export const DataConsole = () => {
+  const { rows, hasMore, loadError, loadMoreError, loadingMore, handleLoadMore } =
+    useSubmissionsFeed()
+  const [selectedId, setSelectedId] = useState<string | null>(null)
+  const selected = rows?.find((row) => row.id === selectedId) ?? null
 
   const handleSheetOpen = useCallback((open: boolean) => {
     if (!open) {
       setSelectedId(null)
     }
   }, [])
-
-  const selected = rows?.find((row) => row.id === selectedId) ?? null
 
   return (
     <div className="view-transition-enter bg-ice flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
@@ -58,7 +120,15 @@ export const DataConsole = () => {
         id="main-content"
         className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden px-5 py-5 lg:px-8 lg:py-8"
       >
-        <DataConsoleBody rows={rows} loadError={loadError} onTranscript={handleOpenTranscript} />
+        <DataConsoleBody
+          rows={rows}
+          loadError={loadError}
+          hasMore={hasMore}
+          loadMoreError={loadMoreError}
+          loadingMore={loadingMore}
+          onLoadMore={handleLoadMore}
+          onTranscript={setSelectedId}
+        />
       </div>
       {selectedId && selected ? (
         <SubmissionDetailSheet key={selectedId} row={selected} onClose={handleSheetOpen} />

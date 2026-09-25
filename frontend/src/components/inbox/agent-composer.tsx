@@ -80,7 +80,7 @@ const ComposerField = ({
   onKeyDown: (event: KeyboardEvent<HTMLInputElement>) => void
 }) => (
   <div
-    className={`relative flex min-h-14 items-center gap-2 rounded-full border px-3 py-2 transition-[border-color,box-shadow,background-color] duration-150 ease-out ${
+    className={`relative flex min-h-14 items-center gap-2 rounded-lg border px-3 py-2 transition-[border-color,box-shadow,background-color] duration-150 ease-out ${
       closed
         ? "border-line text-mute bg-transparent"
         : "border-ink bg-paper shadow-[0_2px_8px_rgba(13,31,58,0.04)]"
@@ -119,9 +119,10 @@ const ComposerField = ({
         ) : (
           <div className="max-h-64 overflow-y-auto p-1">
             {canned.map((item, index) => (
-              <button
+              <Button
                 key={item.shortcut}
                 type="button"
+                variant="ghost"
                 onClick={() => onSelect(item)}
                 aria-label={`Insert #${item.shortcut}`}
                 className={`flex w-full flex-col gap-0.5 rounded-[8px] px-3 py-2 text-left transition-[background-color,transform] duration-150 ${index === activeIndex ? "bg-ice-2" : "hover:bg-ice"}`}
@@ -133,7 +134,7 @@ const ComposerField = ({
                   </span>
                 </span>
                 <span className="text-ink line-clamp-2 text-xs">{item.body}</span>
-              </button>
+              </Button>
             ))}
           </div>
         )}
@@ -152,7 +153,7 @@ const ComposerField = ({
       className="text-ink placeholder:text-mute disabled:text-mute h-auto min-w-0 flex-1 rounded-none border-0 !bg-transparent px-1 text-base shadow-none outline-none focus-visible:border-0 focus-visible:ring-0 dark:!bg-transparent"
     />
     <Button
-      variant="default"
+      variant="ghost"
       size="icon-lg"
       type="submit"
       aria-label="Send"
@@ -160,7 +161,7 @@ const ComposerField = ({
       className={`widget-send-button flex size-11 shrink-0 items-center justify-center rounded-full focus-visible:ring-2 focus-visible:outline-none ${
         closed
           ? "bg-line text-mute"
-          : "bg-steel hover:bg-navy disabled:bg-ember-soft focus-visible:ring-steel dark:text-navy-deep text-white"
+          : "bg-steel hover:bg-navy disabled:bg-ember-soft focus-visible:ring-steel text-white hover:text-white"
       }`}
     >
       <ArrowUp aria-hidden="true" className="size-5" strokeWidth={2.4} />

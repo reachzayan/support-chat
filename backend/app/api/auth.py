@@ -4,7 +4,7 @@ from uuid import UUID
 
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app.db import SessionDep
 from app.models.user import User
@@ -27,8 +27,10 @@ LOGIN_FAILURE = "Invalid email or password"
 
 
 class LoginRequest(BaseModel):
-    email: str
-    password: str
+    model_config = ConfigDict(extra="forbid")
+
+    email: str = Field(min_length=3, max_length=254)
+    password: str = Field(min_length=1, max_length=1024)
 
     @field_validator("email")
     @classmethod
@@ -40,8 +42,10 @@ class LoginRequest(BaseModel):
 
 
 class ChangePasswordRequest(BaseModel):
-    current_password: str
-    new_password: str = Field(min_length=15)
+    model_config = ConfigDict(extra="forbid")
+
+    current_password: str = Field(min_length=1, max_length=1024)
+    new_password: str = Field(min_length=15, max_length=1024)
 
 
 class UserOut(BaseModel):
@@ -78,26 +82,11 @@ def _request_ip(request: Request, settings: Settings) -> str | None:
     )
 
 
-async def _enforce_login_budget(request: Request, settings: Settings, email: str) -> None:
+async def _reserve_login_budget(request: Request, settings: Settings, email: str) -> None:
     limiter = RateLimiter(settings)
     ip = _request_ip(request, settings)
     try:
-        await limiter.guard_login(email, ip)
-    except RateLimitExceeded as exc:
-        raise HTTPException(
-            status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail="Too many requests"
-        ) from exc
-    except RateLimitUnavailable as exc:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Unavailable"
-        ) from exc
-
-
-async def _record_login_failure(request: Request, settings: Settings, email: str) -> None:
-    limiter = RateLimiter(settings)
-    ip = _request_ip(request, settings)
-    try:
-        await limiter.hit_login_failure(email, ip)
+        await limiter.reserve_login(email, ip)
     except RateLimitExceeded as exc:
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail="Too many requests"
@@ -116,16 +105,16 @@ async def login(
     session: SessionDep,
     settings: Annotated[Settings, Depends(get_settings)],
 ) -> SessionOut:
-    await _enforce_login_budget(request, settings, payload.email)
+    await _reserve_login_budget(request, settings, payload.email)
     service = AuthService(session, settings)
     try:
         issued = await service.login(payload.email, payload.password)
     except AuthFailed:
-        await _record_login_failure(request, settings, payload.email)
         log.info("login_failed")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED, detail=LOGIN_FAILURE
         ) from None
+    await RateLimiter(settings).release_login(payload.email, _request_ip(request, settings))
     _attach_session(response, issued.refresh_token, settings)
     return SessionOut(access_token=issued.access_token, user=_user_out(issued.user))
 

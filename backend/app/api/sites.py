@@ -26,7 +26,7 @@ class SiteCreateIn(BaseModel):
 
 
 class SitePatchIn(BaseModel):
-    model_config = ConfigDict(extra="ignore")
+    model_config = ConfigDict(extra="forbid")
 
     name: str | None = None
     greeting: str | None = None

@@ -1,4 +1,5 @@
 from enum import StrEnum
+from functools import lru_cache
 from ipaddress import ip_network
 from urllib.parse import urlsplit
 
@@ -39,6 +40,32 @@ def _origin_key(origin: str) -> tuple[str, int]:
     return host.casefold(), parsed.port or 443
 
 
+def _validate_production_redis(url: str) -> None:
+    if not url.startswith("rediss://"):
+        raise ValueError("REDIS_URL must use rediss:// in production")
+    if urlsplit(url).username != "app":
+        raise ValueError("REDIS_URL must authenticate as the app ACL user in production")
+    if "local-dev-redis" in url:
+        raise ValueError("production redis URL must not use the local-dev-redis password")
+
+
+def _validate_optional_provider_url(name: str, url: str | None) -> None:
+    if not url:
+        return
+    provider = urlsplit(url)
+    invalid = (
+        provider.scheme != "https"
+        or not provider.hostname
+        or provider.username
+        or provider.password
+        or provider.query
+        or provider.fragment
+        or provider.hostname.casefold() in {"localhost", "127.0.0.1"}
+    )
+    if invalid:
+        raise ValueError(f"{name} must be a canonical https URL in production")
+
+
 class AppEnvironment(StrEnum):
     LOCAL = "local"
     TEST = "test"
@@ -60,6 +87,8 @@ class Settings(BaseSettings):
     widget_csp_service_secret: str = ""
     trusted_proxy_cidrs: str = ""
     app_env: AppEnvironment = AppEnvironment.LOCAL
+    internal_eval_enabled: bool = False
+    enable_background_workers: bool = True
     chat_retention_days: int = 30
     rate_bootstrap: int = 60
     rate_bootstrap_window: int = 600
@@ -97,6 +126,7 @@ class Settings(BaseSettings):
     fast_path_min_score: float = 0.15
     fast_path_margin_ratio: float = 1.5
     conversation_window_size: int = 24
+    message_replay_limit: int = 500
     query_vector_cache_ttl: int = 24 * 60 * 60
     grounded_response_cache_ttl: int = 24 * 60 * 60
     kb_ingest_page_concurrency: int = 4
@@ -106,6 +136,12 @@ class Settings(BaseSettings):
     kb_ingest_source_timeout_seconds: float = 600.0
     kb_llm_extract_concurrency: int = 4
     kb_ingest_retry_sleep: float = 0.0
+    bot_generation_lease_seconds: int = 90
+    bot_generation_recovery_grace_seconds: int = 2
+    background_job_poll_seconds: float = 1.0
+    handoff_summary_max_attempts: int = 3
+    ip_geolocation_provider_url: str | None = None
+    ip_geolocation_retry_hours: int = 24
 
     def trusted_proxy_networks(self) -> list:
         networks = []
@@ -160,23 +196,86 @@ class Settings(BaseSettings):
             raise ValueError("OPENAI_EMBED_MODEL must be a non-empty model id")
         return model_id
 
-    @field_validator("openai_embed_dim")
+    @field_validator(
+        "openai_embed_dim",
+        "haiku_max_tokens",
+        "chat_retention_days",
+        "rate_bootstrap",
+        "rate_bootstrap_window",
+        "rate_widget_csp_ip",
+        "rate_widget_csp_site",
+        "rate_widget_csp_window",
+        "rate_visitor_create",
+        "rate_visitor_create_window",
+        "rate_visitor_submit",
+        "rate_visitor_submit_window",
+        "rate_visitor_submit_ip",
+        "rate_visitor_submit_ip_window",
+        "rate_login_failure",
+        "rate_login_failure_window",
+        "embed_batch",
+        "chunk_target_chars",
+        "chunk_overlap_chars",
+        "openai_embed_max_tokens",
+        "max_answer_chars",
+        "max_bot_answer_chars",
+        "anthropic_calls_per_minute",
+        "full_context_max_tokens",
+        "conversation_window_size",
+        "message_replay_limit",
+        "query_vector_cache_ttl",
+        "grounded_response_cache_ttl",
+        "kb_ingest_page_concurrency",
+        "kb_ingest_source_concurrency",
+        "kb_ingest_stuck_minutes",
+        "kb_llm_extract_concurrency",
+        "bot_generation_lease_seconds",
+        "bot_generation_recovery_grace_seconds",
+        "handoff_summary_max_attempts",
+        "ip_geolocation_retry_hours",
+    )
     @classmethod
-    def openai_embed_dim_positive(cls, value: int) -> int:
+    def positive_int(cls, value: int) -> int:
         if value < 1:
-            raise ValueError("OPENAI_EMBED_DIM must be a positive integer")
+            raise ValueError("must be a positive integer")
+        return value
+
+    @field_validator(
+        "anthropic_timeout",
+        "haiku_timeout",
+        "embed_query_timeout",
+        "embed_ingest_timeout",
+        "kb_ingest_source_timeout_seconds",
+        "fast_path_min_score",
+        "fast_path_margin_ratio",
+        "background_job_poll_seconds",
+    )
+    @classmethod
+    def positive_float(cls, value: float) -> float:
+        if value < 0:
+            raise ValueError("must be zero or positive")
+        return value
+
+    @field_validator("kb_ingest_host_delay_ms", "kb_ingest_retry_sleep")
+    @classmethod
+    def non_negative_int(cls, value: int) -> int:
+        if value < 0:
+            raise ValueError("must be zero or positive")
         return value
 
     @field_validator("anthropic_max_tokens")
     @classmethod
     def anthropic_max_tokens_positive(cls, value: int) -> int:
-        del value
-        return 500
+        if value < 1:
+            raise ValueError("ANTHROPIC_MAX_TOKENS must be a positive integer")
+        return value
 
     @model_validator(mode="after")
     def production_must_fail_closed(self) -> "Settings":
         if self.app_env is not AppEnvironment.PRODUCTION:
             return self
+        if self.internal_eval_enabled:
+            raise ValueError("INTERNAL_EVAL_ENABLED must be false in production")
         if self.chat_retention_days < 1:
             raise ValueError("CHAT_RETENTION_DAYS must be a positive integer in production")
         if not self.cookie_secure:
@@ -197,10 +296,10 @@ class Settings(BaseSettings):
             raise ValueError(
                 "STAFF_APP_ORIGIN, WIDGET_ORIGIN, and MARKETING_HOST_ORIGIN must be distinct"
             )
-        if not self.redis_url.startswith("rediss://"):
-            raise ValueError("REDIS_URL must use rediss:// in production")
-        if "local-dev-redis" in self.redis_url:
-            raise ValueError("production redis URL must not use the local-dev-redis password")
+        _validate_production_redis(self.redis_url)
+        _validate_optional_provider_url(
+            "IP_GEOLOCATION_PROVIDER_URL", self.ip_geolocation_provider_url
+        )
         _reject_weak_production_secret("JWT_SECRET", self.jwt_secret)
         _reject_weak_production_secret("WIDGET_TOKEN_SECRET", self.widget_token_secret)
         _reject_weak_production_secret("RATE_KEY_SECRET", self.rate_key_secret)
@@ -227,5 +326,10 @@ class Settings(BaseSettings):
         return url
 
 
+@lru_cache
 def get_settings() -> Settings:
     return Settings()
+
+
+def reset_settings_cache() -> None:
+    get_settings.cache_clear()

@@ -3,7 +3,17 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from app.services.kb_crawl import FetchError
-from app.services.kb_fetcher import _allow_browser_request, fetch_page
+from app.services.kb_fetcher import (
+    _allow_browser_request,
+    _without_unsafe_browser_flags,
+    fetch_page,
+)
+
+
+def test_crawler_keeps_chromium_sandbox_enabled() -> None:
+    assert _without_unsafe_browser_flags(
+        ["--headless=new", "--no-sandbox", "--disable-setuid-sandbox"]
+    ) == ["--headless=new"]
 
 
 async def test_loopback_does_not_invoke_crawler() -> None:

@@ -548,13 +548,12 @@
   };
 
   // embed-loader/launcher.ts
-  var NAVY = "#0B2347";
-  var STEEL = "#2456A0";
-  var PAPER = "#FFFFFF";
   var INK = "#0D1F3A";
-  var mountLauncher = (doc, handleOpen2) => {
+  var PAPER = "#FFFFFF";
+  var STEEL = "#2456A0";
+  var mountLauncher = (doc, handleOpen2, widgetOrigin) => {
     const style = doc.createElement("style");
-    style.textContent = "[data-supportchat-launcher]{transition:transform 180ms ease,box-shadow 180ms ease}[data-supportchat-launcher]:hover{transform:translateY(-2px);box-shadow:0 12px 28px rgba(11,35,71,0.4)}[data-supportchat-launcher]:active{transform:translateY(0) scale(.96)}[data-supportchat-launcher]:focus-visible{outline:2px solid #2456A0;outline-offset:2px}@media (prefers-reduced-motion: reduce){[data-supportchat-launcher]{transition:none}}";
+    style.textContent = "[data-supportchat-launcher]{transition:transform 180ms ease,box-shadow 180ms ease}[data-supportchat-launcher]:hover{transform:translateY(-2px);box-shadow:0 12px 28px rgba(11,35,71,0.28)}[data-supportchat-launcher]:active{transform:translateY(0) scale(.96)}[data-supportchat-launcher]:focus-visible{outline:2px solid #2456A0;outline-offset:2px}@media (prefers-reduced-motion: reduce){[data-supportchat-launcher]{transition:none}}";
     doc.head.appendChild(style);
     const button = doc.createElement("button");
     button.type = "button";
@@ -566,30 +565,26 @@
       "bottom:24px",
       "width:56px",
       "height:56px",
+      "padding:0",
       "border:0",
       "border-radius:50%",
-      `background:${NAVY}`,
+      "background:#0B0B0B",
       "cursor:pointer",
       "z-index:2147483646",
       "touch-action:manipulation",
       "display:flex",
       "align-items:center",
       "justify-content:center",
-      "box-shadow:0 8px 24px rgba(11,35,71,0.35)"
+      "overflow:hidden",
+      "box-shadow:0 8px 24px rgba(11,35,71,0.28)"
     ].join(";");
-    const icon = doc.createElementNS("http://www.w3.org/2000/svg", "svg");
-    icon.setAttribute("viewBox", "0 0 24 24");
-    icon.setAttribute("width", "28");
-    icon.setAttribute("height", "28");
+    const icon = doc.createElement("span");
+    icon.textContent = "Chat"
+
     icon.setAttribute("aria-hidden", "true");
-    icon.setAttribute("focusable", "false");
-    const bubble = doc.createElementNS("http://www.w3.org/2000/svg", "path");
-    bubble.setAttribute(
-      "d",
-      "M5 4h14a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-6l-4 3v-3H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2z"
-    );
-    bubble.setAttribute("fill", PAPER);
-    icon.appendChild(bubble);
+
+
+    icon.style.cssText = "color:white;font:600 12px/1 system-ui,sans-serif";
     button.appendChild(icon);
     button.addEventListener("click", handleOpen2);
     doc.body.appendChild(button);
@@ -944,7 +939,7 @@
       retryTimer: null,
       hideTimer: null
     };
-    runtime.launcher = mountLauncher(doc, () => handleOpen(runtime));
+    runtime.launcher = mountLauncher(doc, () => handleOpen(runtime), widgetOrigin);
     runtime.launcher.addEventListener("pointerenter", () => warmPanel(runtime));
     runtime.launcher.addEventListener("focus", () => warmPanel(runtime));
     win.addEventListener("message", (event) => handleHostMessage(runtime, event));

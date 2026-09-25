@@ -10,7 +10,7 @@ from app.models.kb_page_job import KbPageJob
 from app.models.kb_snapshot import KbSnapshot
 from app.models.kb_source import KbSource
 from app.repositories.kb_source_repo import KbSourceRepository
-from app.services.full_context import clear_units_cache, load_live_units
+from app.services.full_context import load_live_units
 from app.services.kb_embedder import FakeEmbedder, configured_embedder_id
 from app.services.kb_hybrid import HybridKbSearch
 from app.services.kb_ingest import canonical_url, ingest_source
@@ -139,7 +139,6 @@ async def test_text_source_uses_the_shared_pipeline_without_crawling(
             )
         )
         assert live_id is not None
-        clear_units_cache()
         units = await load_live_units(session, [live_id])
         assert [unit.url for unit in units] == [""]
         live_text = page.content_text

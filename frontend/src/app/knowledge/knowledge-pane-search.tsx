@@ -23,6 +23,8 @@ export const PaneSearch = ({
     <Input
       id={id}
       type="search"
+      autoComplete="off"
+      spellCheck={false}
       aria-label={label}
       value={value}
       onChange={(event) => onQuery(event.target.value)}

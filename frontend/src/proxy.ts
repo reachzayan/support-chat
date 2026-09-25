@@ -54,12 +54,45 @@ const isStaffPath = (pathname: string) => {
   return STAFF_PREFIXES.some((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`))
 }
 
+const isStaffDocumentPath = (pathname: string) => {
+  return (
+    pathname === "/login" ||
+    pathname.startsWith("/admin") ||
+    pathname === "/inbox" ||
+    pathname.startsWith("/inbox/") ||
+    pathname === "/sites" ||
+    pathname.startsWith("/sites/") ||
+    pathname === "/knowledge" ||
+    pathname.startsWith("/knowledge/") ||
+    pathname === "/settings" ||
+    pathname.startsWith("/settings/")
+  )
+}
+
 const isWidgetOnlyPath = (pathname: string) => {
   return (
     pathname === "/widget" ||
     pathname === "/supportchat.js" ||
     pathname === "/api/public/widget-bootstrap"
   )
+}
+
+export const staffDocumentCsp = (nonce: string, api = apiOrigin()) => {
+  const ws = api.replace(/^http/, "ws")
+  return [
+    "default-src 'self'",
+    `script-src 'self' 'nonce-${nonce}' 'strict-dynamic'`,
+    "style-src 'self' 'unsafe-inline'",
+    "object-src 'none'",
+    "base-uri 'self'",
+    "form-action 'self'",
+    "font-src 'self'",
+    `connect-src 'self' ${api} ${ws}`,
+    "frame-ancestors 'none'",
+  ]
+    .join("; ")
+    .replace(/\s{2,}/g, " ")
+    .trim()
 }
 
 const applyWidgetCsp = async (request: NextRequest, response: NextResponse) => {
@@ -95,6 +128,15 @@ export const proxy = async (request: NextRequest) => {
   const requestHeaders = new Headers(request.headers)
   if (pathname === "/widget") {
     requestHeaders.set("x-supportchat-surface", "widget")
+  }
+  if (isStaffDocumentPath(pathname)) {
+    const nonce = Buffer.from(crypto.randomUUID()).toString("base64")
+    const csp = staffDocumentCsp(nonce)
+    requestHeaders.set("x-nonce", nonce)
+    requestHeaders.set("Content-Security-Policy", csp)
+    const response = NextResponse.next({ request: { headers: requestHeaders } })
+    response.headers.set("Content-Security-Policy", csp)
+    return response
   }
   return applyWidgetCsp(request, NextResponse.next({ request: { headers: requestHeaders } }))
 }

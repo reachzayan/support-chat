@@ -127,7 +127,7 @@ export const EmptyState = ({
         ? "Responses created here work across every website."
         : `General responses remain available unless this website defines the same shortcut. ${scopeLabel(scope, sites)} can have its own approved wording.`}
     </p>
-    <Button className="bg-ember hover:bg-ember/90 mt-5" onClick={onAdd}>
+    <Button variant="default" size="lg" className="mt-5 font-bold" onClick={onAdd}>
       Add {scope === "general" ? "general" : "website"} response
     </Button>
   </section>

@@ -49,11 +49,13 @@ export const KnowledgeConsole = ({ isAdmin, displayName: _displayName }: Knowled
               {isAdmin ? (
                 <Button
                   type="button"
+                  variant="default"
+                  size="lg"
                   onClick={handleOpenAddKnowledge}
                   disabled={!state.siteId}
-                  className="bg-ember hover:bg-ember-mid focus-visible:ring-steel h-10 rounded-[9px] px-4 text-sm font-bold text-white focus-visible:ring-2 focus-visible:outline-none"
+                  className="font-bold"
                 >
-                  <Plus aria-hidden="true" />
+                  <Plus data-icon="inline-start" aria-hidden="true" />
                   Add knowledge
                 </Button>
               ) : null}

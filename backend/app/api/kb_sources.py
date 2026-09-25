@@ -7,8 +7,9 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from app.db import SessionDep
 from app.models.kb_chunk import KbChunk
 from app.models.kb_page import KbPage
-from app.models.kb_page_job import KbPageJob
 from app.models.kb_source import KbSource
+from app.repositories.kb_page_job_repo import KbPageJobRepository
+from app.repositories.kb_snapshot_repo import KbSnapshotRepository
 from app.security.deps import CurrentAdmin, CurrentUser
 from app.services.kb_source_admin import KbSourceService, general_tab_id
 from app.services.site_admin import AdminError
@@ -225,10 +226,11 @@ def _http_error(exc: AdminError) -> HTTPException:
     )
 
 
-async def _source_out(session, source: KbSource) -> SourceOut:
-    rows = await KbSourceService(session).list_snapshots(source.id)
-    latest = rows[0] if rows else None
-    live = next((row for row in rows if row.state == "live"), None)
+async def _source_out(session, source: KbSource, summary=None) -> SourceOut:
+    if summary is None:
+        summaries = await KbSnapshotRepository(session).summaries_for_sources([source.id])
+        summary = summaries.get(source.id, (None, None))
+    latest, live = summary
     serving = live or latest
     failed_run = latest if latest is not None and latest.state == "failed" else None
     return SourceOut(
@@ -318,7 +320,8 @@ async def list_sources(site_id: UUID, session: SessionDep, _staff: CurrentUser) 
         rows = await KbSourceService(session).list_sources(site_id)
     except AdminError as exc:
         raise _http_error(exc) from exc
-    items = [await _source_out(session, row) for row in rows]
+    summaries = await KbSnapshotRepository(session).summaries_for_sources([row.id for row in rows])
+    items = [await _source_out(session, row, summaries.get(row.id, (None, None))) for row in rows]
     return SourceListOut(items=items)
 
 
@@ -424,20 +427,14 @@ async def source_progress(source_id: UUID, session: SessionDep, _staff: CurrentU
     source = await session.get(KbSource, source_id)
     if source is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
-    from sqlalchemy import select
-
     from app.services.kb_progress import describe_progress_event
 
-    result = await session.execute(
-        select(KbPageJob, KbPage)
-        .join(KbPage, KbPage.id == KbPageJob.page_id)
-        .where(KbPageJob.source_id == source_id)
-        .order_by(KbPageJob.finished_at.desc().nullslast(), KbPageJob.created_at.desc())
+    current_rows, recent_rows = await KbPageJobRepository(session).progress_for_source(
+        source_id, current_limit=100, recent_limit=20
     )
-    rows = list(result.all())
     recent: list[ProgressEventOut] = []
     current: list[ProgressJobOut] = []
-    for job, page in rows:
+    for job, page in [*recent_rows, *current_rows]:
         page_locator = page.public_url or page.title
         duration = None
         if job.started_at is not None and job.finished_at is not None:
@@ -520,10 +517,13 @@ def _unit_out(item: dict) -> EvidenceUnitOut:
 
 @router.get("/api/kb-sources/{source_id}/snapshots", response_model=SnapshotListOut)
 async def list_snapshots(
-    source_id: UUID, session: SessionDep, _staff: CurrentUser
+    source_id: UUID,
+    session: SessionDep,
+    _staff: CurrentUser,
+    limit: Annotated[int, Query(ge=1, le=100)] = 50,
 ) -> SnapshotListOut:
     try:
-        rows = await KbSourceService(session).list_snapshots(source_id)
+        rows = await KbSourceService(session).list_snapshots(source_id, limit=limit)
     except AdminError as exc:
         raise _http_error(exc) from exc
     return SnapshotListOut(

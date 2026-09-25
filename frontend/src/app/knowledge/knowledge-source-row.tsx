@@ -5,8 +5,10 @@ import { useCallback } from "react"
 
 import type { KbPageRecord, KbSourceRecord } from "@/components/admin/staff-api"
 import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import { LinkButton, linkUnderlineClass } from "@/components/ui/link-button"
+import { Spinner } from "@/components/ui/spinner"
 
 import {
   sourceIsSyncing,
@@ -45,7 +47,11 @@ const SourceRowActions = ({
       {isAdmin ? (
         <>
           <LinkButton type="button" onClick={handleSync} disabled={syncing}>
-            <RefreshCw aria-hidden="true" className={cn("size-3.5", syncing && "animate-spin")} />
+            {syncing ? (
+              <Spinner data-icon="inline-start" />
+            ) : (
+              <RefreshCw aria-hidden="true" data-icon="inline-start" className="size-3.5" />
+            )}
             {sourceSyncActionLabel(source)}
           </LinkButton>
           <LinkButton
@@ -111,14 +117,15 @@ const SourcePageRow = ({
   const handleSelect = useCallback(() => onSelect(page), [onSelect, page])
   return (
     <li>
-      <button
+      <Button
         type="button"
+        variant="ghost"
         onClick={handleSelect}
         aria-current={selected ? "true" : undefined}
         aria-label={page.title}
-        className="focus-visible:ring-steel w-full rounded-[6px] px-1 py-1.5 text-left focus-visible:ring-2 focus-visible:outline-none"
+        className="focus-visible:ring-steel h-auto w-full justify-start rounded-lg px-2 py-1.5 text-left focus-visible:ring-2 focus-visible:outline-none"
       >
-        <span className="block max-w-full truncate">
+        <span className="block max-w-full min-w-0 truncate text-left">
           <span
             className={cn(
               linkUnderlineClass,
@@ -131,13 +138,19 @@ const SourcePageRow = ({
             {page.title}
           </span>
         </span>
-      </button>
+      </Button>
     </li>
   )
 }
 
-const SourceRowTrigger = ({ source }: { source: KbSourceRecord }) => (
-  <CollapsibleTrigger className="group w-full gap-2">
+const SourceRowTrigger = ({
+  source,
+  onSelect,
+}: {
+  source: KbSourceRecord
+  onSelect: () => void
+}) => (
+  <CollapsibleTrigger onClick={onSelect} className="group h-auto w-full gap-2 rounded-lg py-1">
     <span className="flex min-w-0 flex-1 items-center gap-2">
       <span className="text-navy min-w-0 truncate text-sm font-semibold">
         {source.display_name || source.start_url}
@@ -164,7 +177,8 @@ const SourceRowBody = ({
   onDelete,
   onSelectPage,
   onViewChanges,
-}: Omit<SourceRowProps, "selected" | "onSelect">) => {
+  onSelect,
+}: Omit<SourceRowProps, "selected" | "onSelect"> & { onSelect: () => void }) => {
   const Icon = source.source_kind === "text" ? FileText : Globe2
   return (
     <div className="flex items-start gap-3">
@@ -175,7 +189,7 @@ const SourceRowBody = ({
         <Icon className="size-4" strokeWidth={1.8} />
       </span>
       <div className="min-w-0 flex-1">
-        <SourceRowTrigger source={source} />
+        <SourceRowTrigger source={source} onSelect={onSelect} />
         <div className="text-mute mt-2 flex flex-col gap-1 text-xs" aria-live="polite">
           <span className="text-ink inline-flex items-center gap-1.5 font-semibold">
             <span
@@ -219,11 +233,9 @@ export const SourceRow = ({
   const handleSelect = useCallback(() => onSelect(source), [onSelect, source])
   return (
     <li className="px-1 py-0.5">
-      {/* oxlint-disable-next-line jsx-a11y/click-events-have-key-events, jsx-a11y/no-static-element-interactions -- Nested Sync/page buttons cannot live inside another button; the source title is the keyboard control. */}
       <div
-        onClick={handleSelect}
         className={cn(
-          "relative cursor-pointer rounded-[10px] px-3 py-3 transition-colors duration-150",
+          "relative rounded-xl px-3 py-3 transition-colors duration-150",
           selected ? "bg-ice-2" : "hover:bg-ice-2/70",
         )}
       >
@@ -239,6 +251,7 @@ export const SourceRow = ({
             onDelete={onDelete}
             onSelectPage={onSelectPage}
             onViewChanges={onViewChanges}
+            onSelect={handleSelect}
           />
         </Collapsible>
       </div>
