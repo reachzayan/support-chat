@@ -25,15 +25,17 @@ def test_frontend_pins_turbopack_to_the_frontend_package() -> None:
     assert "fileURLToPath(import.meta.url)" in config
 
 
-def test_deploy_command_never_transports_a_github_token() -> None:
-    files = (
-        "deploy/ssm-deploy.sh",
-        "deploy/github-actions-ssm-deploy.sh",
-        ".github/workflows/ci-cd.yml",
-        ".github/workflows/deploy-dev.yml",
-    )
-    for relative in files:
-        assert "GITHUB_TOKEN" not in _read(relative), relative
+def test_deploy_uses_actions_token_https_fetch_not_ssh_deploy_key() -> None:
+    deploy = _read("deploy/ssm-deploy.sh")
+    sender = _read("deploy/github-actions-ssm-deploy.sh")
+    ci = _read(".github/workflows/ci-cd.yml")
+    manual = _read(".github/workflows/deploy-dev.yml")
+    assert "x-access-token:${GITHUB_TOKEN}@github.com" in deploy
+    assert "git@github.com" not in deploy
+    assert "deploy key" not in deploy.lower()
+    assert "GITHUB_TOKEN" in sender
+    assert "GITHUB_TOKEN: ${{ github.token }}" in ci
+    assert "GITHUB_TOKEN: ${{ github.token }}" in manual
 
 
 def test_production_redis_uses_acl_app_identity() -> None:
