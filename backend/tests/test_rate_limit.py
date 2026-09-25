@@ -102,6 +102,25 @@ def test_third_login_failure_is_429_and_does_not_issue_cookies(
     assert "supportchat_refresh=" not in " ".join(third.headers.get_list("set-cookie")).lower()
 
 
+def test_shared_ip_does_not_block_other_staff_after_few_failures(
+    client: TestClient, monkeypatch
+) -> None:
+    insert_staff(ALEX_EMAIL, "Alex Morgan", ALEX_PASSWORD)
+    _set_budgets(monkeypatch, RATE_LOGIN_FAILURE="2", RATE_LOGIN_IP_FAILURE="4")
+    for index in range(3):
+        response = client.post(
+            "/auth/login",
+            json={"email": f"unknown{index}@example.com", "password": "wrong"},
+        )
+        assert response.status_code == 401
+    assert (
+        client.post(
+            "/auth/login", json={"email": ALEX_EMAIL, "password": ALEX_PASSWORD}
+        ).status_code
+        == 200
+    )
+
+
 def test_bootstrap_fails_closed_when_limiter_is_down(client: TestClient, monkeypatch) -> None:
     insert_site(DEMO_SITE_KEY, "Demo", DEMO_PUBLIC_KEY)
 
