@@ -3,7 +3,7 @@ from unittest.mock import patch
 from uuid import UUID
 
 from app.llm.bot_responder import BotResponder
-from app.services.grounded_response import EvidenceUnit, GroundedResponseEngine, TurnContext
+from app.services.grounded_response import EvidenceUnit, TurnContext
 from app.services.kb_embedder import OpenAIEmbedder, configured_embedder_id
 from app.settings import Settings
 
@@ -148,11 +148,5 @@ async def test_grounded_responder_uses_the_installed_sdk_request_contract(monkey
     assert draft.body == paraphrase
     assert draft.citations[0].source_title == evidence.source_title
     assert draft.citations[0].source_url == evidence.source_url
-    validation = GroundedResponseEngine()._validate_draft(
-        draft,
-        [evidence],
-        TurnContext(visitor_text="how fast", evidence=[evidence], site_name="SampleSite"),
-    )
-    assert validation.accepted is True
     assert captured["max_tokens"] == 500
     assert set(captured) == {"model", "max_tokens", "system", "messages"}

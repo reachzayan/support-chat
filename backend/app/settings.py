@@ -102,6 +102,7 @@ class Settings(BaseSettings):
     rate_visitor_submit_ip: int = 60
     rate_visitor_submit_ip_window: int = 60
     rate_login_failure: int = 10
+    rate_login_ip_failure: int = 100
     rate_login_failure_window: int = 900
     anthropic_model: str = "claude-haiku-4-5-20251001"
     anthropic_api_key: str | None = None
@@ -128,7 +129,6 @@ class Settings(BaseSettings):
     conversation_window_size: int = 24
     message_replay_limit: int = 500
     query_vector_cache_ttl: int = 24 * 60 * 60
-    grounded_response_cache_ttl: int = 24 * 60 * 60
     kb_ingest_page_concurrency: int = 4
     kb_ingest_source_concurrency: int = 2
     kb_ingest_host_delay_ms: int = 500
@@ -212,6 +212,7 @@ class Settings(BaseSettings):
         "rate_visitor_submit_ip",
         "rate_visitor_submit_ip_window",
         "rate_login_failure",
+        "rate_login_ip_failure",
         "rate_login_failure_window",
         "embed_batch",
         "chunk_target_chars",
@@ -224,7 +225,6 @@ class Settings(BaseSettings):
         "conversation_window_size",
         "message_replay_limit",
         "query_vector_cache_ttl",
-        "grounded_response_cache_ttl",
         "kb_ingest_page_concurrency",
         "kb_ingest_source_concurrency",
         "kb_ingest_stuck_minutes",
