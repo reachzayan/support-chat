@@ -1,4 +1,4 @@
-import { describe, expect, test } from "vitest"
+import { afterEach, describe, expect, test, vi } from "vitest"
 
 import nextConfig from "../next.config"
 import { staffDocumentCsp } from "./proxy"
@@ -13,6 +13,14 @@ const headerValue = (
 }
 
 describe("security headers", () => {
+  afterEach(() => vi.unstubAllEnvs())
+
+  test("staff CSP permits its configured secure WebSocket origin", () => {
+    vi.stubEnv("NEXT_PUBLIC_STAFF_APP_ORIGIN", "https://staff.example.test")
+
+    expect(staffDocumentCsp("test-nonce")).toContain("wss://staff.example.test")
+  })
+
   test("widget CSP is not baked at build time and staff CSP uses nonces", async () => {
     const rules = await nextConfig.headers!()
     expect(headerValue(rules, "/widget", "Content-Security-Policy")).toBeUndefined()

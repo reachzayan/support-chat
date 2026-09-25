@@ -68,6 +68,8 @@ const IDLE_TICK_MS = 15_000
 const ENTER = { opacity: 0, y: 16 } as const
 const SETTLED = { opacity: 1, y: 0 } as const
 const ENTER_TRANSITION = { duration: 0.18, ease: [0.22, 1, 0.36, 1] } as const
+const centeredPillClass =
+  "mx-auto w-fit max-w-[92%] rounded-full bg-ice-2 px-3 py-1 text-center text-[11px] leading-5 text-mute"
 
 const MotionScrollerItem = motion.create(MessageScrollerItem)
 
@@ -377,6 +379,12 @@ const TranscriptMessage = ({
   )
 }
 
+const CenteredPill = ({ children }: { children: ReactNode }) => (
+  <Marker className={centeredPillClass}>
+    <MarkerContent className="text-center">{children}</MarkerContent>
+  </Marker>
+)
+
 const TranscriptRow = ({
   line,
   selfRole,
@@ -389,9 +397,7 @@ const TranscriptRow = ({
   if (isCenteredNotice(line)) {
     return (
       <AnimatedItem messageId={String(line.id)}>
-        <Marker variant="separator">
-          <MarkerContent>{line.body}</MarkerContent>
-        </Marker>
+        <CenteredPill>{line.body}</CenteredPill>
       </AnimatedItem>
     )
   }
@@ -404,9 +410,7 @@ const TranscriptRow = ({
 
 const DayMarker = ({ id, label }: { id: string; label: string }) => (
   <AnimatedItem messageId={id}>
-    <Marker variant="separator">
-      <MarkerContent>{label}</MarkerContent>
-    </Marker>
+    <CenteredPill>{label}</CenteredPill>
   </AnimatedItem>
 )
 
@@ -437,9 +441,7 @@ const TranscriptExtras = ({
   <>
     {notice === undefined ? null : (
       <AnimatedItem messageId="notice">
-        <Marker variant="separator">
-          <MarkerContent>{notice}</MarkerContent>
-        </Marker>
+        <CenteredPill>{notice}</CenteredPill>
       </AnimatedItem>
     )}
     {showIdleWarning ? (

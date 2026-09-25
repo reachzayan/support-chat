@@ -24,6 +24,22 @@ const marketingHost = () => {
 
 const apiOrigin = () => process.env.API_ORIGIN ?? "http://127.0.0.1:8000"
 
+const staffWebSocketOrigin = () => {
+  const configured = process.env.NEXT_PUBLIC_STAFF_APP_ORIGIN
+  if (!configured) {
+    return ""
+  }
+  try {
+    const url = new URL(configured)
+    if (url.protocol !== "http:" && url.protocol !== "https:") {
+      return ""
+    }
+    return `${url.protocol === "https:" ? "wss:" : "ws:"}//${url.host}`
+  } catch {
+    return ""
+  }
+}
+
 const cspServiceSecret = () => process.env.WIDGET_CSP_SERVICE_SECRET ?? ""
 
 const clientIp = (request: NextRequest) => {
@@ -87,7 +103,7 @@ export const staffDocumentCsp = (nonce: string, api = apiOrigin()) => {
     "base-uri 'self'",
     "form-action 'self'",
     "font-src 'self'",
-    `connect-src 'self' ${api} ${ws}`,
+    `connect-src 'self' ${api} ${ws} ${staffWebSocketOrigin()}`,
     "frame-ancestors 'none'",
   ]
     .join("; ")

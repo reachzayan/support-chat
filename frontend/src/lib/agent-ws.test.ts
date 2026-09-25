@@ -1,4 +1,4 @@
-import { describe, expect, test, vi } from "vitest"
+import { afterEach, describe, expect, test, vi } from "vitest"
 
 import { agentSocketUrl, createAgentSocket } from "./agent-ws"
 
@@ -41,6 +41,19 @@ const CONVO = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
 const CLIENT = "20000000-0000-4000-8000-000000000001"
 
 describe("agent socket client", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs()
+    vi.unstubAllGlobals()
+  })
+
+  test("production agent socket uses the staff hostname, not the build-time API origin", () => {
+    vi.stubEnv("NODE_ENV", "production")
+    vi.stubEnv("NEXT_PUBLIC_API_ORIGIN", "http://127.0.0.1:8000")
+    vi.stubGlobal("window", { location: { origin: "https://staff.example.test" } })
+
+    expect(agentSocketUrl()).toBe("wss://staff.example.test/ws/agent")
+  })
+
   test("agentSocketUrl treats a blank origin as the local default", () => {
     expect(agentSocketUrl("")).toBe("ws://127.0.0.1:8000/ws/agent")
     expect(agentSocketUrl("   ")).toBe("ws://127.0.0.1:8000/ws/agent")

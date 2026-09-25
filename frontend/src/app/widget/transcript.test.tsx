@@ -46,6 +46,10 @@ const RESET_RESUME_LINES = [
   { id: 8, role: "system", body: "This chat was reset by the visitor." },
   { id: 9, role: "system", body: "This chat has been resumed." },
 ]
+const MULTI_DAY_LINES = [
+  { id: 10, role: "visitor", body: "First day", created_at: "2026-01-01T12:00:00Z" },
+  { id: 11, role: "visitor", body: "Second day", created_at: "2026-01-02T12:00:00Z" },
+]
 
 describe("transcript typing indicator", () => {
   beforeEach(() => {
@@ -74,10 +78,10 @@ describe("transcript typing indicator", () => {
     expect(screen.queryByText("Agent")).not.toBeInTheDocument()
     expect(
       screen.getByText("This chat was reset by the visitor.").closest('[data-slot="marker"]'),
-    ).toHaveAttribute("data-variant", "separator")
+    ).toHaveClass("rounded-full", "w-fit", "bg-ice-2", "text-[11px]")
     expect(
       screen.getByText("This chat has been resumed.").closest('[data-slot="marker"]'),
-    ).toHaveAttribute("data-variant", "separator")
+    ).toHaveClass("rounded-full", "w-fit", "bg-ice-2", "text-[11px]")
   })
 
   test("keeps lifecycle notices centered while treating other system copy as an agent message", () => {
@@ -94,10 +98,22 @@ describe("transcript typing indicator", () => {
     expect(
       screen.getByText("Your application is being reviewed.").closest('[data-slot="message"]'),
     ).toHaveAttribute("data-align", "start")
-    expect(screen.getByText("A human has joined.").closest('[data-slot="marker"]')).toHaveAttribute(
-      "data-variant",
-      "separator",
+    expect(screen.getByText("A human has joined.").closest('[data-slot="marker"]')).toHaveClass(
+      "rounded-full",
+      "w-fit",
+      "bg-ice-2",
     )
+  })
+
+  test("day labels use the same compact pill treatment", () => {
+    renderWithProviders(<Transcript lines={MULTI_DAY_LINES} />)
+
+    const markers = document.querySelectorAll('[data-slot="marker"]')
+    expect(markers).toHaveLength(2)
+    for (const marker of markers) {
+      expect(marker).toHaveClass("rounded-full", "w-fit", "bg-ice-2", "text-[11px]")
+      expect(marker).not.toHaveAttribute("data-variant", "separator")
+    }
   })
 
   test("keeps paragraph breaks in agent replies", () => {

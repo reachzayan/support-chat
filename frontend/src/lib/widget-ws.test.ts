@@ -1,6 +1,6 @@
-import { describe, expect, test, vi } from "vitest"
+import { afterEach, describe, expect, test, vi } from "vitest"
 
-import { createVisitorSocket } from "./widget-ws"
+import { createVisitorSocket, visitorSocketUrl } from "./widget-ws"
 
 class FakeSocket {
   static instances: FakeSocket[] = []
@@ -37,6 +37,19 @@ const emitMessage = (socket: FakeSocket | undefined, id: number, body: string) =
 }
 
 describe("visitor socket client", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs()
+    vi.unstubAllGlobals()
+  })
+
+  test("production visitor socket uses the widget hostname, not the build-time API origin", () => {
+    vi.stubEnv("NODE_ENV", "production")
+    vi.stubEnv("NEXT_PUBLIC_API_ORIGIN", "http://127.0.0.1:8000")
+    vi.stubGlobal("window", { location: { origin: "https://widget.example.test" } })
+
+    expect(visitorSocketUrl()).toBe("wss://widget.example.test/ws/visitor")
+  })
+
   test("reconnects after cursor 12 and retries one unacked client id once", async () => {
     FakeSocket.instances = []
     vi.stubGlobal("WebSocket", FakeSocket)
