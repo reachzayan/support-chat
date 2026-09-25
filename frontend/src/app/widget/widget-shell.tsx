@@ -73,7 +73,7 @@ type WidgetShellProps = {
 }
 
 const ICON_BUTTON =
-  "bg-white/75 text-ink shadow-[0_6px_20px_rgba(13,31,58,0.10)] backdrop-blur-xl hover:bg-white hover:shadow-[0_10px_24px_rgba(13,31,58,0.14)] focus-visible:ring-steel flex size-10 cursor-pointer items-center justify-center rounded-full transition-[background-color,box-shadow,transform] duration-200 ease-out focus-visible:ring-2 focus-visible:outline-none active:scale-95"
+  "bg-white/75 text-ink backdrop-blur-xl hover:bg-white focus-visible:ring-steel flex size-10 cursor-pointer items-center justify-center rounded-full transition-[background-color,transform] duration-200 ease-out focus-visible:ring-2 focus-visible:outline-none active:scale-95"
 
 export const WidgetShell = ({
   name,
@@ -113,7 +113,7 @@ export const WidgetShell = ({
       aria-label={displayName}
       onKeyDown={handleKeyDown}
       onCancel={handleCancel}
-      className="widget-enter text-ink m-0 flex h-dvh max-h-none w-full max-w-none flex-col overflow-hidden rounded-[30px] border border-white/70 bg-white/78 p-0 font-sans shadow-[0_24px_70px_rgba(13,31,58,0.20)] backdrop-blur-2xl outline-none"
+      className="widget-enter text-ink m-0 flex h-dvh max-h-none w-full max-w-none flex-col overflow-hidden rounded-[30px] border border-white/70 bg-white/78 p-0 font-sans backdrop-blur-2xl outline-none"
     >
       <header className="relative z-10 px-3 pt-3 pb-2">
         <WidgetTopbar
@@ -126,7 +126,7 @@ export const WidgetShell = ({
       </header>
       <main className="flex min-h-0 min-w-0 flex-1 flex-col">{children}</main>
       <footer className="text-mute flex items-center justify-center px-4 pt-1 pb-3 text-center">
-        <p className="rounded-full bg-white/65 px-3 py-1 text-[11px] leading-4 shadow-[0_4px_16px_rgba(13,31,58,0.05)] backdrop-blur-lg">
+        <p className="rounded-full bg-white/65 px-3 py-1 text-[11px] leading-4 backdrop-blur-lg">
           AI responses may be incorrect. Do not share sensitive information.
         </p>
       </footer>
@@ -161,7 +161,7 @@ const WidgetTopbar = ({
         transition={
           reducedMotion ? { duration: 0 } : { type: "spring", stiffness: 360, damping: 32 }
         }
-        className="mx-auto max-w-[240px] min-w-0 rounded-[22px] bg-white/80 px-4 py-2 shadow-[0_10px_28px_rgba(13,31,58,0.13)] backdrop-blur-xl"
+        className="mx-auto max-w-[240px] min-w-0 rounded-[22px] bg-white/80 px-4 py-2 backdrop-blur-xl"
       >
         <div className="min-w-0 text-center">
           <h1 className="heading truncate text-sm">{name}</h1>

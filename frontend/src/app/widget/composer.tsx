@@ -45,7 +45,7 @@ export const Composer = ({ disabled, sending, onSend }: ComposerProps) => {
         transition={
           reducedMotion ? { duration: 0 } : { type: "spring", stiffness: 380, damping: 32 }
         }
-        className="focus-within:border-steel/45 focus-within:ring-steel/25 flex min-h-14 items-center gap-2 rounded-lg border border-white/80 bg-white/80 px-3 py-2 shadow-[0_10px_30px_rgba(13,31,58,0.12)] backdrop-blur-xl transition-[border-color,box-shadow] duration-200 ease-out focus-within:ring-4"
+        className="focus-within:border-steel/45 focus-within:ring-steel/25 flex min-h-14 items-center gap-2 rounded-lg border border-white/80 bg-white/80 px-3 py-2 backdrop-blur-xl transition-[border-color,box-shadow] duration-200 ease-out focus-within:ring-4"
       >
         <Input
           id="supportchat-message"
@@ -63,7 +63,7 @@ export const Composer = ({ disabled, sending, onSend }: ComposerProps) => {
           type="submit"
           aria-label="Send"
           disabled={!canSend}
-          className="widget-send-button border-steel/15 bg-ice-2 text-navy hover:!text-navy focus-visible:ring-steel/30 flex size-11 shrink-0 rounded-full border shadow-[0_6px_16px_rgba(36,86,160,0.14)] hover:!bg-[#e6eefc] focus-visible:ring-4 disabled:opacity-45"
+          className="widget-send-button border-steel/15 bg-ice-2 text-navy hover:!text-navy focus-visible:ring-steel/30 flex size-10 shrink-0 rounded-full border hover:!bg-[#e6eefc] focus-visible:ring-4 disabled:opacity-45"
         >
           <ArrowUp aria-hidden="true" className="size-5" strokeWidth={2.4} />
           <span className="sr-only">Send</span>
