@@ -659,11 +659,12 @@ class ConversationService:
         self, conversation_id: UUID, now: datetime | None = None
     ) -> CommandResult | None:
         moment = now or datetime.now(UTC)
-        conversation = await self._conversations.lock_by_id(conversation_id)
+        conversation, site = await self._lock_site_then_conversation(conversation_id)
+        if conversation is None:
+            return None
         if not await self._idle_due(conversation, moment):
             await self._session.commit()
             return None
-        site = await self._sites.get_by_id(conversation.site_id)
         site_key = site.key if site is not None else ""
         self._apply_idle_close(conversation, moment)
         await self._session.commit()
@@ -1191,7 +1192,7 @@ class ConversationService:
     async def _release_generation(self, conversation_id: UUID, generation_id: UUID) -> None:
         try:
             await self._session.rollback()
-            conversation = await self._conversations.lock_by_id(conversation_id)
+            conversation, _site = await self._lock_site_then_conversation(conversation_id)
             if conversation is None or conversation.active_generation_id != generation_id:
                 await self._session.commit()
                 return
@@ -1211,15 +1212,31 @@ class ConversationService:
     async def _lock_finalize_context(
         self, conversation_id: UUID, site_id: UUID
     ) -> tuple[Conversation | None, Site | None, str]:
-        site = await self._sites.lock_by_id(site_id)
-        cached = await self._conversations.get_by_id(conversation_id)
-        if cached is not None:
-            self._session.expire(cached)
-        conversation = await self._conversations.lock_by_id(conversation_id)
+        conversation, site = await self._lock_site_then_conversation(
+            conversation_id, site_id=site_id
+        )
         if conversation is None:
             return None, None, ""
         site_key = site.key if site is not None else ""
         return conversation, site, site_key
+
+    async def _lock_site_then_conversation(
+        self, conversation_id: UUID, *, site_id: UUID | None = None
+    ) -> tuple[Conversation | None, Site | None]:
+        resolved_site_id = site_id
+        if resolved_site_id is None:
+            probe = await self._conversations.get_by_id(conversation_id)
+            if probe is None:
+                return None, None
+            resolved_site_id = probe.site_id
+        site = await self._sites.lock_by_id(resolved_site_id)
+        if site is None:
+            return None, None
+        cached = await self._conversations.get_by_id(conversation_id)
+        if cached is not None:
+            self._session.expire(cached)
+        conversation = await self._conversations.lock_by_id(conversation_id)
+        return conversation, site
 
     async def replay(
         self, conversation_id: UUID, cursor: int | None
@@ -1399,20 +1416,16 @@ class ConversationService:
     async def _lock_visitor_conversation(
         self, conversation_id: UUID, visitor_id: UUID, parent_origin: str
     ) -> tuple[Conversation, str]:
-        conversation = await self._conversations.lock_by_id(conversation_id)
-        if conversation is None or conversation.visitor_id != visitor_id:
+        conversation, site = await self._lock_site_then_conversation(conversation_id)
+        if conversation is None or site is None or conversation.visitor_id != visitor_id:
             raise CommandError("invalid")
-        site = await self._sites.get_by_id(conversation.site_id)
-        if site is None or parent_origin not in site.allowed_origins:
+        if parent_origin not in site.allowed_origins:
             raise CommandError("origin_revoked")
         return conversation, site.key
 
     async def _lock_staff_conversation(self, conversation_id: UUID) -> tuple[Conversation, str]:
-        conversation = await self._conversations.lock_by_id(conversation_id)
-        if conversation is None:
-            raise CommandError("invalid")
-        site = await self._sites.get_by_id(conversation.site_id)
-        if site is None:
+        conversation, site = await self._lock_site_then_conversation(conversation_id)
+        if conversation is None or site is None:
             raise CommandError("invalid")
         return conversation, site.key
 
