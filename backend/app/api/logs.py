@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 from uuid import UUID
 
-from fastapi import APIRouter, Query, Request
+from fastapi import APIRouter, Query
 from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -36,11 +36,23 @@ class AppLogListOut(BaseModel):
 class ClientLogIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    level: str = Field(default="error", max_length=16)
-    event: str = Field(min_length=1, max_length=128)
-    message: str = Field(min_length=1, max_length=4000)
-    detail: dict[str, Any] | None = None
-    logger_name: str = Field(default="frontend", max_length=128)
+    event: Literal["ui_window_error", "ui_unhandled_rejection"]
+    error_class: Literal[
+        "Error",
+        "TypeError",
+        "ReferenceError",
+        "SyntaxError",
+        "RangeError",
+        "URIError",
+        "EvalError",
+        "AggregateError",
+        "DOMException",
+        "AbortError",
+        "NetworkError",
+        "UnhandledRejection",
+    ] = "Error"
+    line: int | None = Field(default=None, ge=0, le=1_000_000)
+    column: int | None = Field(default=None, ge=0, le=1_000_000)
 
 
 def _to_out(row) -> AppLogOut:
@@ -89,21 +101,27 @@ async def dump_logs(session: SessionDep, _admin: CurrentAdmin) -> PlainTextRespo
 @router.post("/api/logs/client", response_model=AppLogOut, status_code=201)
 async def client_log(
     payload: ClientLogIn,
-    request: Request,
     session: SessionDep,
     staff: CurrentUser,
 ) -> AppLogOut:
-    detail = dict(payload.detail or {})
-    detail.setdefault("path", request.headers.get("referer"))
+    detail: dict[str, Any] = {"error_class": payload.error_class}
+    if payload.line is not None:
+        detail["line"] = payload.line
+    if payload.column is not None:
+        detail["column"] = payload.column
     detail["reported_by_user_id"] = str(staff.id)
     detail["reported_by_is_admin"] = staff.is_admin
     row = await record_app_log(
         session,
-        level=payload.level,
+        level="error",
         source="frontend",
-        logger_name=payload.logger_name or "frontend",
+        logger_name="frontend",
         event=payload.event,
-        message=payload.message,
+        message=(
+            "Unhandled window error"
+            if payload.event == "ui_window_error"
+            else "Unhandled promise rejection"
+        ),
         detail=detail,
     )
     await session.commit()

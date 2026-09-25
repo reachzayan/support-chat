@@ -187,20 +187,15 @@ def test_frontend_client_log_endpoint_accepts_staff_errors(client: TestClient) -
         "/api/logs/client",
         headers=_auth(staff),
         json={
-            "level": "error",
             "event": "ui_unhandled_rejection",
-            "message": "Failed to load knowledge sources",
-            "detail": {
-                "path": "/admin/knowledge",
-                "error_class": "TypeError",
-                "stack": "TypeError: failed\n    at loadSources",
-                "password": "nope",
-            },
+            "error_class": "TypeError",
         },
     )
     assert response.status_code == 201
     body = response.json()
     assert body["event"] == "ui_unhandled_rejection"
+    assert body["message"] == "Unhandled promise rejection"
+    assert body["detail"]["error_class"] == "TypeError"
     assert "password" not in (body.get("detail") or {})
 
     admin = _login_admin(client)
@@ -216,10 +211,9 @@ def test_frontend_client_log_rejects_unknown_fields(client: TestClient) -> None:
         "/api/logs/client",
         headers=_auth(staff),
         json={
-            "level": "error",
             "event": "ui_window_error",
-            "message": "Error",
-            "stack": "should-not-be-accepted",
+            "error_class": "Error",
+            "detail": {"stack": "should-not-be-accepted"},
         },
     )
     assert response.status_code == 422
