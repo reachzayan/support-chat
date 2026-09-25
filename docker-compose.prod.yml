@@ -56,6 +56,8 @@ services:
       APP_ENV: production
       DATABASE_URL: postgresql+asyncpg://${MIGRATION_DB_USER:?MIGRATION_DB_USER is required}:${MIGRATION_DB_PASSWORD:?MIGRATION_DB_PASSWORD is required}@postgres:5432/${POSTGRES_DB:?POSTGRES_DB is required}
       MIGRATION_DATABASE_URL: postgresql+asyncpg://${MIGRATION_DB_USER:?MIGRATION_DB_USER is required}:${MIGRATION_DB_PASSWORD:?MIGRATION_DB_PASSWORD is required}@postgres:5432/${POSTGRES_DB:?POSTGRES_DB is required}
+    volumes:
+      - ${REDIS_TLS_DIR:-./deploy/redis-tls}/ca.crt:/run/secrets/redis-ca.crt:ro
 
   worker:
     restart: unless-stopped

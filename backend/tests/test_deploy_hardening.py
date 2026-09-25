@@ -51,6 +51,20 @@ def test_production_redis_uses_acl_app_identity() -> None:
     assert "rediss://app:" in _read("backend/.env.example")
 
 
+def test_migrate_service_mounts_redis_ca_like_backend() -> None:
+    """Prod migrate loads rediss:// from .env.prod; without the CA mount the
+    shared entrypoint times out on Redis and never runs Alembic."""
+    compose = _read("docker-compose.prod.yml")
+    migrate_block = compose.split("migrate:", 1)[1].split("\n  worker:", 1)[0]
+    assert "/run/secrets/redis-ca.crt:ro" in migrate_block
+
+
+def test_entrypoint_skips_redis_wait_for_migrate_command() -> None:
+    entrypoint = _read("backend/docker/entrypoint.sh")
+    assert "migrate.sh" in entrypoint
+    assert "Waiting for Redis..." in entrypoint
+
+
 def test_deploy_workflows_pin_the_worker_service_list() -> None:
     for relative in (".github/workflows/ci-cd.yml", ".github/workflows/deploy-dev.yml"):
         workflow = _read(relative)
