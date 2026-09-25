@@ -266,13 +266,16 @@ async def _run_visitor_command(
     assigned = None
     async with session_maker()() as session:
         assigned = await ConversationService(session).assigned_agent_view(result.conversation)
-    await connection_manager.send_state(websocket, result.conversation, assigned)
+    # Deliver committed rows before the direct state frame so a later send
+    # failure cannot drop the socket before the visitor sees new messages.
     if not result.duplicate:
         await connection_manager.after_commit(
             result.conversation,
             result.site_key,
             result.message.id if result.message is not None else None,
         )
+        await connection_manager.catch_up_socket(websocket)
+    await connection_manager.send_state(websocket, result.conversation, assigned)
     if kind == "prechat":
         await connection_manager.send_prechat_accepted(
             websocket,

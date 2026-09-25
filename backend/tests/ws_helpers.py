@@ -1,4 +1,6 @@
+import concurrent.futures
 import json
+import time
 import uuid
 from collections.abc import Callable, Iterator
 from typing import Any
@@ -259,15 +261,28 @@ def collect_until(
     websocket: Any,
     done: Callable[[list[dict[str, Any]]], bool],
     limit: int = 40,
+    timeout_seconds: float = 5.0,
 ) -> list[dict[str, Any]]:
     frames: list[dict[str, Any]] = []
-    while not done(frames) and len(frames) < limit:
-        try:
-            frames.append(websocket.receive_json())
-        except WebSocketDisconnect as exc:
-            raise AssertionError(
-                f"socket closed code={exc.code} reason={exc.reason!r} after {frames!r}"
-            ) from exc
+    deadline = time.monotonic() + timeout_seconds
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+        while not done(frames) and len(frames) < limit:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise AssertionError(
+                    f"timed out after {timeout_seconds}s waiting for frames; got {frames!r}"
+                )
+            future = pool.submit(websocket.receive_json)
+            try:
+                frames.append(future.result(timeout=remaining))
+            except concurrent.futures.TimeoutError as exc:
+                raise AssertionError(
+                    f"timed out after {timeout_seconds}s waiting for frames; got {frames!r}"
+                ) from exc
+            except WebSocketDisconnect as exc:
+                raise AssertionError(
+                    f"socket closed code={exc.code} reason={exc.reason!r} after {frames!r}"
+                ) from exc
     return frames
 
 

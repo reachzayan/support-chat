@@ -1,5 +1,5 @@
 import uuid
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import CancelledError, ThreadPoolExecutor
 
 import pytest
 from fastapi.testclient import TestClient
@@ -314,8 +314,14 @@ def test_visitor_escalate_frame_stays_with_the_bot(
 ) -> None:
     ctx = _boot(client)
     conversation_id = uuid.UUID(ctx["conversation_id"])
+    keep_helping = keep_helping_line(DEMO_NAME)
+    offered: list[dict] = []
 
-    with client.websocket_connect("/ws/visitor", headers={"Origin": WIDGET_ORIGIN}) as visitor:
+    # Starlette's TestClient portal can CancelledError on close after fanout;
+    # keep assertions outside so a cleanup race cannot hide the product check.
+    socket = client.websocket_connect("/ws/visitor", headers={"Origin": WIDGET_ORIGIN})
+    visitor = socket.__enter__()
+    try:
         auth_visitor(visitor, ctx["bootstrap_token"])
         collect_until(visitor, lambda frames: any(frame.get("type") == "state" for frame in frames))
         visitor.send_json(
@@ -336,7 +342,7 @@ def test_visitor_escalate_frame_stays_with_the_bot(
         )
 
         visitor.send_json({"v": 1, "type": "escalate"})
-        keep_helping = keep_helping_line(DEMO_NAME)
+        visitor.send_json({"v": 1, "type": "heartbeat"})
         offered = collect_until(
             visitor,
             lambda frames: any(
@@ -344,10 +350,15 @@ def test_visitor_escalate_frame_stays_with_the_bot(
                 for frame in frames
             ),
         )
+        assert all(frame.get("state") != "queued" for frame in frames_of_type(offered, "state"))
+    finally:
+        try:
+            socket.__exit__(None, None, None)
+        except CancelledError:
+            pass
 
     assert conversation_state(conversation_id) == "bot"
     assert message_count(conversation_id, role="system", body=keep_helping) == 1
-    assert all(frame.get("state") != "queued" for frame in frames_of_type(offered, "state"))
 
 
 def test_join_inserts_named_system_row_and_visitor_message_does_not_create_bot_rows(
