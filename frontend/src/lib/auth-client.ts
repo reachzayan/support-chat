@@ -66,36 +66,63 @@ export const login = async (email: string, password: string) => {
   return body.user
 }
 
+const fetchRefresh = async (): Promise<RefreshSessionResult> => {
+  try {
+    const response = await fetch("/auth/refresh", {
+      method: "POST",
+      credentials: "include",
+      headers: csrfHeaders(),
+    })
+    if (response.status === 401) {
+      accessToken = null
+      return { status: "unauthenticated" }
+    }
+    if (!response.ok) {
+      return { status: "unavailable" }
+    }
+    const body = (await response.json()) as LoginResponse
+    accessToken = body.access_token
+    return { status: "authenticated", user: body.user }
+  } catch {
+    return { status: "unavailable" }
+  }
+}
+
+const withRefreshLock = async (): Promise<RefreshSessionResult> => {
+  const locks = navigator.locks
+  if (locks === undefined) {
+    return fetchRefresh()
+  }
+  return locks.request("supportchat-refresh", fetchRefresh)
+}
+
 export const refreshSession = async (): Promise<RefreshSessionResult> => {
   if (refreshInFlight !== null) {
     return refreshInFlight
   }
-  const pending = (async (): Promise<RefreshSessionResult> => {
-    try {
-      const response = await fetch("/auth/refresh", {
-        method: "POST",
-        credentials: "include",
-        headers: csrfHeaders(),
-      })
-      if (response.status === 401) {
-        accessToken = null
-        return { status: "unauthenticated" }
-      }
-      if (!response.ok) {
-        return { status: "unavailable" }
-      }
-      const body = (await response.json()) as LoginResponse
-      accessToken = body.access_token
-      return { status: "authenticated", user: body.user }
-    } catch {
-      return { status: "unavailable" }
-    }
-  })()
+  const pending = withRefreshLock()
   refreshInFlight = pending
   void pending.finally(() => {
     refreshInFlight = null
   })
   return pending
+}
+
+export const logout = async () => {
+  try {
+    await fetch("/auth/logout", {
+      method: "POST",
+      credentials: "include",
+      headers: csrfHeaders(),
+    })
+  } catch {
+    // Clear the local session even if the request fails.
+  }
+  accessToken = null
+}
+
+export const redirectToLogin = () => {
+  window.location.assign("/login")
 }
 
 export const fetchMe = async () => {

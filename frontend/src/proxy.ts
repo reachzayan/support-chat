@@ -156,3 +156,7 @@ export const proxy = async (request: NextRequest) => {
   }
   return applyWidgetCsp(request, NextResponse.next({ request: { headers: requestHeaders } }))
 }
+
+export const config = {
+  matcher: ["/((?!_next/static|_next/image|favicon.ico|supportchat.js|fonts/).*)"],
+}

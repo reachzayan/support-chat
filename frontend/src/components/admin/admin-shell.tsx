@@ -27,6 +27,7 @@ import {
 
 import { ClientErrorReporter } from "@/components/admin/client-error-reporter"
 import { StaffPageSkeleton } from "@/components/admin/loading-skeleton"
+import { SignOutButton } from "@/components/admin/sign-out-button"
 import { BrandMark } from "@/components/brand-mark"
 import { usePreferences } from "@/components/preferences-context"
 import { ThemeToggle } from "@/components/theme-toggle"
@@ -103,7 +104,7 @@ const AvatarMark = ({ initials }: { initials: string }) => (
     </span>
     <span
       aria-hidden="true"
-      className="border-sidebar absolute -right-0.5 -bottom-0.5 size-2 rounded-full border-2 bg-[#67B587]"
+      className="border-sidebar bg-steel absolute -right-0.5 -bottom-0.5 size-2 rounded-full border-2"
     />
   </span>
 )
@@ -128,7 +129,7 @@ const AdminSidebarLink = ({
         />
       }
       className={cn(
-        "text-sidebar-foreground/60 data-active:text-sidebar-foreground relative isolate h-11 rounded-[10px] px-3 text-sm font-semibold no-underline transition-[width,height,padding,colors] duration-300 ease-[cubic-bezier(0.32,0.72,0,1)] hover:bg-white/4.5 hover:text-sidebar-foreground/90 data-active:hover:bg-transparent",
+        "text-sidebar-foreground/60 data-active:text-sidebar-foreground relative isolate h-11 rounded-lg px-3 text-sm font-semibold no-underline transition-[width,height,padding,colors] duration-300 ease-[cubic-bezier(0.32,0.72,0,1)] hover:bg-white/4.5 hover:text-sidebar-foreground/90 data-active:hover:bg-transparent",
         collapsed && "size-8! justify-center gap-0 p-0!",
       )}
     >
@@ -138,7 +139,7 @@ const AdminSidebarLink = ({
           transition={NAV_SPRING}
           aria-hidden="true"
           className={cn(
-            "absolute inset-0 -z-10 rounded-[10px]",
+            "absolute inset-0 -z-10 rounded-lg",
             collapsed
               ? "bg-ember/15"
               : "from-ember/20 via-ember/8 bg-linear-to-r to-transparent ring-1 ring-white/5",
@@ -202,7 +203,7 @@ const AdminSidebarAccount = ({
                 aria-label={accountLabel}
                 data-active={active || undefined}
                 className={cn(
-                  "flex size-8 items-center justify-center rounded-[10px] no-underline outline-none transition-colors hover:bg-white/5 focus-visible:ring-2 focus-visible:ring-[#70B8FF]",
+                  "flex size-8 items-center justify-center rounded-lg no-underline outline-none transition-colors hover:bg-white/5 focus-visible:ring-2 focus-visible:ring-steel",
                   active && "bg-ember/15",
                 )}
               />
@@ -225,7 +226,7 @@ const AdminSidebarAccount = ({
         tooltip={displayName}
         isActive={active}
         render={<Link href="/admin/settings" aria-label={accountLabel} />}
-        className="text-sidebar-foreground rounded-[10px] px-2 no-underline hover:bg-white/5"
+        className="text-sidebar-foreground rounded-lg px-2 no-underline hover:bg-white/5"
       >
         <AvatarMark initials={initials} />
         <span className="grid min-w-0 flex-1 text-left text-xs">
@@ -244,7 +245,7 @@ const adminSidebarStyle = {
   "--sidebar-accent": "#1e212a",
   "--sidebar-accent-foreground": "#FFFFFF",
   "--sidebar-border": "transparent",
-  "--sidebar-ring": "#70B8FF",
+  "--sidebar-ring": "#2456A0",
 } as CSSProperties
 
 const AdminSidebarBrand = ({ collapsed }: { collapsed: boolean }) => (
@@ -258,7 +259,7 @@ const AdminSidebarBrand = ({ collapsed }: { collapsed: boolean }) => (
       href="/admin/inbox"
       aria-label="SupportChat admin home"
       className={cn(
-        "focus-visible:ring-sidebar-ring flex h-9 cursor-pointer items-center gap-3 overflow-hidden rounded-[10px] no-underline outline-none focus-visible:ring-2",
+        "focus-visible:ring-sidebar-ring flex h-9 cursor-pointer items-center gap-3 overflow-hidden rounded-lg no-underline outline-none focus-visible:ring-2",
         collapsed ? "size-8 justify-center gap-0" : "w-full",
       )}
     >
@@ -289,6 +290,13 @@ const AdminSidebarFooter = ({
       <ThemeToggle compact />
       <SidebarTrigger className="text-white/70 hover:bg-white/10 hover:text-white" />
     </div>
+    <SignOutButton
+      iconOnly={collapsed}
+      className={cn(
+        "text-white/70 hover:bg-white/10 hover:text-white",
+        collapsed ? "size-8 justify-center" : "w-full justify-start",
+      )}
+    />
     <SidebarMenu className={cn("w-full", collapsed && "w-auto items-center")}>
       <AdminSidebarAccount displayName={displayName} pathname={pathname} collapsed={collapsed} />
     </SidebarMenu>
@@ -402,7 +410,7 @@ export const AdminShell = ({ children }: { children: ReactNode }) => {
         <AdminSidebar displayName={user?.display_name ?? "Loading workspace"} />
         <SidebarInset className="flex h-svh min-h-0 min-w-0 flex-col overflow-hidden bg-[#14161b] p-2">
           <AdminUserContext.Provider value={user}>
-            <div className="bg-ice flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-2xl">
+            <div className="bg-ice flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-lg">
               {checkingSession ? <StaffPageSkeleton /> : frame}
             </div>
           </AdminUserContext.Provider>
