@@ -349,6 +349,11 @@ def _browser_guard_page_factory(allowed_hosts: set[str], guard: _CrawlGuard):
             )
 
         await page.route("**/*", guard_route)
+
+        async def close_web_socket(ws):
+            await ws.close()
+
+        await page.route_web_socket("**/*", close_web_socket)
         return page
 
     return guard_page
@@ -367,7 +372,15 @@ async def page_crawler(allowed_hosts: set[str]) -> AsyncIterator[CrawlerFn]:
         yield missing
         return
     _install_browser_sandbox_guards(BrowserManager, ManagedBrowser)
-    browser = BrowserConfig(browser_type="chromium", headless=True, user_agent=USER_AGENT)
+    browser = BrowserConfig(
+        browser_type="chromium",
+        headless=True,
+        user_agent=USER_AGENT,
+        extra_args=[
+            "--disable-features=ServiceWorker",
+            "--force-webrtc-ip-handling-policy=disable_non_proxied_udp",
+        ],
+    )
     crawler = AsyncWebCrawler(config=browser)
     await crawler.__aenter__()
     # Serialize browser navigations so one shared guard cannot race across pages.

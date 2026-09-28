@@ -1,6 +1,8 @@
 from collections.abc import Mapping
 from ipaddress import ip_address, ip_network
 
+from app.settings import Settings
+
 MAX_HEADER_LEN = 512
 MAX_HOPS = 8
 
@@ -73,3 +75,9 @@ def resolve_client_ip(
         if not _in_trusted(candidate, networks):
             return candidate
     return peer_ip
+
+
+def request_client_ip(
+    peer: str | None, headers: Mapping[str, str], settings: Settings
+) -> str | None:
+    return resolve_client_ip(peer, headers, settings.trusted_proxy_networks())

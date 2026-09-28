@@ -8,14 +8,14 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app.db import SessionDep
 from app.models.user import User
-from app.security.client_ip import resolve_client_ip
+from app.security.client_ip import request_client_ip
 from app.security.cookies import (
     REFRESH_COOKIE,
     clear_session_cookies,
     set_csrf_cookie,
     set_refresh_cookie,
 )
-from app.security.csrf import new_csrf_token, require_csrf
+from app.security.csrf import new_csrf_token, require_csrf, require_same_origin
 from app.security.deps import CurrentUser
 from app.services.auth_service import AuthFailed, AuthService
 from app.services.rate_limit import RateLimiter, RateLimitExceeded, RateLimitUnavailable
@@ -75,10 +75,10 @@ def _attach_session(response: Response, refresh_token: str, settings: Settings) 
 
 
 def _request_ip(request: Request, settings: Settings) -> str | None:
-    return resolve_client_ip(
+    return request_client_ip(
         request.client.host if request.client else None,
         request.headers,
-        [part.strip() for part in settings.trusted_proxy_cidrs.split(",") if part.strip()],
+        settings,
     )
 
 
@@ -105,6 +105,7 @@ async def login(
     session: SessionDep,
     settings: Annotated[Settings, Depends(get_settings)],
 ) -> SessionOut:
+    require_same_origin(request, settings)
     await _reserve_login_budget(request, settings, payload.email)
     service = AuthService(session, settings)
     try:
@@ -168,6 +169,7 @@ async def change_password(
     current_user: CurrentUser,
 ) -> dict[str, str]:
     require_csrf(request)
+    await _reserve_login_budget(request, settings, current_user.email)
     try:
         await AuthService(session, settings).change_password(
             current_user,
@@ -178,4 +180,5 @@ async def change_password(
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED, detail=LOGIN_FAILURE
         ) from None
+    await RateLimiter(settings).release_login(current_user.email, _request_ip(request, settings))
     return {"status": "ok"}
