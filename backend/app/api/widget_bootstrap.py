@@ -9,7 +9,7 @@ from pydantic import BaseModel, ConfigDict, ValidationError
 
 from app.chat.connection_manager import connection_manager, message_frame
 from app.db import SessionDep
-from app.security.client_ip import resolve_client_ip
+from app.security.client_ip import _as_ip, request_client_ip
 from app.security.widget_tokens import create_widget_token
 from app.services.conversation_service import CommandError, ConversationService
 from app.services.conversation_types import BootstrapResult
@@ -160,7 +160,7 @@ async def widget_frame_ancestors(request: Request, session: SessionDep) -> JSONR
     if isinstance(payload, JSONResponse):
         return payload
 
-    client_ip = request.headers.get("x-supportchat-client-ip")
+    client_ip = _as_ip(request.headers.get("x-supportchat-client-ip"))
     if not client_ip:
         client_ip = request.client.host if request.client else None
     try:
@@ -203,10 +203,10 @@ async def widget_bootstrap(request: Request, session: SessionDep) -> JSONRespons
 
     origin = request.headers.get("origin")
     settings = get_settings()
-    client_ip = resolve_client_ip(
+    client_ip = request_client_ip(
         request.client.host if request.client else None,
         request.headers,
-        [part.strip() for part in settings.trusted_proxy_cidrs.split(",") if part.strip()],
+        settings,
     )
     try:
         await RateLimiter(settings).hit_bootstrap(client_ip, payload.site_key)

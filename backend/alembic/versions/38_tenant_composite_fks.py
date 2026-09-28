@@ -152,3 +152,6 @@ def downgrade() -> None:
     op.drop_constraint("fk_kb_pages_source_site", "kb_pages", type_="foreignkey")
     op.drop_constraint("uq_kb_pages_id_site", "kb_pages", type_="unique")
     op.drop_constraint("uq_conversations_id_site", "conversations", type_="unique")
+    with op.get_context().autocommit_block():
+        op.execute("DROP INDEX CONCURRENTLY IF EXISTS uq_conversations_id_site")
+        op.execute("DROP INDEX CONCURRENTLY IF EXISTS uq_kb_pages_id_site")

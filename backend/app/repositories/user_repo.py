@@ -36,3 +36,11 @@ class UserRepository:
     async def increment_token_version(self, user: User) -> None:
         user.token_version += 1
         await self._session.flush()
+
+    async def token_state_for(self, ids: list[UUID]) -> dict[UUID, tuple[bool, int]]:
+        if not ids:
+            return {}
+        result = await self._session.execute(
+            select(User.id, User.is_active, User.token_version).where(User.id.in_(ids))
+        )
+        return {row.id: (bool(row.is_active), int(row.token_version)) for row in result.all()}

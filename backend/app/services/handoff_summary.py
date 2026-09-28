@@ -6,9 +6,9 @@ import time
 from uuid import UUID
 
 import structlog
-from anthropic import AsyncAnthropic
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.llm.bot_responder import BotResponder
 from app.llm.prompts import HANDOFF_SUMMARY_PROMPT
 from app.repositories.handoff_repo import HandoffRepository
 from app.repositories.message_repo import MessageRepository
@@ -103,10 +103,7 @@ async def _transcript_block(session: AsyncSession, conversation_id: UUID) -> str
 
 async def _call_haiku(prompt: str, *, model: str, timeout: float, attempt: int) -> str:
     settings = get_settings()
-    client_kwargs: dict = {"timeout": timeout, "max_retries": 0}
-    if settings.anthropic_api_key:
-        client_kwargs["api_key"] = settings.anthropic_api_key
-    client = AsyncAnthropic(**client_kwargs)
+    client = BotResponder._shared_anthropic_client().with_options(timeout=timeout, max_retries=0)
     section = f"handoff_summary_provider_{attempt}"
     started = time.perf_counter()
     record_trace(section, model=model, max_tokens=settings.haiku_max_tokens, prompt=prompt)
@@ -124,8 +121,6 @@ async def _call_haiku(prompt: str, *, model: str, timeout: float, attempt: int) 
         )
         log.info("provider_failure", error_class=type(exc).__name__, elapsed_ms=0)
         return ""
-    finally:
-        await client.close()
     parts: list[str] = []
     for block in response.content:
         text = getattr(block, "text", None)

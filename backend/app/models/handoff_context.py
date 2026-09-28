@@ -77,6 +77,13 @@ class HandoffContext(Base):
             "site_id",
             "created_at",
         ),
+        Index(
+            "ix_handoff_contexts_summary_queue",
+            "summary_status",
+            "summary_next_run_at",
+            "created_at",
+            postgresql_where=text("summary_status IN ('queued','running')"),
+        ),
     )
 
     id: Mapped[UUID] = mapped_column(

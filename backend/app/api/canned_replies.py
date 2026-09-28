@@ -70,6 +70,8 @@ def _http_error(exc: CannedReplyError) -> HTTPException:
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail="Provide at least one field to update.",
         )
+    if exc.code == "forbidden":
+        return HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
     if exc.code == "invalid_shortcut":
         return HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
@@ -119,10 +121,12 @@ async def list_canned_reply_library(
     "/api/canned-replies", response_model=CannedReplyOut, status_code=status.HTTP_201_CREATED
 )
 async def create_canned_reply(
-    payload: CannedReplyCreateIn, session: SessionDep, _staff: CurrentUser
+    payload: CannedReplyCreateIn, session: SessionDep, staff: CurrentUser
 ) -> CannedReplyOut:
     try:
-        reply = await CannedReplyService(session).create(**payload.model_dump())
+        reply = await CannedReplyService(session).create(
+            **payload.model_dump(), is_admin=staff.is_admin
+        )
     except CannedReplyError as exc:
         raise _http_error(exc) from exc
     return _out(reply)
@@ -130,12 +134,12 @@ async def create_canned_reply(
 
 @router.patch("/api/canned-replies/{response_id}", response_model=CannedReplyOut)
 async def patch_canned_reply(
-    response_id: UUID, payload: CannedReplyPatchIn, session: SessionDep, _staff: CurrentUser
+    response_id: UUID, payload: CannedReplyPatchIn, session: SessionDep, staff: CurrentUser
 ) -> CannedReplyOut:
     fields = set(payload.model_fields_set)
     try:
         reply = await CannedReplyService(session).update(
-            response_id, fields=fields, **payload.model_dump()
+            response_id, fields=fields, is_admin=staff.is_admin, **payload.model_dump()
         )
     except CannedReplyError as exc:
         raise _http_error(exc) from exc
@@ -143,8 +147,8 @@ async def patch_canned_reply(
 
 
 @router.delete("/api/canned-replies/{response_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_canned_reply(response_id: UUID, session: SessionDep, _staff: CurrentUser) -> None:
+async def delete_canned_reply(response_id: UUID, session: SessionDep, staff: CurrentUser) -> None:
     try:
-        await CannedReplyService(session).delete(response_id)
+        await CannedReplyService(session).delete(response_id, is_admin=staff.is_admin)
     except CannedReplyError as exc:
         raise _http_error(exc) from exc
