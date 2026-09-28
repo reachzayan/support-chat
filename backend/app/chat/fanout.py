@@ -85,8 +85,10 @@ async def _subscriber_loop() -> None:
             )
             pubsub = _subscriber_client.pubsub()
             await pubsub.subscribe(WAKEUP_CHANNEL)
-            async for message in pubsub.listen():
-                await _handle_wakeup_message(message)
+            while True:
+                message = await pubsub.get_message(timeout=15.0)
+                if message is not None:
+                    await _handle_wakeup_message(message)
         except asyncio.CancelledError:
             raise
         except Exception:

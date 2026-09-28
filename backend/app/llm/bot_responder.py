@@ -463,7 +463,7 @@ class BotResponder:
                 continue
             if not isinstance(text, str) or not text.strip():
                 continue
-            messages.append({"role": role, "content": text})
+            messages.append({"role": role, "content": redact_for_model(text)})
         messages.append(
             {
                 "role": "user",
@@ -512,7 +512,7 @@ class BotResponder:
                 continue
             if not isinstance(text, str) or not text.strip():
                 continue
-            messages.append({"role": role, "content": text})
+            messages.append({"role": role, "content": redact_for_model(text)})
         messages.append(
             {
                 "role": "user",
@@ -588,10 +588,13 @@ class BotResponder:
             raise RuntimeError("incomplete_provider_response")
         request_id = getattr(response, "_request_id", None)
         request_id_str = request_id if isinstance(request_id, str) else None
+        usage = getattr(response, "usage", None)
         log.info(
             "grounded_provider",
             request_id=request_id_str,
             document_count=len(documents),
+            cache_creation_input_tokens=getattr(usage, "cache_creation_input_tokens", 0) or 0,
+            cache_read_input_tokens=getattr(usage, "cache_read_input_tokens", 0) or 0,
         )
         started = time.perf_counter_ns()
         body, citations = extract_native_citations(list(response.content), documents)

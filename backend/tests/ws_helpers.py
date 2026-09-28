@@ -88,14 +88,16 @@ def insert_site(
         session.close()
 
 
-def insert_staff(email: str, display_name: str, password: str) -> uuid.UUID:
+def insert_staff(
+    email: str, display_name: str, password: str, *, is_admin: bool = False
+) -> uuid.UUID:
     session = next(sync_session())
     try:
         user = User(
             email=email,
             display_name=display_name,
             password_hash=hash_password(password),
-            is_admin=False,
+            is_admin=is_admin,
             is_active=True,
             token_version=0,
         )
@@ -252,7 +254,11 @@ def decode_widget_token(token: str) -> dict[str, Any]:
 
 
 def login_staff(client: TestClient, email: str = ALEX_EMAIL, password: str = ALEX_PASSWORD) -> str:
-    response = client.post("/auth/login", json={"email": email, "password": password})
+    response = client.post(
+        "/auth/login",
+        json={"email": email, "password": password},
+        headers={"Origin": STAFF_ORIGIN},
+    )
     assert response.status_code == 200, response.text
     return response.json()["access_token"]
 

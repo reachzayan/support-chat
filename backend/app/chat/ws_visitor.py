@@ -11,7 +11,7 @@ from starlette.websockets import WebSocketState
 from app.chat.connection_manager import FRAME_MAX, VisitorConnection, connection_manager
 from app.chat.state_machine import IllegalTransition
 from app.db import session_maker
-from app.security.client_ip import resolve_client_ip
+from app.security.client_ip import request_client_ip
 from app.security.surfaces import websocket_surface_allowed
 from app.security.widget_tokens import decode_widget_token
 from app.services.conversation_service import CommandError, ConversationService
@@ -21,17 +21,22 @@ log = structlog.get_logger("ws_visitor")
 
 router = APIRouter()
 MAX_MESSAGE_ID = (1 << 63) - 1
+IDLE_CHECK_SECONDS = 5.0
+IDLE_PING_AFTER_SECONDS = 20.0
+IDLE_CLOSE_SECONDS = 30.0
+ORIGIN_RECHECK_SECONDS = 10.0
+_bot_generation_tasks: set[asyncio.Task] = set()
 
 
 async def _idle_watch(websocket: WebSocket, last_seen: dict[str, float]) -> None:
     try:
         while True:
-            await asyncio.sleep(5)
+            await asyncio.sleep(IDLE_CHECK_SECONDS)
             idle = asyncio.get_running_loop().time() - last_seen["t"]
-            if idle >= 30:
+            if idle >= IDLE_CLOSE_SECONDS:
                 await websocket.close(code=1001)
                 return
-            if idle >= 20:
+            if idle >= IDLE_PING_AFTER_SECONDS:
                 await websocket.send_json({"v": 1, "type": "ping"})
     except Exception:
         return
@@ -75,12 +80,14 @@ async def visitor_socket(websocket: WebSocket) -> None:
         return
     connection_manager.register_visitor(connection)
     try:
-        await connection_manager.catch_up_socket(websocket, last_event_id=connection.last_event_id)
-    except Exception:
-        await websocket.send_json(
-            {"v": 1, "type": "state", "state": "prechat", "assigned_agent": None}
-        )
-    try:
+        try:
+            await connection_manager.catch_up_socket(
+                websocket, last_event_id=connection.last_event_id
+            )
+        except Exception:
+            await connection_manager.send_error(websocket, "unavailable")
+            await websocket.close(code=1011)
+            return
         await _visitor_loop(websocket, connection)
     finally:
         connection_manager.drop(websocket)
@@ -128,6 +135,7 @@ async def _authenticate_visitor(websocket: WebSocket, settings) -> VisitorConnec
         site_id=site_id,
         parent_origin=parent,
         last_event_id=last_event_id,
+        origin_checked_at=asyncio.get_running_loop().time(),
     )
 
 
@@ -193,7 +201,7 @@ async def _visitor_loop(websocket: WebSocket, connection: VisitorConnection) -> 
 async def _handle_visitor_ping_pong(
     websocket: WebSocket, connection: VisitorConnection, frame_type: str
 ) -> None:
-    if not await _parent_still_allowed(websocket, connection):
+    if not await _parent_still_allowed(websocket, connection, throttle=True):
         return
     if frame_type == "ping":
         await websocket.send_json({"v": 1, "type": "pong"})
@@ -222,7 +230,7 @@ async def _handle_visitor_frame(
         await _handle_visitor_ping_pong(websocket, connection, frame_type)
         return
     if frame_type == "heartbeat":
-        if not await _parent_still_allowed(websocket, connection):
+        if not await _parent_still_allowed(websocket, connection, throttle=True):
             return
         await connection_manager.catch_up_socket(websocket)
         return
@@ -247,12 +255,18 @@ async def _handle_visitor_frame(
     await connection_manager.send_error(websocket, "unknown_type")
 
 
-async def _parent_still_allowed(websocket: WebSocket, connection: VisitorConnection) -> bool:
+async def _parent_still_allowed(
+    websocket: WebSocket, connection: VisitorConnection, *, throttle: bool = False
+) -> bool:
+    now = asyncio.get_running_loop().time()
+    if throttle and (now - connection.origin_checked_at) < ORIGIN_RECHECK_SECONDS:
+        return True
     async with session_maker()() as session:
         allowed = await ConversationService(session).parent_origin_allowed(
             connection.site_id, connection.parent_origin
         )
     if allowed:
+        connection.origin_checked_at = now
         return True
     try:
         if websocket.application_state == WebSocketState.CONNECTED:
@@ -307,8 +321,14 @@ async def _run_visitor_command(
     elif kind == "message" and result.message is not None and result.client_message_id:
         await connection_manager.send_ack(websocket, result.client_message_id, result.message.id)
     if result.generation_id is not None:
-        with CancelScope(shield=True):
-            await _finish_bot_generation(websocket, result)
+        task = asyncio.create_task(_shielded_bot_generation(websocket, result))
+        _bot_generation_tasks.add(task)
+        task.add_done_callback(_bot_generation_tasks.discard)
+
+
+async def _shielded_bot_generation(websocket: WebSocket, result) -> None:
+    with CancelScope(shield=True):
+        await _finish_bot_generation(websocket, result)
 
 
 async def _finish_bot_generation(websocket: WebSocket, result) -> None:
@@ -319,12 +339,12 @@ async def _finish_bot_generation(websocket: WebSocket, result) -> None:
             bot = await ConversationService(session).run_bot_turn(
                 result.conversation.id, result.generation_id
             )
-    except Exception:
+    except Exception as exc:
         log.info(
             "bot_generation_failed",
             conversation_id=str(result.conversation.id),
             role="visitor",
-            length=0,
+            error_class=type(exc).__name__,
         )
     finally:
         await connection_manager.send_typing(websocket, False)
@@ -343,11 +363,7 @@ async def _finish_bot_generation(websocket: WebSocket, result) -> None:
 def _socket_ip(websocket: WebSocket) -> str | None:
     settings = get_settings()
     peer = websocket.client.host if websocket.client else None
-    return resolve_client_ip(
-        peer,
-        websocket.headers,
-        [part.strip() for part in settings.trusted_proxy_cidrs.split(",") if part.strip()],
-    )
+    return request_client_ip(peer, websocket.headers, settings)
 
 
 async def _dispatch_visitor(
