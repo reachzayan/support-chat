@@ -1,6 +1,7 @@
 import ipaddress
 import re
 import socket
+import time
 from urllib.parse import urljoin, urlparse, urlunparse
 from urllib.robotparser import RobotFileParser
 
@@ -13,7 +14,9 @@ MAX_SITEMAP_NODES = 5_000
 USER_AGENT = "SupportChatBot/1.0"
 MAX_BYTES = 1_000_000
 TIMEOUT = 10.0
+BODY_DEADLINE = 20.0
 MAX_HOPS = 3
+_NAT64 = ipaddress.ip_network("64:ff9b::/96")
 
 
 class FetchError(Exception):
@@ -23,14 +26,12 @@ class FetchError(Exception):
 
 
 def _blocked(address: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
-    return (
-        address.is_private
-        or address.is_loopback
-        or address.is_link_local
-        or address.is_multicast
-        or address.is_reserved
-        or str(address) == "169.254.169.254"
-    )
+    mapped = getattr(address, "ipv4_mapped", None)
+    if mapped is not None:
+        return _blocked(mapped)
+    if isinstance(address, ipaddress.IPv6Address) and address in _NAT64:
+        return True
+    return not address.is_global
 
 
 def _resolve_ips(host: str) -> list[ipaddress.IPv4Address | ipaddress.IPv6Address]:
@@ -56,6 +57,8 @@ def _validated_addresses(host: str) -> list[ipaddress.IPv4Address | ipaddress.IP
 def public_fetch_url(url: str):
     parsed = urlparse(url)
     if parsed.scheme != "https" or parsed.username or parsed.password or not parsed.hostname:
+        raise FetchError("ssrf")
+    if parsed.port not in (None, 443):
         raise FetchError("ssrf")
     host = parsed.hostname.casefold()
     try:
@@ -151,7 +154,10 @@ def _read_body(response: httpx.Response) -> bytes:
             pass
     chunks: list[bytes] = []
     total = 0
+    deadline = time.monotonic() + BODY_DEADLINE
     for piece in response.iter_bytes():
+        if time.monotonic() > deadline:
+            raise FetchError("http")
         total += len(piece)
         if total > MAX_BYTES:
             raise FetchError("too_large")

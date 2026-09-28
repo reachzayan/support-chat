@@ -51,19 +51,25 @@ type TranscriptProps = {
   notice?: string
   selfRole?: TranscriptSelfRole
   agentName?: string | null
+  companyName?: string | null
   logLabel?: string
   autoFollow?: boolean
   muted?: boolean
   conversationState?: TranscriptConversationState | null
 }
 
-type FeedItem = { kind: "day"; id: string; label: string } | { kind: "line"; line: TranscriptLine }
+type FeedItem =
+  | { kind: "day"; id: string; label: string }
+  | { kind: "time"; id: string; dateTime: string; label: string }
+  | { kind: "line"; line: TranscriptLine }
 
-const IDLE_WARNING = "This chat will be closed in one minute. Send any message to keep active."
+const IDLE_WARNING = "This chat will close in 1 minute. Send a message to keep active."
+const IDLE_CLOSED = "This chat has been closed automatically."
 
 const IDLE_WARN_MS = 4 * 60 * 1000
 const IDLE_CLOSE_MS = 5 * 60 * 1000
 const IDLE_TICK_MS = 15_000
+const TIME_GAP_MS = 10 * 60 * 1000
 
 const ENTER = { opacity: 0, y: 16 } as const
 const SETTLED = { opacity: 1, y: 0 } as const
@@ -77,18 +83,25 @@ export const isClosedNotice = (line: TranscriptLine) => {
   if (line.role !== "system") {
     return false
   }
-  return /^(this chat is closed|this chat was closed by .+)\.?$/i.test(line.body.trim())
+  const body = line.body.trim()
+  return (
+    /^(this chat is closed|this chat was closed by .+)\.?$/i.test(body) ||
+    body === IDLE_CLOSED ||
+    /^this chat has been closed automatically\.?$/i.test(body)
+  )
 }
 
 export const isCenteredNotice = (line: TranscriptLine) => {
   if (line.role !== "system") {
     return false
   }
+  const body = line.body.trim()
   return (
     isClosedNotice(line) ||
-    /^(a human has joined)\.?$/i.test(line.body.trim()) ||
-    /^you(?:'|’)re now chatting with .+\.?$/i.test(line.body.trim()) ||
-    /^(this chat was reset by the visitor|this chat has been resumed)\.?$/i.test(line.body.trim())
+    /^(a human has joined)\.?$/i.test(body) ||
+    /^you(?:'|’)re now chatting with .+\.?$/i.test(body) ||
+    /^(this chat was reset by the visitor|this chat has been resumed)\.?$/i.test(body) ||
+    /^this chat will close in 1 minute\. send a message to keep active\.?$/i.test(body)
   )
 }
 
@@ -102,12 +115,24 @@ const lastVisitorCreatedAt = (lines: TranscriptLine[]) => {
   return null
 }
 
+const hasPersistedIdleWarning = (lines: TranscriptLine[]) =>
+  lines.some(
+    (line) =>
+      line.role === "system" &&
+      /^this chat will close in 1 minute\. send a message to keep active\.?$/i.test(
+        line.body.trim(),
+      ),
+  )
+
 const isIdleWarningDue = (
   conversationState: TranscriptConversationState | null | undefined,
   lines: TranscriptLine[],
   nowMs: number,
 ) => {
   if (conversationState !== "bot" && conversationState !== "human") {
+    return false
+  }
+  if (hasPersistedIdleWarning(lines)) {
     return false
   }
   const createdAt = lastVisitorCreatedAt(lines)
@@ -140,9 +165,21 @@ const useIdleWarning = (
   return visible
 }
 
+const isStaffLine = (line: TranscriptLine) =>
+  line.role === "agent" ||
+  line.role === "admin" ||
+  line.role === "bot" ||
+  (line.role === "system" && !isCenteredNotice(line))
+
 const isSelfLine = (line: TranscriptLine, selfRole: TranscriptSelfRole) =>
-  line.role === selfRole ||
-  (selfRole === "agent" && (line.role === "agent" || line.role === "admin" || line.role === "bot"))
+  selfRole === "visitor" ? line.role === "visitor" : isStaffLine(line)
+
+const firstName = (displayName: string) => displayName.trim().split(/\s+/)[0] || displayName
+
+const companyLabel = (companyName: string | null | undefined) => {
+  const name = companyName?.trim()
+  return name ? name : null
+}
 
 const staffName = (line: TranscriptLine, agentName: string | null | undefined) => {
   const authored = line.author_user?.display_name?.trim()
@@ -156,24 +193,38 @@ const staffName = (line: TranscriptLine, agentName: string | null | undefined) =
   return null
 }
 
+const staffCompanyLabel = (
+  line: TranscriptLine,
+  agentName: string | null | undefined,
+  companyName: string | null | undefined,
+) => {
+  const person = staffName(line, agentName)
+  const company = companyLabel(companyName)
+  if (person && company) {
+    return `${firstName(person)} - ${company}`
+  }
+  if (person) {
+    return firstName(person)
+  }
+  return company
+}
+
 const roleLabel = (
   line: TranscriptLine,
   selfRole: TranscriptSelfRole,
   agentName: string | null | undefined,
+  companyName: string | null | undefined,
 ) => {
-  if (isCenteredNotice(line) || line.role === selfRole) {
+  if (isCenteredNotice(line)) {
     return null
   }
   if (line.role === "visitor") {
-    return "Visitor"
-  }
-  if (line.role === "bot") {
-    return "Assistant"
+    return selfRole === "visitor" ? null : "Visitor"
   }
   if (line.role === "agent" || line.role === "admin") {
-    return staffName(line, agentName) ?? (line.role === "admin" ? "Admin" : "Agent")
+    return staffCompanyLabel(line, agentName, companyName)
   }
-  return "Agent"
+  return companyLabel(companyName)
 }
 
 const parseStamp = (value: string | null | undefined) => {
@@ -236,19 +287,61 @@ const shouldShowDayMarkers = (lines: TranscriptLine[], now: Date) => {
   return !days.has(localDayKey(now))
 }
 
+const maybeDayItem = (
+  line: TranscriptLine,
+  day: string | null,
+  lastDay: string | null,
+  now: Date,
+): FeedItem | null => {
+  if (!day || day === lastDay || !line.created_at) {
+    return null
+  }
+  const label = formatDayLabel(line.created_at, now)
+  if (!label) {
+    return null
+  }
+  return { kind: "day", id: `day-${day}`, label }
+}
+
+const maybeTimeItem = (
+  line: TranscriptLine,
+  date: Date | null,
+  lastStampMs: number | null,
+): FeedItem | null => {
+  if (!date || !line.created_at || lastStampMs === null) {
+    return null
+  }
+  if (date.getTime() - lastStampMs < TIME_GAP_MS) {
+    return null
+  }
+  const label = formatMessageTime(line.created_at)
+  if (!label) {
+    return null
+  }
+  return { kind: "time", id: `time-${line.id}`, dateTime: line.created_at, label }
+}
+
 const buildFeed = (lines: TranscriptLine[], now: Date): FeedItem[] => {
   const showDays = shouldShowDayMarkers(lines, now)
   const items: FeedItem[] = []
   let lastDay: string | null = null
+  let lastStampMs: number | null = null
   for (const line of lines) {
     const date = parseStamp(line.created_at)
     const day = date ? localDayKey(date) : null
-    if (showDays && day && day !== lastDay && line.created_at) {
-      const label = formatDayLabel(line.created_at, now)
-      if (label) {
-        items.push({ kind: "day", id: `day-${day}`, label })
+    if (showDays) {
+      const dayItem = maybeDayItem(line, day, lastDay, now)
+      if (dayItem) {
+        items.push(dayItem)
+        lastDay = day
       }
-      lastDay = day
+    }
+    const timeItem = maybeTimeItem(line, date, lastStampMs)
+    if (timeItem) {
+      items.push(timeItem)
+    }
+    if (date) {
+      lastStampMs = date.getTime()
     }
     items.push({ kind: "line", line })
   }
@@ -348,12 +441,14 @@ const TranscriptMessage = ({
   line,
   selfRole,
   agentName,
+  companyName,
 }: {
   line: TranscriptLine
   selfRole: TranscriptSelfRole
   agentName?: string | null
+  companyName?: string | null
 }) => {
-  const label = roleLabel(line, selfRole, agentName)
+  const label = roleLabel(line, selfRole, agentName, companyName)
   const align = isSelfLine(line, selfRole) ? "end" : "start"
   const messageId = `transcript-msg-${line.id}`
   const outgoing = align === "end"
@@ -389,10 +484,12 @@ const TranscriptRow = ({
   line,
   selfRole,
   agentName,
+  companyName,
 }: {
   line: TranscriptLine
   selfRole: TranscriptSelfRole
   agentName?: string | null
+  companyName?: string | null
 }) => {
   if (isCenteredNotice(line)) {
     return (
@@ -403,7 +500,12 @@ const TranscriptRow = ({
   }
   return (
     <AnimatedItem messageId={String(line.id)} scrollAnchor={line.role === "visitor"}>
-      <TranscriptMessage line={line} selfRole={selfRole} agentName={agentName} />
+      <TranscriptMessage
+        line={line}
+        selfRole={selfRole}
+        agentName={agentName}
+        companyName={companyName}
+      />
     </AnimatedItem>
   )
 }
@@ -411,6 +513,17 @@ const TranscriptRow = ({
 const DayMarker = ({ id, label }: { id: string; label: string }) => (
   <AnimatedItem messageId={id}>
     <CenteredPill>{label}</CenteredPill>
+  </AnimatedItem>
+)
+
+const GapTimestamp = ({ id, dateTime, label }: { id: string; dateTime: string; label: string }) => (
+  <AnimatedItem messageId={id}>
+    <time
+      dateTime={dateTime}
+      className="text-mute mx-auto block text-center text-[11px] font-normal"
+    >
+      {label}
+    </time>
   </AnimatedItem>
 )
 
@@ -446,8 +559,8 @@ const TranscriptExtras = ({
     )}
     {showIdleWarning ? (
       <AnimatedItem messageId="idle-warning">
-        <Marker render={<output />}>
-          <MarkerContent>{IDLE_WARNING}</MarkerContent>
+        <Marker render={<output />} className={centeredPillClass}>
+          <MarkerContent className="text-center">{IDLE_WARNING}</MarkerContent>
         </Marker>
       </AnimatedItem>
     ) : null}
@@ -464,12 +577,42 @@ const TranscriptExtras = ({
   </>
 )
 
+const TranscriptFeedItem = ({
+  item,
+  selfRole,
+  agentName,
+  companyName,
+}: {
+  item: FeedItem
+  selfRole: TranscriptSelfRole
+  agentName?: string | null
+  companyName?: string | null
+}) => {
+  if (item.kind === "day") {
+    return <DayMarker id={item.id} label={item.label} />
+  }
+  if (item.kind === "time") {
+    return <GapTimestamp id={item.id} dateTime={item.dateTime} label={item.label} />
+  }
+  return (
+    <TranscriptRow
+      line={item.line}
+      selfRole={selfRole}
+      agentName={agentName}
+      companyName={companyName}
+    />
+  )
+}
+
+const feedItemKey = (item: FeedItem) => (item.kind === "line" ? String(item.line.id) : item.id)
+
 export const Transcript = ({
   lines,
   typing = false,
   notice,
   selfRole = "visitor",
   agentName = null,
+  companyName,
   logLabel,
   autoFollow = false,
   muted = false,
@@ -487,21 +630,20 @@ export const Transcript = ({
         <MessageScrollerViewport>
           <MessageScrollerContent
             aria-label={logLabel}
+            aria-live="polite"
+            aria-relevant="additions"
             aria-busy={typing || undefined}
             className="gap-5 px-5 pt-5 pb-14"
           >
-            {feed.map((item) =>
-              item.kind === "day" ? (
-                <DayMarker key={item.id} id={item.id} label={item.label} />
-              ) : (
-                <TranscriptRow
-                  key={item.line.id}
-                  line={item.line}
-                  selfRole={selfRole}
-                  agentName={agentName}
-                />
-              ),
-            )}
+            {feed.map((item) => (
+              <TranscriptFeedItem
+                key={feedItemKey(item)}
+                item={item}
+                selfRole={selfRole}
+                agentName={agentName}
+                companyName={companyName}
+              />
+            ))}
             <TranscriptExtras
               notice={notice}
               showIdleWarning={showIdleWarning}

@@ -1,5 +1,5 @@
 import { screen, waitFor } from "@testing-library/react"
-import { beforeEach, describe, expect, test } from "vitest"
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest"
 
 import {
   CONVO_ID,
@@ -9,13 +9,24 @@ import {
   emit,
   openQueuedAda,
   resetInboxHarness,
+  staffFetch,
 } from "./inbox-test-harness"
 
 const ADA_DOT = "How fast are DOT results?"
 
 describe("inbox conversation isolation", () => {
+  const originalLocation = window.location
+
   beforeEach(() => {
     resetInboxHarness()
+  })
+
+  afterEach(() => {
+    Object.defineProperty(window, "location", {
+      configurable: true,
+      value: originalLocation,
+    })
+    vi.unstubAllGlobals()
   })
 
   test("Ada DOT line does not appear after selecting Other Visitor", async () => {
@@ -56,6 +67,34 @@ describe("inbox conversation isolation", () => {
     await waitFor(() => expect(FakeSocket.instances.length).toBe(1))
     FakeSocket.instances[0]?.close(4401)
     await new Promise((resolve) => setTimeout(resolve, 80))
+    expect(FakeSocket.instances.length).toBe(1)
+  })
+
+  test("auth close 4401 and a 401 refresh sends the specialist to login", async () => {
+    const assign = vi.fn()
+    Object.defineProperty(window, "location", {
+      configurable: true,
+      value: {
+        assign,
+        replace: assign,
+        href: "http://localhost:3000/admin/inbox",
+        origin: "http://localhost:3000",
+        pathname: "/admin/inbox",
+        search: "",
+        hash: "",
+      },
+    })
+    document.cookie = "supportchat_csrf=csrf-inbox"
+    vi.stubGlobal("fetch", async (input: RequestInfo | URL) => {
+      if (String(input) === "/auth/refresh") {
+        return { ok: false, status: 401, json: async () => ({ detail: "Not authenticated" }) }
+      }
+      return staffFetch(input)
+    })
+    await openQueuedAda()
+    await waitFor(() => expect(FakeSocket.instances.length).toBe(1))
+    FakeSocket.instances[0]?.close(4401)
+    await waitFor(() => expect(assign).toHaveBeenCalledWith("/login"))
     expect(FakeSocket.instances.length).toBe(1)
   })
 })

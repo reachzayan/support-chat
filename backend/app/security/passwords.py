@@ -1,3 +1,5 @@
+import asyncio
+
 from argon2 import PasswordHasher
 from argon2.exceptions import InvalidHash, VerificationError, VerifyMismatchError
 
@@ -26,3 +28,11 @@ def verify_password_or_dummy(password_hash: str | None, password: str) -> bool:
         verify_password(_DUMMY_PASSWORD_HASH, password)
         return False
     return verify_password(password_hash, password)
+
+
+async def hash_password_async(password: str) -> str:
+    return await asyncio.to_thread(hash_password, password)
+
+
+async def verify_password_or_dummy_async(password_hash: str | None, password: str) -> bool:
+    return await asyncio.to_thread(verify_password_or_dummy, password_hash, password)

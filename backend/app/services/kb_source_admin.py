@@ -14,8 +14,10 @@ from app.models.site import Site
 from app.models.user import User
 from app.repositories.kb_snapshot_repo import KbSnapshotRepository
 from app.repositories.kb_source_repo import KbSourceRepository
-from app.services.kb_embedder import configured_embedder_id
+from app.services.kb_embedder import configured_embedder_id, default_embedder
 from app.services.kb_ingest import CanonicalError, canonical_fetch_url, enqueue_wakeup, host_allowed
+from app.services.kb_ingest_chunks import _chunk_content_hash
+from app.services.kb_ingest_state import _pg_safe
 from app.services.site_admin import AdminError
 
 SAMPLESITE_SMOKE = ["24-48", "MRO", "rapid"]
@@ -329,7 +331,16 @@ class KbSourceService:
         await self._session.commit()
         return page
 
-    async def patch_chunk(self, chunk_id: UUID, *, enabled: bool) -> KbChunk:
+    async def patch_chunk(
+        self,
+        chunk_id: UUID,
+        *,
+        enabled: bool | None = None,
+        body: str | None = None,
+        edit_id: UUID | None = None,
+    ) -> KbChunk:
+        if enabled is None and body is None:
+            raise AdminError("invalid")
         result = await self._session.execute(
             select(KbChunk)
             .join(KbSnapshot, KbSnapshot.id == KbChunk.snapshot_id)
@@ -340,9 +351,36 @@ class KbSourceService:
             if await self._session.get(KbChunk, chunk_id) is None:
                 raise AdminError("not_found")
             raise AdminError("stale")
-        chunk.enabled = enabled
+        if body is not None:
+            await self._apply_body_edit(chunk, body=body, edit_id=edit_id)
+        if enabled is not None:
+            chunk.enabled = enabled
         await self._session.commit()
         return chunk
+
+    async def _apply_body_edit(self, chunk: KbChunk, *, body: str, edit_id: UUID | None) -> None:
+        if edit_id is None:
+            raise AdminError("invalid")
+        clean = _pg_safe(body).strip()
+        if not clean:
+            raise AdminError("invalid")
+        if chunk.last_body_edit_id == edit_id:
+            if chunk.body != clean:
+                raise AdminError("conflict")
+            return
+        vectors = await default_embedder().embed_documents([clean])
+        chunk.body = clean
+        chunk.answer_verbatim = clean
+        chunk.last_body_edit_id = edit_id
+        chunk.content_hash = _chunk_content_hash(
+            heading=chunk.heading,
+            canonical_question=chunk.canonical_question,
+            aliases=list(chunk.aliases or []),
+            answer_verbatim=clean,
+            body=clean,
+        )
+        if vectors:
+            chunk.embedding = vectors[0]
 
     async def list_snapshots(self, source_id: UUID, *, limit: int = 50) -> list[KbSnapshot]:
         source = await self._session.get(KbSource, source_id)

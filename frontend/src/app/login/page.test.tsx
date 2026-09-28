@@ -28,6 +28,13 @@ describe("staff login", () => {
     expect(screen.getByRole("button", { name: "Sign in" })).toBeInTheDocument()
   })
 
+  test("does not show a Case file card", () => {
+    renderWithProviders(<LoginPage />)
+
+    expect(screen.queryByText("Case file")).not.toBeInTheDocument()
+    expect(screen.queryByText("SampleSite")).not.toBeInTheDocument()
+  })
+
   test("shows inline validation before attempting sign in", async () => {
     const user = userEvent.setup()
     renderWithProviders(<LoginPage />)

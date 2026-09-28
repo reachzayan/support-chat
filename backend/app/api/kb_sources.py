@@ -46,6 +46,7 @@ def _http_error(exc: AdminError) -> HTTPException:
             "This page already belongs to another knowledge source.",
         ),
         "busy": (status.HTTP_409_CONFLICT, "This source is already syncing."),
+        "conflict": (status.HTTP_409_CONFLICT, "This edit was already applied."),
     }.get(exc.code, (status.HTTP_422_UNPROCESSABLE_CONTENT, "Invalid request"))
     return HTTPException(status_code=code, detail=detail)
 
@@ -98,6 +99,7 @@ def _chunk_out(chunk: KbChunk) -> ChunkOut:
         body=chunk.body,
         enabled=chunk.enabled,
         origin_urls=list(chunk.origin_urls or []),
+        last_body_edit_id=chunk.last_body_edit_id,
     )
 
 
@@ -187,7 +189,12 @@ async def patch_chunk(
     chunk_id: UUID, payload: ChunkPatchIn, session: SessionDep, _admin: CurrentAdmin
 ) -> ChunkOut:
     try:
-        chunk = await KbSourceService(session).patch_chunk(chunk_id, enabled=payload.enabled)
+        chunk = await KbSourceService(session).patch_chunk(
+            chunk_id,
+            enabled=payload.enabled,
+            body=payload.body,
+            edit_id=payload.edit_id,
+        )
     except AdminError as exc:
         if exc.code == "stale":
             raise HTTPException(

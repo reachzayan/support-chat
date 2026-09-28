@@ -1,10 +1,15 @@
-from sqlalchemy import select
+from uuid import uuid4
+
+import pytest
+from sqlalchemy import select, text
 
 from app.db import session_maker
 from app.models.kb_chunk import KbChunk
 from app.models.kb_page import KbPage
 from app.services.full_context import load_live_units
+from app.services.kb_embedder import FakeEmbedder
 from app.services.kb_source_admin import KbSourceService
+from app.services.site_admin import AdminError
 from tests.bot_fixtures import insert_chunk, insert_site
 
 
@@ -78,3 +83,78 @@ async def test_chunk_toggle_requires_live_snapshot_and_changes_retrievable_block
         stored = await session.scalar(select(KbChunk).where(KbChunk.id == chunk.id))
         assert stored is not None
         assert stored.enabled is False
+
+
+EDITED_BODY = "FCRA-compliant employment screening packages include county searches."
+ORIGINAL_BODY = "Most negative results are reported within 24-48 hours."
+
+
+async def test_chunk_body_edit_replaces_the_live_answer_text(migrated_db, monkeypatch) -> None:
+    """Catches a body patch that leaves prompts answering from the old verbatim copy."""
+    monkeypatch.setattr("app.services.kb_source_admin.default_embedder", lambda: FakeEmbedder())
+    async with session_maker()() as session:
+        site = await insert_site(session, "samplesite", "SampleSite")
+        chunk = await insert_chunk(session, site, "Turnaround time", ORIGINAL_BODY)
+        await session.commit()
+        edit_id = uuid4()
+
+        saved = await KbSourceService(session).patch_chunk(
+            chunk.id, body=EDITED_BODY, edit_id=edit_id
+        )
+        assert saved.body == EDITED_BODY
+        units = await load_live_units(session, [chunk.snapshot_id])
+        assert [unit.answer_verbatim for unit in units] == [EDITED_BODY]
+        stored = await session.scalar(select(KbChunk).where(KbChunk.id == chunk.id))
+        assert stored is not None
+        assert stored.answer_verbatim == EDITED_BODY
+        assert stored.embedding is not None
+        assert stored.embedding[1] == pytest.approx(1.0)
+        assert stored.embedding[0] == pytest.approx(0.0)
+        found = await session.scalar(
+            text(
+                "SELECT id FROM kb_chunks "
+                "WHERE id = :id AND search_document @@ plainto_tsquery('english', :q)"
+            ),
+            {"id": chunk.id, "q": "fcra"},
+        )
+        assert found == chunk.id
+
+
+async def test_chunk_body_edit_replay_keeps_the_first_saved_text(migrated_db) -> None:
+    """Catches a retried edit_id applying a different body or concatenating the first save."""
+    async with session_maker()() as session:
+        site = await insert_site(session, "backgroundchecks", "Sample Services")
+        chunk = await insert_chunk(session, site, "Turnaround time", ORIGINAL_BODY)
+        await session.commit()
+        edit_id = uuid4()
+        service = KbSourceService(session)
+
+        first = await service.patch_chunk(chunk.id, body=EDITED_BODY, edit_id=edit_id)
+        replay = await service.patch_chunk(chunk.id, body=EDITED_BODY, edit_id=edit_id)
+        assert first.body == EDITED_BODY
+        assert replay.body == EDITED_BODY
+
+        with pytest.raises(AdminError, match="conflict"):
+            await service.patch_chunk(
+                chunk.id,
+                body="Something else a specialist never saved.",
+                edit_id=edit_id,
+            )
+        stored = await session.scalar(select(KbChunk).where(KbChunk.id == chunk.id))
+        assert stored is not None
+        assert stored.body == EDITED_BODY
+        assert stored.answer_verbatim == EDITED_BODY
+
+
+async def test_chunk_body_edit_rejects_blank_text(migrated_db) -> None:
+    """Catches a whitespace-only save wiping a retrieved answer."""
+    async with session_maker()() as session:
+        site = await insert_site(session, "samplesite", "SampleSite")
+        chunk = await insert_chunk(session, site, "Turnaround time", ORIGINAL_BODY)
+        await session.commit()
+
+        with pytest.raises(AdminError, match="invalid"):
+            await KbSourceService(session).patch_chunk(chunk.id, body="   ", edit_id=uuid4())
+        stored = await session.scalar(select(KbChunk).where(KbChunk.id == chunk.id))
+        assert stored is not None
+        assert stored.body == ORIGINAL_BODY

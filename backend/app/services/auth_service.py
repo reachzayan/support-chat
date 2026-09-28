@@ -10,7 +10,7 @@ from app.models.user import User
 from app.repositories.refresh_token_repo import RefreshTokenRepository
 from app.repositories.user_repo import UserRepository
 from app.security.jwt import create_access_token
-from app.security.passwords import hash_password, verify_password_or_dummy
+from app.security.passwords import hash_password_async, verify_password_or_dummy_async
 from app.settings import Settings
 
 REFRESH_DAYS = 14
@@ -45,9 +45,9 @@ class AuthService:
     async def login(self, email: str, password: str) -> SessionTokens:
         user = await self._users.get_by_email(email)
         if user is None or not user.is_active:
-            verify_password_or_dummy(None, password)
+            await verify_password_or_dummy_async(None, password)
             raise AuthFailed
-        if not verify_password_or_dummy(user.password_hash, password):
+        if not await verify_password_or_dummy_async(user.password_hash, password):
             raise AuthFailed
         return await self._issue_session(user, uuid4())
 
@@ -79,9 +79,9 @@ class AuthService:
         await self._session.commit()
 
     async def change_password(self, user: User, current_password: str, new_password: str) -> None:
-        if not verify_password_or_dummy(user.password_hash, current_password):
+        if not await verify_password_or_dummy_async(user.password_hash, current_password):
             raise AuthFailed
-        user.password_hash = hash_password(new_password)
+        user.password_hash = await hash_password_async(new_password)
         await self._users.increment_token_version(user)
         await self._tokens.revoke_all_for_user(user.id)
         await self._session.commit()

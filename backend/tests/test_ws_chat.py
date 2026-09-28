@@ -1,3 +1,5 @@
+import asyncio
+import time
 import uuid
 from concurrent.futures import CancelledError, ThreadPoolExecutor
 
@@ -15,6 +17,7 @@ from tests.ws_helpers import (
     DEMO_PUBLIC_KEY,
     DEMO_SITE_KEY,
     DOT_QUESTION,
+    HOST_ORIGIN,
     JOIN_LINE_ALEX,
     JORDAN_EMAIL,
     JORDAN_NAME,
@@ -792,3 +795,123 @@ def test_bot_turn_crash_turns_typing_off_and_keeps_the_socket(
             visitor, lambda items: any(frame.get("type") == "pong" for frame in items)
         )
         assert frames_of_type(pong, "pong")[-1]["type"] == "pong"
+
+
+def test_visitor_socket_stays_open_during_long_bot_turn(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import app.chat.ws_visitor as ws_visitor
+    from app.services.conversation_service import ConversationService
+
+    monkeypatch.setattr(ws_visitor, "IDLE_CHECK_SECONDS", 0.15)
+    monkeypatch.setattr(ws_visitor, "IDLE_PING_AFTER_SECONDS", 0.2)
+    monkeypatch.setattr(ws_visitor, "IDLE_CLOSE_SECONDS", 0.6)
+    original = ConversationService.run_bot_turn
+
+    async def slow(self, conversation_id, generation_id, **kwargs):
+        await asyncio.sleep(1.1)
+        return await original(self, conversation_id, generation_id, **kwargs)
+
+    monkeypatch.setattr(ConversationService, "run_bot_turn", slow)
+    ctx = _boot(client)
+    conversation_id = uuid.UUID(ctx["conversation_id"])
+    with client.websocket_connect("/ws/visitor", headers={"Origin": WIDGET_ORIGIN}) as visitor:
+        auth_visitor(visitor, ctx["bootstrap_token"])
+        collect_until(visitor, lambda frames: any(frame.get("type") == "state" for frame in frames))
+        visitor.send_json(
+            {
+                "v": 1,
+                "type": "prechat",
+                "submission_id": PRECHAT_SUBMISSION_ID,
+                "name": "Ada Lopez",
+                "email": "ada@example.com",
+                "phone": "",
+                "inquiry_type": "results",
+                "message": DOT_QUESTION,
+            }
+        )
+        frames: list[dict] = []
+        deadline = time.monotonic() + 12.0
+        while time.monotonic() < deadline:
+            remaining = deadline - time.monotonic()
+            visitor_socket = visitor
+            try:
+                with ThreadPoolExecutor(max_workers=1) as pool:
+                    frame = pool.submit(visitor_socket.receive_json).result(timeout=remaining)
+            except Exception as exc:
+                raise AssertionError(
+                    f"socket failed during bot turn: {exc!r} frames={frames!r}"
+                ) from exc
+            frames.append(frame)
+            if frame.get("type") == "ping":
+                visitor.send_json({"v": 1, "type": "pong"})
+            if frame.get("type") == "typing" and frame.get("active") is False:
+                break
+        else:
+            raise AssertionError(f"bot turn never finished; frames={frames!r}")
+        assert any(frame.get("type") == "ping" for frame in frames)
+        visitor.send_json({"v": 1, "type": "ping"})
+        pong = collect_until(
+            visitor, lambda items: any(frame.get("type") == "pong" for frame in items)
+        )
+        assert frames_of_type(pong, "pong")[-1]["type"] == "pong"
+    assert bot_row_count() + message_count(conversation_id, role="system") >= 1
+
+
+async def test_parallel_bootstrap_after_close_shares_one_open_conversation(migrated_db) -> None:
+    from datetime import UTC, datetime
+
+    from sqlalchemy import func, select
+
+    from app.db import session_maker
+    from app.models.conversation import Conversation
+    from app.services.conversation_service import ConversationService
+    from tests.bot_fixtures import insert_site as insert_site_async
+
+    async with session_maker()() as session:
+        site = await insert_site_async(session, "samplesite", "SampleSite")
+        await session.commit()
+        first = await ConversationService(session).bootstrap(
+            site.key,
+            site.public_key,
+            HOST_ORIGIN,
+            None,
+            "203.0.113.9",
+            "Mozilla/5.0",
+        )
+        conversation = await session.get(Conversation, first.conversation_id)
+        assert conversation is not None
+        conversation.state = "closed"
+        conversation.closed_at = datetime.now(UTC)
+        await session.commit()
+        site_key = site.key
+        public_key = site.public_key
+        resume = first.resume_token
+        visitor_id = first.visitor_id
+
+    async def once() -> uuid.UUID:
+        async with session_maker()() as session:
+            result = await ConversationService(session).bootstrap(
+                site_key,
+                public_key,
+                HOST_ORIGIN,
+                resume,
+                "203.0.113.9",
+                "Mozilla/5.0",
+            )
+            assert result.mode == "conversation"
+            assert result.conversation_id is not None
+            return result.conversation_id
+
+    left, right = await asyncio.gather(once(), once())
+    assert left == right
+    async with session_maker()() as session:
+        open_count = int(
+            await session.scalar(
+                select(func.count())
+                .select_from(Conversation)
+                .where(Conversation.visitor_id == visitor_id, Conversation.state != "closed")
+            )
+            or 0
+        )
+    assert open_count == 1

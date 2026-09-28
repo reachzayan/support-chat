@@ -16,6 +16,7 @@ LOGIN_FAILURE = "Invalid email or password"
 ALEX_EMAIL = "agent@example.local"
 ALEX_NAME = "Alex Morgan"
 ALEX_PASSWORD = "secret"
+STAFF_ORIGIN = "http://localhost:3000"
 
 
 def _sync_session() -> Iterator[Session]:
@@ -80,6 +81,10 @@ def _csrf_headers(client: TestClient) -> dict[str, str]:
     return {"X-CSRF-Token": token}
 
 
+def _login(client: TestClient, payload: dict[str, str], *, origin: str = STAFF_ORIGIN):
+    return client.post("/auth/login", json=payload, headers={"Origin": origin})
+
+
 async def test_persists_alex_morgan_and_rejects_duplicate_normalized_email(
     client: TestClient,
 ) -> None:
@@ -116,10 +121,7 @@ async def test_persists_alex_morgan_and_rejects_duplicate_normalized_email(
 def test_login_sets_host_only_httponly_refresh_and_returns_alex(client: TestClient) -> None:
     user_id = _insert_alex()
 
-    response = client.post(
-        "/auth/login",
-        json={"email": ALEX_EMAIL, "password": ALEX_PASSWORD},
-    )
+    response = _login(client, {"email": ALEX_EMAIL, "password": ALEX_PASSWORD})
 
     assert response.status_code == 200
     body = response.json()
@@ -156,10 +158,7 @@ def test_wrong_password_is_generic_and_does_not_log_secrets(client: TestClient) 
     _insert_alex()
 
     with capture_logs() as logs:
-        response = client.post(
-            "/auth/login",
-            json={"email": ALEX_EMAIL, "password": ALEX_PASSWORD + "-wrong"},
-        )
+        response = _login(client, {"email": ALEX_EMAIL, "password": ALEX_PASSWORD + "-wrong"})
 
     assert response.status_code == 401
     assert response.json() == {"detail": LOGIN_FAILURE}
@@ -184,7 +183,7 @@ def test_login_rejects_oversized_and_unknown_fields_before_password_hashing(
 ) -> None:
     _insert_alex()
 
-    response = client.post("/auth/login", json=payload)
+    response = _login(client, payload)
 
     assert response.status_code == 422
     assert "supportchat_refresh=" not in " ".join(response.headers.get_list("set-cookie")).lower()
@@ -192,7 +191,7 @@ def test_login_rejects_oversized_and_unknown_fields_before_password_hashing(
 
 def test_refresh_rotation_and_reuse_revokes_family(client: TestClient) -> None:
     _insert_alex()
-    login = client.post("/auth/login", json={"email": ALEX_EMAIL, "password": ALEX_PASSWORD})
+    login = _login(client, {"email": ALEX_EMAIL, "password": ALEX_PASSWORD})
     r1 = _cookie_value(login, "supportchat_refresh")
 
     rotated = client.post("/auth/refresh", headers=_csrf_headers(client))
@@ -212,7 +211,7 @@ def test_refresh_rotation_and_reuse_revokes_family(client: TestClient) -> None:
 
 def test_csrf_mismatch_does_not_rotate_or_logout(client: TestClient) -> None:
     _insert_alex()
-    login = client.post("/auth/login", json={"email": ALEX_EMAIL, "password": ALEX_PASSWORD})
+    login = _login(client, {"email": ALEX_EMAIL, "password": ALEX_PASSWORD})
     access = login.json()["access_token"]
     r1 = _cookie_value(login, "supportchat_refresh")
 
@@ -238,13 +237,13 @@ def test_csrf_mismatch_does_not_rotate_or_logout(client: TestClient) -> None:
         json={"current_password": ALEX_PASSWORD, "new_password": "corrected-pass1"},
     )
     assert change_mismatch.status_code == 403
-    still_old = client.post("/auth/login", json={"email": ALEX_EMAIL, "password": ALEX_PASSWORD})
+    still_old = _login(client, {"email": ALEX_EMAIL, "password": ALEX_PASSWORD})
     assert still_old.status_code == 200
 
 
 def test_password_change_revokes_old_credentials(client: TestClient) -> None:
     _insert_alex()
-    login = client.post("/auth/login", json={"email": ALEX_EMAIL, "password": ALEX_PASSWORD})
+    login = _login(client, {"email": ALEX_EMAIL, "password": ALEX_PASSWORD})
     access = login.json()["access_token"]
     new_password = "corrected-pass1"
 
@@ -261,18 +260,18 @@ def test_password_change_revokes_old_credentials(client: TestClient) -> None:
     stale_refresh = client.post("/auth/refresh", headers=_csrf_headers(client))
     assert stale_refresh.status_code == 401
 
-    old_login = client.post("/auth/login", json={"email": ALEX_EMAIL, "password": ALEX_PASSWORD})
+    old_login = _login(client, {"email": ALEX_EMAIL, "password": ALEX_PASSWORD})
     assert old_login.status_code == 401
     assert old_login.json() == {"detail": LOGIN_FAILURE}
 
-    new_login = client.post("/auth/login", json={"email": ALEX_EMAIL, "password": new_password})
+    new_login = _login(client, {"email": ALEX_EMAIL, "password": new_password})
     assert new_login.status_code == 200
     assert new_login.json()["user"]["display_name"] == ALEX_NAME
 
 
 def test_logout_increments_token_version_and_clears_refresh(client: TestClient) -> None:
     user_id = _insert_alex()
-    login = client.post("/auth/login", json={"email": ALEX_EMAIL, "password": ALEX_PASSWORD})
+    login = _login(client, {"email": ALEX_EMAIL, "password": ALEX_PASSWORD})
     access = login.json()["access_token"]
 
     logout = client.post("/auth/logout", headers=_csrf_headers(client))
@@ -297,7 +296,7 @@ def test_logout_increments_token_version_and_clears_refresh(client: TestClient) 
 
 def test_inactive_and_stale_token_version_cannot_use_me(client: TestClient) -> None:
     user_id = _insert_alex()
-    login = client.post("/auth/login", json={"email": ALEX_EMAIL, "password": ALEX_PASSWORD})
+    login = _login(client, {"email": ALEX_EMAIL, "password": ALEX_PASSWORD})
     access = login.json()["access_token"]
 
     session = next(_sync_session())
@@ -313,10 +312,7 @@ def test_inactive_and_stale_token_version_cannot_use_me(client: TestClient) -> N
     assert stale.status_code == 401
 
     inactive_id = _insert_alex_variant(email="inactive@example.local", is_active=False)
-    inactive_login = client.post(
-        "/auth/login",
-        json={"email": "inactive@example.local", "password": ALEX_PASSWORD},
-    )
+    inactive_login = _login(client, {"email": "inactive@example.local", "password": ALEX_PASSWORD})
     assert inactive_login.status_code == 401
     assert inactive_login.json() == {"detail": LOGIN_FAILURE}
     assert not any("supportchat_refresh=" in line.lower() for line in _cookie_headers(inactive_login))
@@ -330,10 +326,7 @@ def test_inactive_and_stale_token_version_cannot_use_me(client: TestClient) -> N
     finally:
         session.close()
 
-    active_login = client.post(
-        "/auth/login",
-        json={"email": "inactive@example.local", "password": ALEX_PASSWORD},
-    )
+    active_login = _login(client, {"email": "inactive@example.local", "password": ALEX_PASSWORD})
     assert active_login.status_code == 200
     session = next(_sync_session())
     try:
@@ -372,7 +365,7 @@ def _insert_alex_variant(email: str, is_active: bool) -> uuid.UUID:
 
 def test_short_new_password_is_rejected(client: TestClient) -> None:
     _insert_alex()
-    login = client.post("/auth/login", json={"email": ALEX_EMAIL, "password": ALEX_PASSWORD})
+    login = _login(client, {"email": ALEX_EMAIL, "password": ALEX_PASSWORD})
     access = login.json()["access_token"]
     too_short = client.post(
         "/auth/change-password",
@@ -380,7 +373,7 @@ def test_short_new_password_is_rejected(client: TestClient) -> None:
         json={"current_password": ALEX_PASSWORD, "new_password": "new-secret-1"},
     )
     assert too_short.status_code == 422
-    still_old = client.post("/auth/login", json={"email": ALEX_EMAIL, "password": ALEX_PASSWORD})
+    still_old = _login(client, {"email": ALEX_EMAIL, "password": ALEX_PASSWORD})
     assert still_old.status_code == 200
 
 
@@ -396,3 +389,38 @@ def test_signup_is_missing_and_does_not_create_users(client: TestClient) -> None
     )
     assert response.status_code == 404
     assert _user_count() == before
+
+
+def test_login_rejects_cross_site_origin(client: TestClient) -> None:
+    _insert_alex()
+    evil = _login(
+        client,
+        {"email": ALEX_EMAIL, "password": ALEX_PASSWORD},
+        origin="https://evil.test",
+    )
+    assert evil.status_code == 403
+    assert evil.json() == {"detail": "CSRF failed"}
+    cookies = " ".join(evil.headers.get_list("set-cookie")).lower()
+    assert "supportchat_refresh=" not in cookies
+    ok = _login(client, {"email": ALEX_EMAIL, "password": ALEX_PASSWORD})
+    assert ok.status_code == 200
+    assert any(line.lower().startswith("supportchat_refresh=") for line in _cookie_headers(ok))
+
+
+def test_change_password_fourth_wrong_attempt_is_429(client: TestClient, monkeypatch) -> None:
+    from app.settings import reset_settings_cache
+
+    monkeypatch.setenv("RATE_LOGIN_FAILURE", "3")
+    reset_settings_cache()
+    _insert_alex()
+    login = _login(client, {"email": ALEX_EMAIL, "password": ALEX_PASSWORD})
+    access = login.json()["access_token"]
+    payload = {"current_password": "not-the-password", "new_password": "corrected-pass1"}
+    headers = {"Authorization": f"Bearer {access}", **_csrf_headers(client)}
+    for _ in range(3):
+        response = client.post("/auth/change-password", headers=headers, json=payload)
+        assert response.status_code == 401
+        assert response.json() == {"detail": LOGIN_FAILURE}
+    fourth = client.post("/auth/change-password", headers=headers, json=payload)
+    assert fourth.status_code == 429
+    assert fourth.json() == {"detail": "Too many requests"}

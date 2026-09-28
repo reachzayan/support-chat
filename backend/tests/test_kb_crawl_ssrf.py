@@ -11,6 +11,7 @@ from app.services.kb_crawl import (
     allowed_fetch_url,
     fetch_html,
     pinned_get,
+    public_fetch_url,
     robots_allows,
 )
 
@@ -201,6 +202,21 @@ def test_pinned_get_stops_redirect_loops(monkeypatch) -> None:
 
     assert caught.value.code == "http"
     assert calls == MAX_HOPS + 1
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://100.64.0.1/",
+        "https://[64:ff9b::7f00:1]/",
+        "https://[::ffff:127.0.0.1]/",
+        "https://sample-site.example.com:8443/",
+    ],
+)
+def test_public_fetch_blocks_cgnat_nat64_mapped_and_non_443(url: str) -> None:
+    with pytest.raises(FetchError) as caught:
+        public_fetch_url(url)
+    assert caught.value.code == "ssrf"
 
 
 def test_pinned_get_rejects_oversized_stream_before_buffering(monkeypatch) -> None:

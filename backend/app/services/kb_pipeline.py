@@ -436,7 +436,9 @@ async def _after_fetch(
         _record_job_event(job, "fetch", "done", renderer=result.renderer)
         _record_job_event(job, "extract", "running", renderer=result.renderer)
         if source.mode == "prefix":
-            _collect_prefix_links(html, result.url, source, extra_urls, seen, result.links)
+            await asyncio.to_thread(
+                _collect_prefix_links, html, result.url, source, extra_urls, seen, result.links
+            )
         baseline = await session.scalar(
             select(KbSnapshot)
             .where(
@@ -455,7 +457,11 @@ async def _after_fetch(
         page.processing_status = "extracting"
         await session.commit()
     structured = hasattr(llm_client, "structure_page")
-    units = [] if structured else extract_html(html, url=url, markdown=markdown)
+    units = (
+        []
+        if structured
+        else await asyncio.to_thread(extract_html, html, url=url, markdown=markdown)
+    )
     async with lock:
         page.processing_status = "llm_extracting"
         job.stage = "llm_extract"

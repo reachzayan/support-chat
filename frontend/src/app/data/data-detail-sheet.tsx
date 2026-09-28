@@ -24,6 +24,8 @@ const TranscriptPane = ({
   hasOlder,
   loadingOlder,
   onLoadOlder,
+  companyName,
+  agentName,
 }: {
   loading: boolean
   error: boolean
@@ -31,6 +33,8 @@ const TranscriptPane = ({
   hasOlder: boolean
   loadingOlder: boolean
   onLoadOlder: () => void
+  companyName?: string | null
+  agentName?: string | null
 }) => {
   if (loading) {
     return <p className="text-mute px-5 py-6 text-sm">Loading transcript…</p>
@@ -58,7 +62,13 @@ const TranscriptPane = ({
           </Button>
         </div>
       ) : null}
-      <Transcript lines={lines} selfRole="agent" logLabel="Transcript" />
+      <Transcript
+        lines={lines}
+        selfRole="agent"
+        logLabel="Transcript"
+        companyName={companyName}
+        agentName={agentName}
+      />
     </div>
   )
 }
@@ -146,6 +156,8 @@ export const SubmissionDetailSheet = ({
           hasOlder={detail?.has_older === true}
           loadingOlder={loadingOlder}
           onLoadOlder={loadOlder}
+          companyName={detail?.site_name ?? row.site_name}
+          agentName={detail?.assigned_agent?.display_name ?? null}
         />
       </SheetContent>
     </Sheet>

@@ -4,6 +4,7 @@ import { render, type RenderOptions } from "@testing-library/react"
 import type { ReactElement } from "react"
 
 import { PreferencesProvider, type Theme } from "@/components/preferences-context"
+import { Toaster } from "@/components/ui/toast"
 
 type ProviderOptions = {
   initialTheme?: Theme
@@ -19,7 +20,7 @@ export const renderWithProviders = (
     ...renderOptions,
     wrapper: ({ children }) => (
       <PreferencesProvider initialTheme={initialTheme} initialSidebarOpen={initialSidebarOpen}>
-        {children}
+        <Toaster>{children}</Toaster>
       </PreferencesProvider>
     ),
   })

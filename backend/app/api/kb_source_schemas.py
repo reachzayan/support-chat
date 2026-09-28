@@ -53,7 +53,17 @@ class PagePatchIn(BaseModel):
 class ChunkPatchIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    enabled: bool
+    enabled: bool | None = None
+    body: str | None = Field(default=None, max_length=40_000)
+    edit_id: UUID | None = None
+
+    @model_validator(mode="after")
+    def require_patch_fields(self) -> "ChunkPatchIn":
+        if self.enabled is None and self.body is None:
+            raise ValueError("enabled or body is required")
+        if self.body is not None and self.edit_id is None:
+            raise ValueError("edit_id is required")
+        return self
 
 
 class SourceOut(BaseModel):
@@ -139,6 +149,7 @@ class ChunkOut(BaseModel):
     body: str
     enabled: bool
     origin_urls: list[str] = Field(default_factory=list)
+    last_body_edit_id: UUID | None = None
 
 
 class PageDetailOut(PageOut):

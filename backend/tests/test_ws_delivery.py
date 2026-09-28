@@ -181,6 +181,13 @@ def test_reconnect_after_cursor_11_replays_only_later_ids_then_state(
             visitor,
             lambda frames: any(frame.get("type") == "prechat_accepted" for frame in frames),
         )
+        collect_until(
+            visitor,
+            lambda frames: any(
+                frame.get("type") == "typing" and frame.get("active") is False for frame in frames
+            ),
+            timeout_seconds=12.0,
+        )
         for index in range(12):
             visitor.send_json(
                 {
@@ -192,6 +199,14 @@ def test_reconnect_after_cursor_11_replays_only_later_ids_then_state(
             )
             collect_until(
                 visitor, lambda frames: any(frame.get("type") == "ack" for frame in frames)
+            )
+            collect_until(
+                visitor,
+                lambda frames: any(
+                    frame.get("type") == "typing" and frame.get("active") is False
+                    for frame in frames
+                ),
+                timeout_seconds=12.0,
             )
 
     total_messages = message_count(uuid.UUID(conversation_id))

@@ -7,6 +7,23 @@ import { renderWithProviders } from "@/test/render"
 import { SitesConsole } from "./sites-console"
 import { mockListFetch, SITE, SNIPPET } from "./sites-test-fixtures"
 
+describe("sites load failure", () => {
+  test("a 503 shows Sites could not be loaded instead of an empty directory", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: false,
+        status: 503,
+        json: async () => ({ detail: "unavailable" }),
+      }),
+    )
+    renderWithProviders(<SitesConsole isAdmin={true} displayName="Riley Chen" />)
+    expect(await screen.findByRole("alert")).toHaveTextContent("Sites could not be loaded")
+    expect(screen.queryByRole("table", { name: "Sites" })).not.toBeInTheDocument()
+    expect(screen.queryByText("No sites configured")).not.toBeInTheDocument()
+  })
+})
+
 describe("sites table", () => {
   beforeEach(() => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(mockListFetch()))

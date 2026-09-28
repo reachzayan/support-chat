@@ -1,9 +1,9 @@
-import { Schema, SchemaTransformation } from "effect"
+const STAFF_EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 
-const StaffEmail = Schema.String.pipe(
-  Schema.decode(SchemaTransformation.trim()),
-  Schema.decode(SchemaTransformation.toLowerCase()),
-  Schema.check(Schema.isNonEmpty(), Schema.isPattern(/^[^\s@]+@[^\s@]+\.[^\s@]+$/)),
-)
-
-export const parseStaffEmail = Schema.decodeUnknownEffect(StaffEmail)
+export const parseStaffEmail = (raw: string): string | null => {
+  const normalized = raw.trim().toLowerCase()
+  if (!STAFF_EMAIL.test(normalized)) {
+    return null
+  }
+  return normalized
+}

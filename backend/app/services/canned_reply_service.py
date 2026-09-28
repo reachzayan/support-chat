@@ -58,10 +58,17 @@ class CannedReplyService:
         return await self._replies.list_library()
 
     async def create(
-        self, *, site_id: UUID | None, shortcut: str, body: str, enabled: bool = True
+        self,
+        *,
+        site_id: UUID | None,
+        shortcut: str,
+        body: str,
+        enabled: bool = True,
+        is_admin: bool = False,
     ) -> CannedReply:
         normalized_shortcut = normalize_shortcut(shortcut)
         normalized_body = normalize_body(body)
+        self._require_admin_for_global(site_id, is_admin)
         if site_id is not None:
             await self._require_site(site_id)
         await self._raise_if_duplicate(site_id, normalized_shortcut)
@@ -85,13 +92,16 @@ class CannedReplyService:
         shortcut: str | None = None,
         body: str | None = None,
         enabled: bool | None = None,
+        is_admin: bool = False,
     ) -> CannedReply:
         if not fields:
             raise CannedReplyError("empty_update")
         reply = await self._replies.get_by_id(reply_id)
         if reply is None:
             raise CannedReplyError("not_found")
+        self._require_admin_for_global(reply.site_id, is_admin)
         target_site_id = site_id if "site_id" in fields else reply.site_id
+        self._require_admin_for_global(target_site_id, is_admin)
         if "shortcut" in fields and not isinstance(shortcut, str):
             raise CannedReplyError("invalid_shortcut")
         if "body" in fields and not isinstance(body, str):
@@ -116,12 +126,17 @@ class CannedReplyService:
         await self._session.refresh(reply)
         return reply
 
-    async def delete(self, reply_id: UUID) -> None:
+    async def delete(self, reply_id: UUID, *, is_admin: bool = False) -> None:
         reply = await self._replies.get_by_id(reply_id)
         if reply is None:
             raise CannedReplyError("not_found")
+        self._require_admin_for_global(reply.site_id, is_admin)
         await self._replies.delete(reply)
         await self._session.commit()
+
+    def _require_admin_for_global(self, site_id: UUID | None, is_admin: bool) -> None:
+        if site_id is None and not is_admin:
+            raise CannedReplyError("forbidden")
 
     async def _require_site(self, site_id: UUID) -> None:
         if await self._session.get(Site, site_id) is None:

@@ -168,8 +168,9 @@ def test_http_www_evil_and_missing_origin_fail_bootstrap_and_create_zero_visitor
 
 
 def test_removing_active_origin_closes_visitor_socket_4403_on_heartbeat(
-    client: TestClient,
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    monkeypatch.setattr("app.chat.ws_visitor.ORIGIN_RECHECK_SECONDS", 0.0)
     token = _login_admin(client)
     created = client.post(
         "/api/sites",
@@ -245,8 +246,9 @@ def test_removing_active_origin_closes_visitor_socket_4403_on_resume(
 
 
 def test_removing_active_origin_closes_visitor_socket_4403_on_ping(
-    client: TestClient,
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    monkeypatch.setattr("app.chat.ws_visitor.ORIGIN_RECHECK_SECONDS", 0.0)
     token = _login_admin(client)
     created = client.post(
         "/api/sites",

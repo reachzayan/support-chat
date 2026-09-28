@@ -31,6 +31,7 @@ class VisitorConnection:
     site_id: UUID
     parent_origin: str
     last_event_id: int = 0
+    origin_checked_at: float = 0.0
 
 
 @dataclass
@@ -210,16 +211,18 @@ class ConnectionManager:
                         if visitor.conversation_id == conversation.id
                     ]
                     users = UserRepository(session)
+                    agent_rows = list(self._agents.values())
+                    states = await users.token_state_for([agent.user.id for agent in agent_rows])
                     agents = []
-                    for agent in list(self._agents.values()):
-                        staff = await users.get_by_id(agent.user.id)
+                    for agent in agent_rows:
+                        staff = states.get(agent.user.id)
                         agents.append(
                             (
                                 agent,
                                 bool(
                                     staff is not None
-                                    and staff.is_active
-                                    and staff.token_version == agent.token_version
+                                    and staff[0]
+                                    and staff[1] == agent.token_version
                                 ),
                             )
                         )
@@ -342,7 +345,12 @@ class ConnectionManager:
                 await self.send_state(agent.websocket, conversation, assigned)
                 if not messages or len(messages) < limit:
                     break
-        except Exception:
+        except Exception as exc:
+            log.info(
+                "replay_failed",
+                conversation_id=str(conversation_id),
+                error_class=type(exc).__name__,
+            )
             return
 
     async def _send_new_messages(

@@ -14,6 +14,7 @@ class FakeSocket {
   static instances: FakeSocket[] = []
   sent: string[] = []
   readyState = 1
+  closeCode: number | null = null
   onopen: ((event: Event) => void) | null = null
   onmessage: ((event: MessageEvent) => void) | null = null
   onclose: ((event: CloseEvent) => void) | null = null
@@ -28,6 +29,7 @@ class FakeSocket {
   }
 
   close(code = 1000) {
+    this.closeCode = code
     this.onclose?.({ code } as CloseEvent)
   }
 }
@@ -488,6 +490,33 @@ describe("widget lifecycle", () => {
 
     expect(screen.getByText("This chat is closed")).toBeInTheDocument()
     expect(screen.queryByText("Is this you?")).not.toBeInTheDocument()
+  })
+})
+
+describe("widget socket resume", () => {
+  beforeEach(() => {
+    FakeSocket.instances = []
+    vi.stubGlobal("WebSocket", FakeSocket)
+    vi.stubGlobal("fetch", vi.fn())
+  })
+
+  test("regaining tab focus does not open a second visitor socket", async () => {
+    renderWithProviders(<WidgetApp />)
+    dispatchBootstrap()
+    await waitFor(() => expect(FakeSocket.instances.length).toBe(1))
+    Object.defineProperty(document, "hidden", { configurable: true, value: false })
+    document.dispatchEvent(new Event("visibilitychange"))
+    await new Promise((resolve) => setTimeout(resolve, 600))
+    expect(FakeSocket.instances.length).toBe(1)
+  })
+
+  test("leaving the widget closes the visitor socket", async () => {
+    const view = renderWithProviders(<WidgetApp />)
+    dispatchBootstrap()
+    await waitFor(() => expect(FakeSocket.instances.length).toBe(1))
+    const first = FakeSocket.instances[0]
+    view.unmount()
+    expect(first?.closeCode).toBe(1000)
   })
 })
 

@@ -1,15 +1,17 @@
 import { cn } from "cn"
-import { ExternalLink } from "lucide-react"
+import { ExternalLink, Pencil } from "lucide-react"
 import { AnimatePresence, motion, useReducedMotion } from "motion/react"
-import { useCallback } from "react"
+import { useCallback, useState, type ChangeEvent } from "react"
 
 /* oxlint-disable react-perf/jsx-no-new-function-as-prop, react-perf/jsx-no-new-object-as-prop -- Answer controls close over chunk records; motion props use inline objects. */
 import { RetryError } from "@/components/admin/retry-error"
 import type { KbPageDetail, KbPageRecord } from "@/components/admin/staff-api"
 import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
 import { LinkButton } from "@/components/ui/link-button"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Switch } from "@/components/ui/switch"
+import { Textarea } from "@/components/ui/textarea"
 import { safeHttpUrl } from "@/lib/ua"
 
 import { humanizeCode } from "./knowledge-format"
@@ -52,6 +54,7 @@ export const DetailPane = ({
   onTogglePage,
   onRetryPage,
   onToggleChunk,
+  onSaveChunk,
 }: {
   detail: KbPageDetail | null
   pages: KbPageRecord[]
@@ -63,6 +66,11 @@ export const DetailPane = ({
   onTogglePage: (page: KbPageRecord) => void
   onRetryPage: (page: KbPageRecord) => void
   onToggleChunk: (pageId: string, chunk: KbPageDetail["chunks"][number]) => Promise<void>
+  onSaveChunk: (
+    pageId: string,
+    chunk: KbPageDetail["chunks"][number],
+    body: string,
+  ) => Promise<boolean>
 }) => (
   <section className="bg-paper flex min-h-0 min-w-0 flex-1 flex-col">
     <div className="flex h-14 items-center px-5">
@@ -80,6 +88,7 @@ export const DetailPane = ({
           onTogglePage={onTogglePage}
           onRetryPage={onRetryPage}
           onToggle={onToggleChunk}
+          onSave={onSaveChunk}
         />
       ) : (
         <p className="text-mute px-5 py-8 text-sm">
@@ -180,48 +189,183 @@ const InspectionNotices = ({ detail, notice }: { detail: KbPageDetail; notice: s
   </>
 )
 
+const AnswerEditor = ({
+  draft,
+  pending,
+  onDraft,
+  onSave,
+  onDiscard,
+}: {
+  draft: string
+  pending: boolean
+  onDraft: (event: ChangeEvent<HTMLTextAreaElement>) => void
+  onSave: () => void
+  onDiscard: () => void
+}) => (
+  <div className="mt-2">
+    <Textarea
+      aria-label="Retrieved answer"
+      value={draft}
+      disabled={pending}
+      onChange={onDraft}
+      className="min-h-28"
+    />
+    <div className="mt-2 flex items-center gap-2">
+      <Button type="button" size="sm" onClick={onSave} disabled={pending || draft.trim() === ""}>
+        Save
+      </Button>
+      <Button type="button" size="sm" variant="outline" onClick={onDiscard} disabled={pending}>
+        Discard
+      </Button>
+    </div>
+  </div>
+)
+
+const IncludeToggle = ({
+  heading,
+  enabled,
+  pending,
+  onToggle,
+}: {
+  heading: string
+  enabled: boolean
+  pending: boolean
+  onToggle: () => void
+}) => (
+  <div className="mt-3 flex items-center justify-between gap-3">
+    <span className="text-mute text-xs font-bold">Include in answers</span>
+    <Switch
+      aria-label={`Include ${heading} in answers`}
+      checked={enabled}
+      disabled={pending}
+      onCheckedChange={onToggle}
+    />
+  </div>
+)
+
+type AnswerUnitProps = {
+  pageId: string
+  pages: KbPageRecord[]
+  chunk: KbPageDetail["chunks"][number]
+  isAdmin: boolean
+  pending: boolean
+  saveLocked: boolean
+  error: string | undefined
+  onToggle: (pageId: string, chunk: KbPageDetail["chunks"][number]) => Promise<void>
+  onSave: (pageId: string, chunk: KbPageDetail["chunks"][number], body: string) => Promise<boolean>
+}
+
+const AnswerHeader = ({
+  heading,
+  kind,
+  enabled,
+  ordinal,
+  canEdit,
+  saveLocked,
+  onEdit,
+}: {
+  heading: string
+  kind: string
+  enabled: boolean
+  ordinal: number
+  canEdit: boolean
+  saveLocked: boolean
+  onEdit: () => void
+}) => (
+  <div className="flex items-start justify-between gap-3">
+    <div className="flex min-w-0 items-start gap-2">
+      <h4 className="text-navy heading text-sm">{heading}</h4>
+      {canEdit ? (
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon-xs"
+          aria-label={`Edit ${heading}`}
+          disabled={saveLocked}
+          onClick={onEdit}
+        >
+          <Pencil aria-hidden="true" />
+        </Button>
+      ) : null}
+    </div>
+    <div className="flex shrink-0 items-center gap-2">
+      <Badge className="bg-ice-2 text-steel">{unitKindLabel(kind)}</Badge>
+      <Badge className={enabled ? "bg-[#E8F5EE] text-[#247A4D]" : "bg-ice-2 text-mute"}>
+        {enabled ? "Enabled" : "Disabled"}
+      </Badge>
+      <span className="text-mute font-mono text-[10px]">#{ordinal + 1}</span>
+    </div>
+  </div>
+)
+
 const AnswerUnit = ({
   pageId,
   pages,
   chunk,
   isAdmin,
   pending,
+  saveLocked,
   error,
   onToggle,
-}: {
-  pageId: string
-  pages: KbPageRecord[]
-  chunk: KbPageDetail["chunks"][number]
-  isAdmin: boolean
-  pending: boolean
-  error: string | undefined
-  onToggle: (pageId: string, chunk: KbPageDetail["chunks"][number]) => Promise<void>
-}) => {
+  onSave,
+}: AnswerUnitProps) => {
+  const [draft, setDraft] = useState<string | null>(null)
   const originLabel = originPagesLabel(chunk, pages)
+  const editing = draft !== null
+  const handleOpenEdit = useCallback(() => {
+    if (saveLocked || pending) {
+      return
+    }
+    setDraft(chunk.body)
+  }, [chunk.body, pending, saveLocked])
+  const handleDiscard = useCallback(() => {
+    if (pending) {
+      return
+    }
+    setDraft(null)
+  }, [pending])
+  const handleDraftChange = useCallback((event: ChangeEvent<HTMLTextAreaElement>) => {
+    setDraft(event.target.value)
+  }, [])
+  const handleSave = useCallback(async () => {
+    if (draft === null || pending || draft.trim() === "") {
+      return
+    }
+    const ok = await onSave(pageId, chunk, draft)
+    if (ok) {
+      setDraft(null)
+    }
+  }, [chunk, draft, onSave, pageId, pending])
   return (
     <article className={cn("py-4 transition-opacity duration-150", !chunk.enabled && "opacity-60")}>
-      <div className="flex items-start justify-between gap-3">
-        <h4 className="text-navy heading text-sm">{chunk.heading}</h4>
-        <div className="flex shrink-0 items-center gap-2">
-          <Badge className="bg-ice-2 text-steel">{unitKindLabel(chunk.kind)}</Badge>
-          <Badge className={chunk.enabled ? "bg-[#E8F5EE] text-[#247A4D]" : "bg-ice-2 text-mute"}>
-            {chunk.enabled ? "Enabled" : "Disabled"}
-          </Badge>
-          <span className="text-mute font-mono text-[10px]">#{chunk.ordinal + 1}</span>
-        </div>
-      </div>
-      <p className="text-ink mt-2 text-sm leading-6 whitespace-pre-wrap">{chunk.body}</p>
+      <AnswerHeader
+        heading={chunk.heading}
+        kind={chunk.kind}
+        enabled={chunk.enabled}
+        ordinal={chunk.ordinal}
+        canEdit={isAdmin && !editing}
+        saveLocked={saveLocked}
+        onEdit={handleOpenEdit}
+      />
+      {editing ? (
+        <AnswerEditor
+          draft={draft}
+          pending={pending}
+          onDraft={handleDraftChange}
+          onSave={() => void handleSave()}
+          onDiscard={handleDiscard}
+        />
+      ) : (
+        <p className="text-ink mt-2 text-sm leading-6 whitespace-pre-wrap">{chunk.body}</p>
+      )}
       {originLabel ? <p className="text-mute mt-2 text-xs">{originLabel}</p> : null}
       {isAdmin ? (
-        <div className="mt-3 flex items-center justify-between gap-3">
-          <span className="text-mute text-xs font-bold">Include in answers</span>
-          <Switch
-            aria-label={`Include ${chunk.heading} in answers`}
-            checked={chunk.enabled}
-            disabled={pending}
-            onCheckedChange={() => void onToggle(pageId, chunk)}
-          />
-        </div>
+        <IncludeToggle
+          heading={chunk.heading}
+          enabled={chunk.enabled}
+          pending={pending}
+          onToggle={() => void onToggle(pageId, chunk)}
+        />
       ) : null}
       {error ? (
         <RetryError text={error} className="mt-3" onRetry={() => void onToggle(pageId, chunk)} />
@@ -240,6 +384,7 @@ const PageInspection = ({
   onTogglePage,
   onRetryPage,
   onToggle,
+  onSave,
 }: {
   detail: KbPageDetail
   pages: KbPageRecord[]
@@ -250,6 +395,7 @@ const PageInspection = ({
   onTogglePage: (page: KbPageRecord) => void
   onRetryPage: (page: KbPageRecord) => void
   onToggle: (pageId: string, chunk: KbPageDetail["chunks"][number]) => Promise<void>
+  onSave: (pageId: string, chunk: KbPageDetail["chunks"][number], body: string) => Promise<boolean>
 }) => {
   const reducedMotion = useReducedMotion()
   return (
@@ -281,8 +427,10 @@ const PageInspection = ({
                 chunk={chunk}
                 isAdmin={isAdmin}
                 pending={pendingIds.includes(chunk.id)}
+                saveLocked={pendingIds.length > 0}
                 error={errors[chunk.id]}
                 onToggle={onToggle}
+                onSave={onSave}
               />
             ))}
           </div>

@@ -1,6 +1,5 @@
 "use client"
 
-import { Effect, Exit } from "effect"
 import { useCallback, useState, type ChangeEvent, type FormEvent } from "react"
 
 import { Button } from "@/components/ui/button"
@@ -28,9 +27,9 @@ const updateLoginError = (
 }
 
 const visibleLoginErrors = (email: string, password: string) => {
-  const parsed = Effect.runSyncExit(parseStaffEmail(email))
+  const parsed = parseStaffEmail(email)
   const nextErrors = {
-    email: Exit.isFailure(parsed) ? emailError(email) : null,
+    email: parsed === null ? emailError(email) : null,
     password: requiredError("Password", password),
   }
   return Object.fromEntries(

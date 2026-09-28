@@ -83,6 +83,12 @@ class Conversation(Base):
         Index(
             "ix_conversations_visitor_site_last_message", "visitor_id", "site_id", "last_message_at"
         ),
+        Index(
+            "ix_conversations_generation_recovery",
+            "generation_lease_expires_at",
+            "generation_created_at",
+            postgresql_where=text("active_generation_id IS NOT NULL"),
+        ),
     )
 
     id: Mapped[UUID] = mapped_column(

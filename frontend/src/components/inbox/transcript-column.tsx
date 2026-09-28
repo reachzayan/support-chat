@@ -22,6 +22,7 @@ type TranscriptColumnProps = {
   joinPending: boolean
   mine: boolean
   joinedBy: string | null
+  agentName: string | null
   lines: ReturnType<typeof useInboxLive>["live"]["lines"]
   hasOlder: boolean
   loadingOlder: boolean
@@ -200,7 +201,6 @@ export const TranscriptColumn = (props: TranscriptColumnProps) => {
     visitorName,
     siteName,
     closed,
-    showJoin,
     showMarkContacted,
     composerEnabled,
     canned,
@@ -232,13 +232,13 @@ export const TranscriptColumn = (props: TranscriptColumnProps) => {
         </div>
       ) : null}
       <div className="flex min-h-0 flex-1 flex-col">
-        <TranscriptPane lines={lines} muted={closed} />
+        <TranscriptPane
+          lines={lines}
+          muted={closed}
+          companyName={siteName}
+          agentName={props.agentName}
+        />
       </div>
-      {showJoin && !composerEnabled && !closed ? (
-        <p className="text-mute shrink-0 px-4 pt-2 text-xs">
-          Join this chat to reply as a specialist.
-        </p>
-      ) : null}
       {showMarkContacted ? (
         <p className="text-mute shrink-0 px-4 pt-2 text-xs">
           Callback. Mark contacted when you have reached this visitor.

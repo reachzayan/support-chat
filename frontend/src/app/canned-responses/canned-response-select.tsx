@@ -37,7 +37,7 @@ export const CannedResponseSelect = ({
     <SelectTrigger
       id={id}
       aria-label={label}
-      className="border-line bg-ice h-10 w-full rounded-[8px]"
+      className="border-line bg-ice h-10 min-h-10 w-full rounded-[8px] data-[size=default]:h-10"
     >
       <SelectValue />
     </SelectTrigger>

@@ -3,6 +3,7 @@
 import type { ReactNode } from "react"
 
 import { PreferencesProvider, type Theme } from "@/components/preferences-context"
+import { Toaster } from "@/components/ui/toast"
 
 export const AppProviders = ({
   children,
@@ -14,6 +15,6 @@ export const AppProviders = ({
   initialSidebarOpen?: boolean
 }) => (
   <PreferencesProvider initialTheme={initialTheme} initialSidebarOpen={initialSidebarOpen}>
-    {children}
+    <Toaster>{children}</Toaster>
   </PreferencesProvider>
 )

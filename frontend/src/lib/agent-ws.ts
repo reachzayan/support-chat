@@ -188,6 +188,8 @@ const createAgentApi = (
         current.close(1000)
       }
     },
+    isOpen: () =>
+      transport.live && transport.socket !== null && transport.socket.readyState === AUTH_OPEN,
   }
 }
 

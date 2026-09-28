@@ -177,6 +177,7 @@ const ActiveChat = ({
         notice={notice}
         conversationState={state}
         agentName={view.assignedName}
+        companyName={config.name}
       />
       {visitorClosed ? (
         <ClosedFooter contactInfo={config.contact_info} onRestart={onRestart} />

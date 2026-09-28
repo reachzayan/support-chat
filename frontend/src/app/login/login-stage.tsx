@@ -51,7 +51,6 @@ const CaseRoom = ({ reducedMotion }: { reducedMotion: boolean }) => (
         transition={reducedMotion ? STILL : { ...ENTER, delay: 0.04 }}
         className="flex flex-1 flex-col justify-end gap-8 py-8 lg:justify-center lg:gap-12 lg:py-0"
       >
-        <FolderStack />
         <CaseCopy />
       </motion.div>
       <p className="hidden font-mono text-[10px] tracking-[0.18em] text-white/35 uppercase lg:block">
@@ -84,19 +83,5 @@ const CaseCopy = () => (
     <p className="mt-4 text-sm leading-6 text-white/65">
       Invited operators join visitor chats. Transcripts stay on this site.
     </p>
-  </div>
-)
-
-const FolderStack = () => (
-  <div aria-hidden="true" className="relative hidden h-44 w-56 lg:block">
-    <div className="bg-navy-mid/80 absolute top-12 left-8 h-[8.2rem] w-[11rem] rounded-[1.35rem]" />
-    <div className="absolute top-6 left-4 h-[8.2rem] w-[11.75rem] rounded-[1.35rem] border border-white/10 bg-[#163056]" />
-    <div className="absolute top-0 left-0 h-[8.2rem] w-[12.5rem] overflow-hidden rounded-[1.35rem] border border-white/14 bg-[#1a3a62] shadow-[0_22px_48px_rgba(0,0,0,0.34)]">
-      <div className="bg-ember absolute top-0 left-0 h-full w-1.5" />
-      <div className="pt-6 pl-6">
-        <p className="font-mono text-[10px] tracking-[0.2em] text-white/45 uppercase">Case file</p>
-        <p className="mt-2 text-[15px] font-semibold tracking-tight text-white">SampleSite</p>
-      </div>
-    </div>
   </div>
 )

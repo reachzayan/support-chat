@@ -274,6 +274,7 @@ def test_get_page_returns_indexed_copy_and_chunks(client: TestClient) -> None:
             "body": TIMING_BODY,
             "enabled": True,
             "origin_urls": [],
+            "last_body_edit_id": None,
         }
     ]
 

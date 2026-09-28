@@ -135,7 +135,11 @@ async def test_wakeup_catch_up_failure_logs_conversation_id(migrated_db, monkeyp
 
 def test_session_and_inbox_responses_are_no_store(client: TestClient) -> None:
     insert_staff(ALEX_EMAIL, "Alex Morgan", ALEX_PASSWORD)
-    login = client.post("/auth/login", json={"email": ALEX_EMAIL, "password": ALEX_PASSWORD})
+    login = client.post(
+        "/auth/login",
+        json={"email": ALEX_EMAIL, "password": ALEX_PASSWORD},
+        headers={"Origin": "http://localhost:3000"},
+    )
     inbox = client.get(
         "/api/conversations",
         headers={"Authorization": f"Bearer {login.json()['access_token']}"},

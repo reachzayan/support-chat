@@ -100,3 +100,4 @@ class KbChunk(Base):
     )
     embedding: Mapped[list[float] | None] = mapped_column(Vector(EMBEDDING_DIM), nullable=True)
     enabled: Mapped[bool] = mapped_column(Boolean, server_default=text("true"))
+    last_body_edit_id: Mapped[UUID | None] = mapped_column(nullable=True)

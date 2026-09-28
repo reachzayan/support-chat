@@ -110,7 +110,9 @@ async def _drain_queued(hinted: UUID | None, embedder) -> None:
                     source_id=str(source_id),
                     error=type(exc).__name__,
                 )
-                try:
+                await session.rollback()
+                claimed = await KbSourceRepository(session).lock_by_id(source_id)
+                if claimed is not None:
                     claimed.status = "failed"
                     claimed.stage = "failed"
                     claimed.error_code = error_code
@@ -127,9 +129,7 @@ async def _drain_queued(hinted: UUID | None, embedder) -> None:
                         building.state = "failed"
                         building.error_code = error_code
                     await session.commit()
-                except Exception:
-                    await session.rollback()
-                return
+                continue
 
 
 async def _source_loop(embedder, lock: asyncio.Lock) -> None:

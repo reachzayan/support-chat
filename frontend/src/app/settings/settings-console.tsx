@@ -1,5 +1,6 @@
 "use client"
 
+import { SignOutButton } from "@/components/admin/sign-out-button"
 import { StaffHeader } from "@/components/admin/staff-nav"
 import { Input } from "@/components/ui/input"
 
@@ -46,9 +47,12 @@ const ProfileCard = ({
         </p>
         <h2 className="text-navy heading mt-1 text-base">Your account</h2>
       </div>
-      <span className="bg-ice-2 text-steel rounded-full px-3 py-1 text-[10px] font-bold uppercase">
-        {isAdmin ? "Admin" : "Specialist"}
-      </span>
+      <div className="flex items-center gap-2">
+        <span className="bg-ice-2 text-steel rounded-full px-3 py-1 text-[10px] font-bold uppercase">
+          {isAdmin ? "Admin" : "Specialist"}
+        </span>
+        <SignOutButton className="text-navy hover:bg-ice-2" />
+      </div>
     </div>
     <div className="grid gap-4 sm:grid-cols-2">
       <ProfileField id="settings-name" label="Display name" value={displayName} />

@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import (
 from app.settings import get_settings
 
 _engine: AsyncEngine | None = None
+_session_factory: async_sessionmaker[AsyncSession] | None = None
 
 
 def get_engine() -> AsyncEngine:
@@ -25,19 +26,24 @@ def get_engine() -> AsyncEngine:
 
 
 async def dispose_engine() -> None:
-    global _engine
+    global _engine, _session_factory
     if _engine is not None:
         await _engine.dispose()
         _engine = None
+    _session_factory = None
 
 
 def reset_engine() -> None:
-    global _engine
+    global _engine, _session_factory
     _engine = None
+    _session_factory = None
 
 
 def session_maker() -> async_sessionmaker[AsyncSession]:
-    return async_sessionmaker(get_engine(), expire_on_commit=False)
+    global _session_factory
+    if _session_factory is None:
+        _session_factory = async_sessionmaker(get_engine(), expire_on_commit=False)
+    return _session_factory
 
 
 async def get_session() -> AsyncIterator[AsyncSession]:

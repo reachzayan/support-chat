@@ -2,11 +2,17 @@ import { staffRequest } from "@/lib/auth-client"
 
 export const staffRead = async (path: string) => staffRequest(path)
 
-export const staffWrite = async (path: string, method: string, body: unknown) => {
+export const staffWrite = async (
+  path: string,
+  method: string,
+  body: unknown,
+  extras?: { keepalive?: boolean },
+) => {
   return staffRequest(path, {
     method,
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
+    keepalive: extras?.keepalive,
   })
 }
 
@@ -149,6 +155,7 @@ export type KbChunkRecord = {
   body: string
   enabled: boolean
   origin_urls?: string[]
+  last_body_edit_id?: string | null
 }
 
 export type KbPageDetail = KbPageRecord & {

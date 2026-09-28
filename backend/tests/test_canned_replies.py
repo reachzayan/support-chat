@@ -12,12 +12,14 @@ from tests.ws_helpers import (
     login_staff,
 )
 
+ADMIN_EMAIL = "admin@example.local"
+
 
 def _auth(token: str) -> dict[str, str]:
     return {"Authorization": f"Bearer {token}"}
 
 
-def test_non_admin_staff_manages_general_and_website_responses_with_disabled_override(
+def test_non_admin_staff_manages_website_responses_and_cannot_create_global(
     client: TestClient,
 ) -> None:
     """Catches a site override falling back to General after it is disabled."""
@@ -26,11 +28,25 @@ def test_non_admin_staff_manages_general_and_website_responses_with_disabled_ove
         "backgroundchecks", "Sample Services", BG_PUBLIC_KEY, [HOST_ORIGIN]
     )
     insert_staff(ALEX_EMAIL, ALEX_NAME, ALEX_PASSWORD)
-    token = login_staff(client)
+    insert_staff(ADMIN_EMAIL, "Admin", ALEX_PASSWORD, is_admin=True)
+    staff = login_staff(client)
+    admin = login_staff(client, ADMIN_EMAIL, ALEX_PASSWORD)
+
+    denied = client.post(
+        "/api/canned-replies",
+        headers=_auth(staff),
+        json={
+            "site_id": None,
+            "shortcut": "hours",
+            "body": "Most negative results are reported within 24-48 hours.",
+        },
+    )
+    assert denied.status_code == 403
+    assert denied.json() == {"detail": "Forbidden"}
 
     general = client.post(
         "/api/canned-replies",
-        headers=_auth(token),
+        headers=_auth(admin),
         json={
             "site_id": None,
             "shortcut": " #Hours ",
@@ -47,7 +63,7 @@ def test_non_admin_staff_manages_general_and_website_responses_with_disabled_ove
 
     privacy = client.post(
         "/api/canned-replies",
-        headers=_auth(token),
+        headers=_auth(admin),
         json={
             "site_id": None,
             "shortcut": "privacy",
@@ -58,7 +74,7 @@ def test_non_admin_staff_manages_general_and_website_responses_with_disabled_ove
 
     override = client.post(
         "/api/canned-replies",
-        headers=_auth(token),
+        headers=_auth(staff),
         json={
             "site_id": str(easy_id),
             "shortcut": "hours",
@@ -68,9 +84,9 @@ def test_non_admin_staff_manages_general_and_website_responses_with_disabled_ove
     )
     assert override.status_code == 201
 
-    easy = client.get("/api/canned-replies", params={"site_id": str(easy_id)}, headers=_auth(token))
+    easy = client.get("/api/canned-replies", params={"site_id": str(easy_id)}, headers=_auth(staff))
     background = client.get(
-        "/api/canned-replies", params={"site_id": str(background_id)}, headers=_auth(token)
+        "/api/canned-replies", params={"site_id": str(background_id)}, headers=_auth(staff)
     )
     assert easy.status_code == 200
     assert easy.json()["items"] == [
@@ -86,7 +102,7 @@ def test_non_admin_staff_manages_general_and_website_responses_with_disabled_ove
         {"shortcut": "privacy", "body": "Please review our privacy notice.", "scope": "general"},
     ]
 
-    library = client.get("/api/canned-replies/library", headers=_auth(token))
+    library = client.get("/api/canned-replies/library", headers=_auth(staff))
     assert library.status_code == 200
     rows = library.json()["items"]
     assert len(rows) == 3
@@ -137,8 +153,8 @@ def test_canned_response_rejects_duplicate_shortcuts_and_invalid_updates(
 
 def test_deleting_a_canned_response_removes_it_and_404s_on_repeat(client: TestClient) -> None:
     """Catches a delete route that reports success without removing the row, or 500s when repeated."""
-    insert_staff(ALEX_EMAIL, ALEX_NAME, ALEX_PASSWORD)
-    token = login_staff(client)
+    insert_staff(ADMIN_EMAIL, "Admin", ALEX_PASSWORD, is_admin=True)
+    token = login_staff(client, ADMIN_EMAIL, ALEX_PASSWORD)
 
     created = client.post(
         "/api/canned-replies",

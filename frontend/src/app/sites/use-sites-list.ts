@@ -7,18 +7,33 @@ import { staffRead, type SiteRecord } from "@/components/admin/staff-api"
 export const useSitesList = () => {
   const [sites, setSites] = useState<SiteRecord[]>([])
   const [error, setError] = useState<string | null>(null)
+  const [retryNonce, setRetryNonce] = useState(0)
 
   useEffect(() => {
+    const request = retryNonce
     const load = async () => {
-      const response = await staffRead("/api/sites")
-      if (!response.ok) {
-        return
+      try {
+        const response = await staffRead("/api/sites")
+        if (request !== retryNonce) {
+          return
+        }
+        if (!response.ok) {
+          setError("Sites could not be loaded")
+          return
+        }
+        const body = (await response.json()) as { items: SiteRecord[] }
+        setError(null)
+        setSites(body.items)
+      } catch {
+        if (request !== retryNonce) {
+          return
+        }
+        setError("Sites could not be loaded")
       }
-      const body = (await response.json()) as { items: SiteRecord[] }
-      setSites(body.items)
     }
     void load()
-  }, [])
+  }, [retryNonce])
 
-  return { sites, setSites, error, setError }
+  const handleRetry = () => setRetryNonce((current) => current + 1)
+  return { sites, setSites, error, setError, handleRetry }
 }

@@ -88,7 +88,10 @@ MAX_TITLE = 300
 MAX_URL = 2048
 ASSISTANT_LINE = "You're now chatting with the assistant."
 CLOSED_BY_PREFIX = "This chat was closed by "
+IDLE_WARNING_LINE = "This chat will close in 1 minute. Send a message to keep active."
+IDLE_CLOSED_LINE = "This chat has been closed automatically."
 IDLE_TTL = timedelta(minutes=5)
+IDLE_WARN = IDLE_TTL - timedelta(minutes=1)
 OPEN_IDLE_STATES = frozenset({"prechat", "bot", "queued", "human"})
 SENSITIVE_LINE = "Please do not share Social Security numbers or other personal identifiers."
 RESUMED_LINE = "This chat has been resumed."
@@ -101,6 +104,11 @@ def _transition(state: str | None, event: str) -> str:
         return apply_event(state, event)
     except IllegalTransition as exc:
         raise CommandError("illegal_state") from exc
+
+
+def _is_open_visitor_conflict(exc: IntegrityError) -> bool:
+    orig = getattr(exc, "orig", None)
+    return "uq_conversations_open_visitor" in str(orig if orig is not None else exc)
 
 
 class ConversationService:
@@ -150,8 +158,25 @@ class ConversationService:
                 )
                 await self._commit_and_schedule()
                 return result
-            except IntegrityError:
+            except IntegrityError as exc:
                 await self._session.rollback()
+                if _is_open_visitor_conflict(exc):
+                    try:
+                        result = await self._bootstrap_once(
+                            site_key,
+                            public_key,
+                            origin_header,
+                            resume_token,
+                            client_host,
+                            user_agent,
+                            action,
+                            conversation_id,
+                            replace_current,
+                        )
+                        await self._commit_and_schedule()
+                        return result
+                    except IntegrityError:
+                        await self._session.rollback()
         raise CommandError("not_found")
 
     async def _bootstrap_once(
@@ -662,32 +687,96 @@ class ConversationService:
         conversation, site = await self._lock_site_then_conversation(conversation_id)
         if conversation is None:
             return None
-        if not await self._idle_due(conversation, moment):
-            await self._session.commit()
-            return None
         site_key = site.key if site is not None else ""
-        self._apply_idle_close(conversation, moment)
+        result = await self._apply_idle_tick(conversation, site_key, moment)
         await self._session.commit()
-        return CommandResult(conversation=conversation, site_key=site_key, event="end")
+        return result
 
     async def close_expired(
         self, now: datetime | None = None, limit: int = 100
     ) -> list[CommandResult]:
         moment = now or datetime.now(UTC)
-        cutoff = moment - IDLE_TTL
+        cutoff = moment - IDLE_WARN
         rows = await self._conversations.list_expired_open(cutoff, limit=limit)
         results: list[CommandResult] = []
         for conversation in rows:
-            if not await self._idle_due(conversation, moment):
-                continue
             site = await self._sites.get_by_id(conversation.site_id)
             site_key = site.key if site is not None else ""
-            self._apply_idle_close(conversation, moment)
-            results.append(CommandResult(conversation=conversation, site_key=site_key, event="end"))
+            result = await self._apply_idle_tick(conversation, site_key, moment)
+            if result is not None:
+                results.append(result)
         await self._session.commit()
         return results
 
-    async def _idle_due(self, conversation: Conversation | None, moment: datetime) -> bool:
+    async def _apply_idle_tick(
+        self, conversation: Conversation, site_key: str, moment: datetime
+    ) -> CommandResult | None:
+        if not await self._idle_candidate(conversation):
+            return None
+        age = self._idle_age(conversation, moment)
+        if age is None:
+            return None
+        if age >= IDLE_TTL:
+            return await self._close_idle(conversation, site_key, moment)
+        if age >= IDLE_WARN:
+            inserted = await self._ensure_system_line(
+                conversation, IDLE_WARNING_LINE, created_at=moment, touch_last_message=False
+            )
+            if inserted is None:
+                return None
+            return CommandResult(
+                conversation=conversation,
+                site_key=site_key,
+                message=inserted,
+                event="idle_warning",
+            )
+        return None
+
+    async def _close_idle(
+        self, conversation: Conversation, site_key: str, moment: datetime
+    ) -> CommandResult:
+        self._apply_idle_close(conversation, moment)
+        await self._ensure_system_line(
+            conversation,
+            IDLE_WARNING_LINE,
+            created_at=moment - (IDLE_TTL - IDLE_WARN),
+            touch_last_message=False,
+        )
+        inserted = await self._ensure_system_line(
+            conversation,
+            IDLE_CLOSED_LINE,
+            created_at=moment,
+            touch_last_message=True,
+            last_message_at=moment,
+        )
+        return CommandResult(
+            conversation=conversation,
+            site_key=site_key,
+            message=inserted,
+            event="end",
+        )
+
+    async def _ensure_system_line(
+        self,
+        conversation: Conversation,
+        body: str,
+        *,
+        created_at: datetime,
+        touch_last_message: bool,
+        last_message_at: datetime | None = None,
+    ) -> Message | None:
+        if await self._messages.has_system_body(conversation.id, body):
+            return None
+        return await self._insert_message(
+            conversation,
+            "system",
+            body,
+            created_at=created_at,
+            touch_last_message=touch_last_message,
+            at=last_message_at,
+        )
+
+    async def _idle_candidate(self, conversation: Conversation | None) -> bool:
         if conversation is None or conversation.state not in OPEN_IDLE_STATES:
             return False
         if conversation.active_generation_id is not None:
@@ -696,12 +785,22 @@ class ConversationService:
             conversation.id
         ):
             return False
+        return conversation.last_message_at is not None
+
+    def _idle_age(self, conversation: Conversation, moment: datetime) -> timedelta | None:
         last_at = conversation.last_message_at
         if last_at is None:
-            return False
+            return None
         if last_at.tzinfo is None:
             last_at = last_at.replace(tzinfo=UTC)
-        return moment - last_at >= IDLE_TTL
+        return moment - last_at
+
+    async def _idle_due(self, conversation: Conversation | None, moment: datetime) -> bool:
+        if not await self._idle_candidate(conversation):
+            return False
+        assert conversation is not None
+        age = self._idle_age(conversation, moment)
+        return age is not None and age >= IDLE_TTL
 
     def _apply_idle_close(self, conversation: Conversation, moment: datetime) -> None:
         conversation.state = _transition(conversation.state, "end")
@@ -796,7 +895,7 @@ class ConversationService:
         return row
 
     def _schedule_handoff_summary(self, row) -> None:
-        HandoffService(self._session).schedule_summary(row)
+        HandoffService(self._session).trace_summary_queued(row)
 
     async def _arm_bot_turn(self, conversation: Conversation, site: Site, text: str) -> UUID | None:
         if not site.bot_enabled:
@@ -1446,6 +1545,8 @@ class ConversationService:
         response_outcome: str | None = None,
         response_reason_code: str | None = None,
         at: datetime | None = None,
+        created_at: datetime | None = None,
+        touch_last_message: bool = True,
     ) -> Message:
         message = await self._messages.create(
             conversation.id,
@@ -1463,8 +1564,10 @@ class ConversationService:
             source_title=source_title,
             response_outcome=response_outcome,
             response_reason_code=response_reason_code,
+            created_at=created_at,
         )
-        conversation.last_message_at = at or datetime.now(UTC)
+        if touch_last_message:
+            conversation.last_message_at = at or datetime.now(UTC)
         return message
 
     async def _rate_limit_submit(

@@ -18,6 +18,7 @@ from app.repositories.site_repo import SiteRepository
 from app.services.bot_trace import capture_trace, record_trace, wait_for_trace_tasks
 from app.services.conversation_service import CommandError, CommandResult, ConversationService
 from app.services.grounded_response import ProviderStatus, ResponseDecision, ResponseOutcome
+from app.services.pii_redactor import redact_for_model
 from app.settings import get_settings
 
 
@@ -69,7 +70,7 @@ class InternalChatHarness:
                 site_key=request.site_key,
                 conversation_id=conversation.id,
                 client_message_id=request.client_message_id,
-                message=request.message,
+                message=redact_for_model(request.message),
             )
             service = ConversationService(self._session)
             try:

@@ -152,7 +152,7 @@ class HandoffService:
         )
         return row
 
-    def schedule_summary(self, row: HandoffContext) -> None:
+    def trace_summary_queued(self, row: HandoffContext) -> None:
         record_trace("handoff_summary", status="queued", handoff_id=row.id, persisted=True)
 
     async def close_handoff(

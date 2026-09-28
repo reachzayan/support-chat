@@ -46,7 +46,7 @@ const stateDotClass = (state: string) => {
     return "bg-ember"
   }
   if (state === "human") {
-    return "bg-[#29915E]"
+    return "bg-steel"
   }
   if (state === "bot") {
     return "bg-steel"
@@ -72,7 +72,7 @@ const stateChipClass = (state: string) => {
 const avatarPalette = [
   "bg-steel/15 text-steel",
   "bg-ember/15 text-ember",
-  "bg-[#29915E]/15 text-[#1F7048]",
+  "bg-steel/15 text-steel",
   "bg-navy/10 text-navy",
 ]
 
@@ -127,7 +127,7 @@ const ConversationRow = ({ item, selected, onSelect }: RowProps) => {
         onClick={handleSelect}
         aria-current={selected ? "true" : undefined}
         whileTap={{ scale: 0.99 }}
-        className={`relative flex h-auto w-full items-start gap-3 rounded-[12px] px-3 py-3 text-left transition-colors duration-150 ease-out ${
+        className={`relative flex h-auto w-full items-start gap-3 rounded-lg px-3 py-3 text-left transition-colors duration-150 ease-out ${
           selected ? "bg-ice-2" : "hover:bg-ice-2/70"
         }`}
       >
@@ -197,14 +197,8 @@ export const ConversationList = ({
   }, [deferredQuery, items])
   return (
     <section className="border-line bg-paper flex min-h-0 w-full flex-col border-r lg:w-[420px] lg:shrink-0">
-      <div className="border-line flex h-16 items-center justify-between border-b px-5">
+      <div className="border-line flex h-16 items-center border-b px-5">
         <h2 className="text-navy heading text-sm">Conversations</h2>
-        <span
-          className="bg-ice-2 text-mute inline-flex shrink-0 items-center rounded-full px-2 py-1 font-mono text-[10px] font-bold"
-          aria-label={`${items.length} conversations`}
-        >
-          {items.length}
-        </span>
       </div>
       <label htmlFor="conversation-search" className="relative mx-4 mt-4 mb-3 block">
         <span className="sr-only">Search chats</span>
@@ -255,7 +249,7 @@ const InboxFilterButton = ({
       aria-label={item.label}
       aria-pressed={active}
       onClick={handleClick}
-      className={`relative flex h-8 shrink-0 items-center justify-center gap-1.5 rounded-full px-2.5 text-center text-[11px] leading-none font-bold whitespace-nowrap transition-colors duration-200 ease-out ${
+      className={`relative flex h-8 shrink-0 items-center justify-center gap-1 rounded-full px-2 text-center text-[11px] leading-none font-bold whitespace-nowrap transition-colors duration-200 ease-out ${
         active ? "text-navy" : "text-mute hover:text-ink"
       }`}
     >
@@ -268,8 +262,10 @@ const InboxFilterButton = ({
         />
       ) : null}
       <span className={`relative size-1.5 shrink-0 rounded-full ${stateDotClass(item.id)}`} />
-      <span className="relative">{item.label}</span>
-      <span className="text-mute relative shrink-0 font-mono text-[10px]">{count}</span>
+      <span className="relative">
+        {item.label}
+        <span className="text-mute font-mono text-[10px] tabular-nums"> {count}</span>
+      </span>
     </Button>
   )
 }
@@ -289,7 +285,7 @@ const InboxFilterNav = ({
     <LayoutGroup id="inbox-filters">
       <nav
         aria-label="Inbox filters"
-        className="border-line bg-ice-2/70 mx-4 mb-3 flex h-10 flex-nowrap items-center gap-0.5 rounded-full border p-1"
+        className="border-line bg-ice-2/70 mx-4 mb-3 flex h-10 flex-nowrap items-center justify-between gap-0.5 overflow-visible rounded-full border p-1"
       >
         {INBOX_FILTERS.map((item) => (
           <InboxFilterButton
@@ -323,10 +319,14 @@ const ConversationRows = ({
   onSelect,
   onLoadMore,
 }: RowsProps) => {
+  const isEmpty = items.length === 0
   return (
-    <ul aria-label="Conversations" className="min-h-0 flex-1 overflow-y-auto">
-      {items.length === 0 ? (
-        <li className="px-5 py-10 text-center">
+    <ul
+      aria-label="Conversations"
+      className={cn("min-h-0 flex-1 overflow-y-auto", isEmpty && "flex flex-col justify-center")}
+    >
+      {isEmpty ? (
+        <li className="px-5 text-center">
           <InboxIcon
             aria-hidden="true"
             className="text-mute/50 mx-auto mb-2 size-6"

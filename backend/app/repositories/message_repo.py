@@ -1,3 +1,4 @@
+from datetime import datetime
 from uuid import UUID
 
 from sqlalchemy import exists, func, select
@@ -23,6 +24,18 @@ class MessageRepository:
         )
         return bool(result.scalar())
 
+    async def has_system_body(self, conversation_id: UUID, body: str) -> bool:
+        result = await self._session.execute(
+            select(
+                exists().where(
+                    Message.conversation_id == conversation_id,
+                    Message.role == "system",
+                    Message.body == body,
+                )
+            )
+        )
+        return bool(result.scalar())
+
     async def create(
         self,
         conversation_id: UUID,
@@ -40,6 +53,7 @@ class MessageRepository:
         source_title: str | None = None,
         response_outcome: str | None = None,
         response_reason_code: str | None = None,
+        created_at: datetime | None = None,
     ) -> Message:
         message = Message(
             conversation_id=conversation_id,
@@ -58,6 +72,8 @@ class MessageRepository:
             response_outcome=response_outcome,
             response_reason_code=response_reason_code,
         )
+        if created_at is not None:
+            message.created_at = created_at
         self._session.add(message)
         await self._session.flush()
         return message
@@ -156,14 +172,3 @@ class MessageRepository:
         rows = list(result.scalars().all())
         rows.reverse()
         return rows
-
-    async def list_for_conversation_with_authors(
-        self, conversation_id: UUID
-    ) -> list[tuple[Message, User | None]]:
-        result = await self._session.execute(
-            select(Message, User)
-            .outerjoin(User, User.id == Message.author_user_id)
-            .where(Message.conversation_id == conversation_id)
-            .order_by(Message.id)
-        )
-        return [(message, author) for message, author in result.all()]

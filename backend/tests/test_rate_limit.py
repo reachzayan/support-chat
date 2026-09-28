@@ -14,6 +14,7 @@ from tests.ws_helpers import (
     DEMO_PUBLIC_KEY,
     DEMO_SITE_KEY,
     HOST_ORIGIN,
+    STAFF_ORIGIN,
     insert_site,
     insert_staff,
     message_count,
@@ -95,9 +96,15 @@ def test_third_login_failure_is_429_and_does_not_issue_cookies(
     insert_staff(ALEX_EMAIL, "Alex Morgan", ALEX_PASSWORD)
     _set_budgets(monkeypatch, RATE_LOGIN_FAILURE="2")
     payload = {"email": ALEX_EMAIL, "password": "wrong-password"}
-    assert client.post("/auth/login", json=payload).status_code == 401
-    assert client.post("/auth/login", json=payload).status_code == 401
-    third = client.post("/auth/login", json=payload)
+    assert (
+        client.post("/auth/login", json=payload, headers={"Origin": STAFF_ORIGIN}).status_code
+        == 401
+    )
+    assert (
+        client.post("/auth/login", json=payload, headers={"Origin": STAFF_ORIGIN}).status_code
+        == 401
+    )
+    third = client.post("/auth/login", json=payload, headers={"Origin": STAFF_ORIGIN})
     assert third.status_code == 429
     assert "supportchat_refresh=" not in " ".join(third.headers.get_list("set-cookie")).lower()
 
@@ -111,11 +118,14 @@ def test_shared_ip_does_not_block_other_staff_after_few_failures(
         response = client.post(
             "/auth/login",
             json={"email": f"unknown{index}@example.com", "password": "wrong"},
+            headers={"Origin": STAFF_ORIGIN},
         )
         assert response.status_code == 401
     assert (
         client.post(
-            "/auth/login", json={"email": ALEX_EMAIL, "password": ALEX_PASSWORD}
+            "/auth/login",
+            json={"email": ALEX_EMAIL, "password": ALEX_PASSWORD},
+            headers={"Origin": STAFF_ORIGIN},
         ).status_code
         == 200
     )
@@ -140,7 +150,11 @@ def test_login_fails_closed_when_limiter_is_down(client: TestClient, monkeypatch
         raise RuntimeError("redis down")
 
     monkeypatch.setattr("app.services.rate_limit.get_redis", boom)
-    response = client.post("/auth/login", json={"email": ALEX_EMAIL, "password": ALEX_PASSWORD})
+    response = client.post(
+        "/auth/login",
+        json={"email": ALEX_EMAIL, "password": ALEX_PASSWORD},
+        headers={"Origin": STAFF_ORIGIN},
+    )
     assert response.status_code == 503
     assert "supportchat_refresh=" not in " ".join(response.headers.get_list("set-cookie")).lower()
 

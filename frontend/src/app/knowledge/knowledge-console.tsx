@@ -5,6 +5,7 @@
 import { Plus } from "lucide-react"
 import { useCallback, useState } from "react"
 
+import { RetryError } from "@/components/admin/retry-error"
 import { StaffHeader } from "@/components/admin/staff-nav"
 import { Button } from "@/components/ui/button"
 
@@ -62,11 +63,56 @@ export const KnowledgeConsole = ({ isAdmin, displayName: _displayName }: Knowled
             </div>
           }
         />
-        <KnowledgeMetrics
-          sourceCount={state.sources.length}
-          pageCount={state.pages.filter((page) => page.tab !== "general").length}
-        />
+        {state.loadError ? (
+          <div className="px-5 py-3 lg:px-8">
+            <RetryError text={state.loadError} onRetry={state.handleRetryLoad} className="mt-0" />
+          </div>
+        ) : null}
       </div>
+      <KnowledgeLoadedCatalog isAdmin={isAdmin} state={state} />
+      <SnapshotDiffSheet
+        open={state.diffSource !== null}
+        onOpenChange={state.handleDiffOpen}
+        diff={state.diff}
+        status={state.diffStatus}
+        canRollback={isAdmin && state.canRollback}
+        rollbackBusy={state.rollbackBusy}
+        onRollback={state.handleRollback}
+        progress={state.detailProgress}
+      />
+      {isAdmin ? (
+        <AddKnowledgeDialog
+          open={addKnowledgeOpen}
+          onOpenChange={setAddKnowledgeOpen}
+          siteName={selectedSite?.name ?? "this website"}
+          urls={state.urls}
+          onUrls={state.handleUrls}
+          onAdd={handleAddWebsite}
+          onAddText={state.handleAddText}
+          busy={state.addBusy}
+          error={state.addError}
+        />
+      ) : null}
+    </div>
+  )
+}
+
+const KnowledgeLoadedCatalog = ({
+  isAdmin,
+  state,
+}: {
+  isAdmin: boolean
+  state: ReturnType<typeof useKnowledgeState>
+}) => {
+  if (state.loadError !== null && state.sites.length === 0) {
+    return null
+  }
+  return (
+    <>
+      <KnowledgeMetrics
+        sourceCount={state.sources.length}
+        pageCount={state.pages.filter((page) => page.tab !== "general").length}
+      />
       <div id="main-content" className="flex min-h-0 flex-1 flex-col overflow-hidden lg:flex-row">
         <SourcePane
           isAdmin={isAdmin}
@@ -92,32 +138,10 @@ export const KnowledgeConsole = ({ isAdmin, displayName: _displayName }: Knowled
           onTogglePage={state.handleTogglePage}
           onRetryPage={state.handleRetryPage}
           onToggleChunk={state.handleToggleChunk}
+          onSaveChunk={state.handleSaveChunk}
         />
       </div>
-      <SnapshotDiffSheet
-        open={state.diffSource !== null}
-        onOpenChange={state.handleDiffOpen}
-        diff={state.diff}
-        status={state.diffStatus}
-        canRollback={isAdmin && state.canRollback}
-        rollbackBusy={state.rollbackBusy}
-        onRollback={state.handleRollback}
-        progress={state.detailProgress}
-      />
-      {isAdmin ? (
-        <AddKnowledgeDialog
-          open={addKnowledgeOpen}
-          onOpenChange={setAddKnowledgeOpen}
-          siteName={selectedSite?.name ?? "this website"}
-          urls={state.urls}
-          onUrls={state.handleUrls}
-          onAdd={handleAddWebsite}
-          onAddText={state.handleAddText}
-          busy={state.addBusy}
-          error={state.addError}
-        />
-      ) : null}
-    </div>
+    </>
   )
 }
 

@@ -86,6 +86,7 @@ const pageDetail = () =>
         heading: PAGE_TITLE,
         body: TIMING_BODY,
         enabled: true,
+        last_body_edit_id: null,
       },
     ],
   })
@@ -150,14 +151,19 @@ const knowledgeRoute = (url: string, init?: RequestInit) => {
     })
   }
   if (url === `/api/kb-chunks/${CHUNK_ID}` && init?.method === "PATCH") {
-    const body = JSON.parse(String(init.body)) as { enabled: boolean }
+    const patch = JSON.parse(String(init.body)) as {
+      enabled?: boolean
+      body?: string
+      edit_id?: string
+    }
     return jsonOk({
       id: CHUNK_ID,
       ordinal: 0,
       kind: "section",
       heading: PAGE_TITLE,
-      body: TIMING_BODY,
-      enabled: body.enabled,
+      body: patch.body ?? TIMING_BODY,
+      enabled: patch.enabled ?? true,
+      last_body_edit_id: patch.edit_id ?? null,
     })
   }
   const page = kbPageRoute(url, init)

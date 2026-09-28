@@ -2,6 +2,7 @@
 
 import { useCallback } from "react"
 
+import { RetryError } from "@/components/admin/retry-error"
 import type { HandoffContextRecord } from "@/components/admin/staff-api"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import {
@@ -36,6 +37,7 @@ type HandoffCardDialogProps = {
   resolved: boolean
   onOpenChange: (open: boolean) => void
   onRegenerate: () => void
+  regenError: boolean
   onResolved: (outcome: NonNullable<HandoffContextRecord["outcome"]>) => void
 }
 
@@ -79,6 +81,7 @@ export const HandoffCardDialog = ({
   resolved,
   onOpenChange,
   onRegenerate,
+  regenError,
   onResolved,
 }: HandoffCardDialogProps) => {
   const handleResolved = useCallback(
@@ -114,6 +117,13 @@ export const HandoffCardDialog = ({
             resolved={resolved}
             onRegenerate={onRegenerate}
           />
+          {regenError ? (
+            <RetryError
+              text="Could not regenerate the summary."
+              onRetry={onRegenerate}
+              className="mt-0"
+            />
+          ) : null}
 
           <Collapsible defaultOpen={false}>
             <CollapsibleTrigger aria-label="Technical details">

@@ -258,21 +258,19 @@ class HaikuPageStructurer:
         source_text: str,
         citation_url: str | None,
     ) -> StructuredPage:
-        from anthropic import AsyncAnthropic
+        from app.llm.bot_responder import BotResponder
 
         if not source_text.strip():
             raise ValueError("empty_source_text")
         units: list[EvidenceUnit] = []
         usage = [0, 0, 0]
         async with self._sem:
-            async with AsyncAnthropic(
-                api_key=get_settings().anthropic_api_key, timeout=120
-            ) as client:
-                for window in page_windows(source_text):
-                    data = {**payload, "text": window}
-                    proposal = await self._call(client, system, name, PageBlocks, data, usage)
-                    parsed = page_blocks_from_proposal(proposal)
-                    units.extend(evidence_from_blocks(parsed, window, citation_url))
+            client = BotResponder._shared_anthropic_client().with_options(timeout=120)
+            for window in page_windows(source_text):
+                data = {**payload, "text": window}
+                proposal = await self._call(client, system, name, PageBlocks, data, usage)
+                parsed = page_blocks_from_proposal(proposal)
+                units.extend(evidence_from_blocks(parsed, window, citation_url))
         units = unique_units(units)
         if not units:
             raise ValueError("empty_structured_page")

@@ -90,6 +90,9 @@ describe("admin shell", () => {
     expect(wrapper).toHaveStyle({ "--sidebar-width-icon": "3rem" })
     expect(sidebarCookie()).toBe("false")
     expect(window.localStorage.getItem("sidebar_state")).toBeNull()
+    const signOut = screen.getByRole("button", { name: "Sign out" })
+    expect(signOut).not.toHaveTextContent("Sign out")
+    expect(signOut.querySelector("svg")).not.toBeNull()
   })
 
   test("restores a collapsed sidebar from the preferences cookie", async () => {
