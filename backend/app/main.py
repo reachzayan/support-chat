@@ -21,39 +21,12 @@ from app.chat.ws_visitor import router as visitor_ws_router
 from app.db import dispose_engine, session_maker
 from app.llm.bot_responder import BotResponder
 from app.logging import configure_logging
-from app.models import (
-    AppLog,
-    CannedReply,
-    Conversation,
-    HandoffContext,
-    HandoffOutcome,
-    KbArticle,
-    Message,
-    RefreshToken,
-    Site,
-    User,
-    Visitor,
-)
 from app.redis import close_redis
 from app.security.surfaces import http_surface_allowed
 from app.services.app_log import record_app_log
 from app.services.kb_embedder import OpenAIEmbedder
 from app.settings import AppEnvironment, get_settings
 from app.workers import start_kb_workers, stop_kb_workers
-
-__all__ = [
-    "AppLog",
-    "CannedReply",
-    "Conversation",
-    "HandoffContext",
-    "HandoffOutcome",
-    "KbArticle",
-    "Message",
-    "RefreshToken",
-    "Site",
-    "User",
-    "Visitor",
-]
 
 
 @asynccontextmanager
@@ -119,22 +92,6 @@ def create_app() -> FastAPI:
 
     @application.exception_handler(Exception)
     async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONResponse:
-        # Never swallow FastAPI/Starlette HTTP and validation errors.
-        from fastapi import HTTPException
-        from fastapi.exception_handlers import (
-            http_exception_handler,
-            request_validation_exception_handler,
-        )
-        from fastapi.exceptions import RequestValidationError
-        from starlette.exceptions import HTTPException as StarletteHTTPException
-
-        if isinstance(exc, StarletteHTTPException):
-            return await http_exception_handler(request, exc)
-        if isinstance(exc, RequestValidationError):
-            return await request_validation_exception_handler(request, exc)
-        if isinstance(exc, HTTPException):
-            return await http_exception_handler(request, exc)
-
         await _persist_unhandled_exception(request, exc)
         return JSONResponse(status_code=500, content={"detail": "Internal server error"})
 

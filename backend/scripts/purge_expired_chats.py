@@ -62,7 +62,7 @@ async def purge_expired(
             await session.execute(delete(Conversation).where(Conversation.id.in_(ids)))
             await session.commit()
             deleted_conversations += len(ids)
-            log.info("purge_batch", conversations=len(ids), ids=[str(item) for item in ids])
+            log.info("purge_batch", conversations=len(ids))
         deleted_visitors = 0
         orphan = ~exists(select(Conversation.id).where(Conversation.visitor_id == Visitor.id))
         while True:
@@ -74,11 +74,7 @@ async def purge_expired(
             await session.execute(delete(Visitor).where(Visitor.id.in_(visitor_ids)))
             await session.commit()
             deleted_visitors += len(visitor_ids)
-            log.info(
-                "purge_visitor_batch",
-                visitors=len(visitor_ids),
-                ids=[str(item) for item in visitor_ids],
-            )
+            log.info("purge_visitor_batch", visitors=len(visitor_ids))
         log.info(
             "purge_complete",
             conversations=deleted_conversations,
