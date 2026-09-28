@@ -34,6 +34,8 @@ describe("inbox scheduled poll", () => {
       renderWithProviders(<InboxConsole user={ALEX} />)
       await user.click(screen.getByRole("button", { name: "Needs Attention" }))
       expect(screen.queryByText("Ada Lopez")).not.toBeInTheDocument()
+      await waitFor(() => expect(FakeSocket.instances.length).toBe(1))
+      FakeSocket.instances[0]?.close(1000)
       setListItems([adaQueued])
       await vi.advanceTimersByTimeAsync(15_000)
       await waitFor(() => expect(screen.getByText("Ada Lopez")).toBeInTheDocument())
@@ -83,6 +85,7 @@ describe("inbox load more", () => {
       await waitFor(() => expect(screen.getByText("Ada Lopez")).toBeInTheDocument())
       await user.click(screen.getByRole("button", { name: "Load more" }))
       await waitFor(() => expect(screen.getByText("Third Visitor")).toBeInTheDocument())
+      FakeSocket.instances[0]?.close(1000)
       const callsBeforePoll = vi.mocked(fetch).mock.calls.length
       await vi.advanceTimersByTimeAsync(15_000)
       await waitFor(() =>
@@ -96,25 +99,29 @@ describe("inbox load more", () => {
   })
 })
 
-describe("inbox view counts", () => {
+describe("inbox views", () => {
   beforeEach(() => {
     resetInboxHarness()
   })
 
-  test("Live, Bot, Needs Attention, and Closed show their counts without clicking a view", async () => {
+  test("Live, Bot, Needs Attention, and Closed keep their full labels and counts", async () => {
     renderWithProviders(<InboxConsole user={ALEX} />)
     await waitFor(() =>
-      expect(screen.getByRole("button", { name: "Needs Attention" })).toHaveTextContent("2"),
+      expect(screen.getByRole("button", { name: "Needs Attention" })).toHaveTextContent(
+        /^Needs Attention 2$/,
+      ),
     )
-    expect(screen.getByRole("button", { name: "Live" })).toHaveTextContent("0")
-    expect(screen.getByRole("button", { name: "Bot" })).toHaveTextContent("0")
-    expect(screen.getByRole("button", { name: "Closed" })).toHaveTextContent("0")
+    expect(screen.getByRole("button", { name: "Live" })).toHaveTextContent(/^Live 0$/)
+    expect(screen.getByRole("button", { name: "Bot" })).toHaveTextContent(/^Bot 0$/)
+    expect(screen.getByRole("button", { name: "Closed" })).toHaveTextContent(/^Closed 0$/)
   })
 
   test("inbox_upsert refreshes an unselected view count", async () => {
     renderWithProviders(<InboxConsole user={ALEX} />)
     await waitFor(() =>
-      expect(screen.getByRole("button", { name: "Needs Attention" })).toHaveTextContent("2"),
+      expect(screen.getByRole("button", { name: "Needs Attention" })).toHaveTextContent(
+        /^Needs Attention 2$/,
+      ),
     )
     await waitFor(() => expect(FakeSocket.instances.length).toBe(1))
     setListItems([
@@ -137,8 +144,12 @@ describe("inbox view counts", () => {
       state: "bot",
       site_key: "samplesite",
     })
-    await waitFor(() => expect(screen.getByRole("button", { name: "Bot" })).toHaveTextContent("1"))
-    expect(screen.getByRole("button", { name: "Needs Attention" })).toHaveTextContent("2")
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Bot" })).toHaveTextContent(/^Bot 1$/),
+    )
+    expect(screen.getByRole("button", { name: "Needs Attention" })).toHaveTextContent(
+      /^Needs Attention 2$/,
+    )
   })
 })
 
@@ -157,6 +168,7 @@ describe("inbox transcript poll", () => {
       await user.click(screen.getByRole("button", { name: /Ada Lopez/ }))
       await waitFor(() => expect(screen.getByText("ada@example.com")).toBeInTheDocument())
       expect(screen.queryByText("Please confirm the portal login.")).not.toBeInTheDocument()
+      FakeSocket.instances[0]?.close(1000)
       setDetails({
         [CONVO_ID]: {
           ...adaDetail,

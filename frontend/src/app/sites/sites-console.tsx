@@ -2,6 +2,7 @@
 
 import { useMemo } from "react"
 
+import { RetryError } from "@/components/admin/retry-error"
 import { StaffHeader } from "@/components/admin/staff-nav"
 
 import { SitesConsoleModals } from "./sites-console-modals"
@@ -15,7 +16,7 @@ type SitesConsoleProps = {
 }
 
 export const SitesConsole = ({ isAdmin, displayName: _displayName }: SitesConsoleProps) => {
-  const { sites, setSites, error, setError } = useSitesList()
+  const { sites, setSites, error, setError, handleRetry } = useSitesList()
   const actions = useSitesConsoleActions(setSites, setError)
 
   const activeSite = useMemo(
@@ -33,7 +34,9 @@ export const SitesConsole = ({ isAdmin, displayName: _displayName }: SitesConsol
         id="main-content"
         className="flex w-full min-w-0 flex-col gap-4 px-5 py-6 lg:px-8 lg:py-8"
       >
-        {error && actions.modal === null ? (
+        {error === "Sites could not be loaded" ? (
+          <RetryError text={error} onRetry={handleRetry} />
+        ) : error && actions.modal === null ? (
           <p
             className="border-ember/20 bg-ember/10 text-ember rounded-[8px] border px-4 py-3 text-sm"
             role="alert"
@@ -42,14 +45,16 @@ export const SitesConsole = ({ isAdmin, displayName: _displayName }: SitesConsol
           </p>
         ) : null}
 
-        <SitesDirectory
-          sites={sites}
-          isAdmin={isAdmin}
-          checkingIds={actions.checkingIds}
-          onOpenAdd={actions.handleOpenAdd}
-          onOpenManage={actions.handleOpenManage}
-          onCheckInstall={actions.handleCheckInstall}
-        />
+        {error === "Sites could not be loaded" && sites.length === 0 ? null : (
+          <SitesDirectory
+            sites={sites}
+            isAdmin={isAdmin}
+            checkingIds={actions.checkingIds}
+            onOpenAdd={actions.handleOpenAdd}
+            onOpenManage={actions.handleOpenManage}
+            onCheckInstall={actions.handleCheckInstall}
+          />
+        )}
       </div>
 
       <SitesConsoleModals

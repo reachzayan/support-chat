@@ -80,10 +80,12 @@ const ComposerField = ({
   onKeyDown: (event: KeyboardEvent<HTMLInputElement>) => void
 }) => (
   <div
-    className={`relative flex min-h-14 items-center gap-2 rounded-lg border px-3 py-2 transition-[border-color,box-shadow,background-color] duration-150 ease-out ${
+    className={`relative flex min-h-14 items-center gap-2 rounded-2xl border px-3 py-2 transition-[border-color,box-shadow,background-color,opacity] duration-150 ease-out ${
       closed
         ? "border-line text-mute bg-transparent"
-        : "border-ink bg-paper shadow-[0_2px_8px_rgba(13,31,58,0.04)]"
+        : disabled
+          ? "border-line bg-ice-2/90 text-mute cursor-not-allowed opacity-75 shadow-none"
+          : "border-ink bg-paper shadow-[0_2px_8px_rgba(13,31,58,0.04)]"
     }`}
   >
     <Popover open={pickerOpen} onOpenChange={onPickerOpenChange} triggerId="canned-picker-trigger">
@@ -97,6 +99,7 @@ const ComposerField = ({
             aria-label="Open canned responses"
             disabled={disabled}
             onClick={onOpenPicker}
+            className={disabled ? "text-mute/70" : undefined}
           />
         }
       >
@@ -150,7 +153,7 @@ const ComposerField = ({
       onChange={onChange}
       onKeyDown={onKeyDown}
       placeholder={composerPlaceholder(closed, disabled)}
-      className="text-ink placeholder:text-mute disabled:text-mute h-auto min-w-0 flex-1 rounded-none border-0 !bg-transparent px-1 text-base shadow-none outline-none focus-visible:border-0 focus-visible:ring-0 dark:!bg-transparent"
+      className="text-ink placeholder:text-mute/80 disabled:text-mute/80 h-auto min-w-0 flex-1 rounded-none border-0 !bg-transparent px-1 text-base shadow-none outline-none focus-visible:border-0 focus-visible:ring-0 disabled:cursor-not-allowed dark:!bg-transparent"
     />
     <Button
       variant="ghost"
@@ -161,7 +164,9 @@ const ComposerField = ({
       className={`widget-send-button flex size-11 shrink-0 items-center justify-center rounded-full focus-visible:ring-2 focus-visible:outline-none ${
         closed
           ? "bg-line text-mute"
-          : "bg-steel hover:bg-navy disabled:bg-ember-soft focus-visible:ring-steel text-white hover:text-white"
+          : disabled
+            ? "bg-line text-mute/80 cursor-not-allowed"
+            : "bg-steel hover:bg-navy disabled:bg-ember-soft focus-visible:ring-steel text-white hover:text-white"
       }`}
     >
       <ArrowUp aria-hidden="true" className="size-5" strokeWidth={2.4} />

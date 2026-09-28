@@ -1,4 +1,4 @@
-import { screen } from "@testing-library/react"
+import { screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { useCallback, useState } from "react"
 import { describe, expect, test } from "vitest"
@@ -26,21 +26,19 @@ const DialogFixture = () => {
 }
 
 describe("dialog chrome", () => {
-  test("opens with a sharp, unblurred frame and no trigger-origin morph", async () => {
+  test("opens a named dialog, traps focus, and offers Close dialog", async () => {
     const user = userEvent.setup()
     renderWithProviders(<DialogFixture />)
-    await user.click(screen.getByRole("button", { name: "Add knowledge" }))
+    const trigger = screen.getByRole("button", { name: "Add knowledge" })
+    await user.click(trigger)
 
-    const dialog = screen.getByRole("dialog")
-    expect(dialog).not.toHaveAttribute("data-origin-left")
-    expect(dialog).not.toHaveAttribute("data-origin-top")
-    expect(dialog.className).not.toMatch(/-translate-x-1\/2/)
-    expect(dialog.className).not.toMatch(/backdrop-blur/)
-    expect(dialog.className).toMatch(/border-line/)
-    expect(dialog.className).toMatch(/bg-paper/)
+    const dialog = await screen.findByRole("dialog", { name: "Add knowledge" })
+    expect(dialog).toHaveAccessibleDescription("Paste source URLs for this website.")
+    await waitFor(() => expect(dialog.contains(document.activeElement)).toBe(true))
+    expect(screen.getByRole("button", { name: "Close dialog" })).toBeInTheDocument()
 
-    const overlay = document.querySelector('[data-slot="dialog-overlay"]')
-    expect(overlay).not.toBeNull()
-    expect(overlay?.className).not.toMatch(/backdrop-blur/)
+    await user.click(screen.getByRole("button", { name: "Close dialog" }))
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument())
+    expect(trigger).toHaveFocus()
   })
 })

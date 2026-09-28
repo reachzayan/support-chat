@@ -78,6 +78,7 @@ const InboxShell = ({ userId, isAdmin, inbox }: InboxShellProps) => {
               joinPending={inbox.live.joinPending}
               mine={mine}
               joinedBy={otherAgentName(inbox.live, mine)}
+              agentName={inbox.live.assigned?.display_name ?? null}
               lines={inbox.live.lines}
               hasOlder={detail.has_older === true}
               loadingOlder={inbox.loadingOlder}

@@ -38,9 +38,7 @@ const SitesColumnHeader = ({
   return (
     <th
       scope="col"
-      className={`${LABEL} border-line relative border-r px-3 py-2.5 last:border-r-0 ${
-        label === "Actions" ? "text-right" : ""
-      }`}
+      className={`${LABEL} border-line relative border-r px-3 py-2.5 last:border-r-0`}
     >
       <span className="pr-3">{label}</span>
       <Button
@@ -164,7 +162,7 @@ const SiteRow = ({
         />
       </td>
       <td className="px-3 py-2.5">
-        <div className="inline-flex items-center justify-end">
+        <div className="flex items-center justify-center">
           <CopyButton value={site.snippet} className="rounded-r-none" />
           <Button
             type="button"

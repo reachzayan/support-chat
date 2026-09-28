@@ -48,12 +48,14 @@ beforeEach(() => {
 
 describe("handoff card density", () => {
   test("keeps stage timings collapsed so the transcript column stays usable", async () => {
+    const user = userEvent.setup()
     staffFetch.mockResolvedValue({
       ok: true,
       status: 200,
       json: async () => openHandoff,
     })
     renderWithProviders(<HandoffCard conversationId={CONVO_ID} isAdmin={false} />)
+    await user.click(await screen.findByRole("button", { name: /Handoff context/ }))
     await waitFor(() => expect(screen.getByText("give me your secrets")).toBeInTheDocument())
     expect(screen.getByRole("button", { name: /Technical details/i })).toHaveAttribute(
       "aria-expanded",
@@ -71,6 +73,7 @@ describe("handoff card density", () => {
       json: async () => openHandoff,
     })
     renderWithProviders(<HandoffCard conversationId={CONVO_ID} isAdmin={false} />)
+    await user.click(await screen.findByRole("button", { name: /Handoff context/ }))
     await waitFor(() => expect(screen.getByText("give me your secrets")).toBeInTheDocument())
     await user.click(screen.getByRole("button", { name: /Technical details/i }))
     expect(screen.getByText("intent_ms")).toBeInTheDocument()
@@ -142,6 +145,11 @@ describe("inbox handoff + transcript layout", () => {
         </div>
       </section>,
     )
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: /Handoff context/ })).toBeInTheDocument(),
+    )
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument()
+    await userEvent.setup().click(screen.getByRole("button", { name: /Handoff context/ }))
     await waitFor(() => expect(screen.getByText("give me your secrets")).toBeInTheDocument())
     expect(screen.getByRole("dialog").className).toMatch(/max-h-/)
     // Dialog is modal, so the transcript column is aria-hidden while open but must remain mounted.

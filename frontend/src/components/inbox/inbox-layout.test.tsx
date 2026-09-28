@@ -49,10 +49,14 @@ describe("inbox layout", () => {
     expect(
       screen.getByRole("heading", { name: "Conversations" }).closest("section")?.className,
     ).toMatch(/lg:w-\[420px\]/)
-    expect(screen.getByRole("button", { name: "Needs Attention" })).toHaveTextContent(
-      "Needs Attention",
-    )
-    expect(screen.getByRole("button", { name: "Closed" })).toHaveTextContent("Closed")
+    const needsAttention = screen.getByRole("button", { name: "Needs Attention" })
+    expect(needsAttention).toHaveTextContent(/^Needs Attention 2$/)
+    expect(needsAttention.className).not.toMatch(/\btruncate\b/)
+    expect(needsAttention.querySelector(".truncate")).toBeNull()
+    expect(screen.getByRole("button", { name: "Closed" })).toHaveTextContent(/^Closed 0$/)
+    expect(screen.getByRole("button", { name: "Live" })).toHaveTextContent(/^Live 0$/)
+    expect(screen.getByRole("button", { name: "Bot" })).toHaveTextContent(/^Bot 0$/)
+    expect(screen.queryByLabelText(/^\d+ conversations$/)).not.toBeInTheDocument()
     const transcriptHeader = screen.getByRole("heading", { level: 1 }).closest("div.border-b")
     const visitorHeader = screen
       .getByRole("complementary", { name: "Visitor facts" })

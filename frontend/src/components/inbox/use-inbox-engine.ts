@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, type Dispatch, type SetStateAction } from "react"
 
 import { agentSocketUrl, createAgentSocket } from "@/lib/agent-ws"
-import { getAccessToken, refreshSession } from "@/lib/auth-client"
+import { getAccessToken, redirectToLogin, refreshSession } from "@/lib/auth-client"
 import { createReconnectScheduler } from "@/lib/ws-reconnect"
 
 import { fetchInboxDetail, fetchInboxList, mergeInboxMessages } from "./inbox-api"
@@ -139,6 +139,10 @@ const handleAgentSocketClose = async (
   }
   if (code === 4401) {
     const result = await refreshSession()
+    if (result.status === "unauthenticated") {
+      redirectToLogin()
+      return
+    }
     if (result.status !== "authenticated") {
       return
     }
@@ -382,15 +386,16 @@ export const useInboxSideEffects = (
 
   useEffect(() => {
     const timer = window.setInterval(() => {
-      if (!document.hidden) {
-        reloadList(refs.filterRef.current)
-        if (refs.selectedRef.current !== null) {
-          reloadDetail(refs.selectedRef.current)
-        }
+      if (document.hidden || socketRef.current?.isOpen()) {
+        return
+      }
+      reloadList(refs.filterRef.current)
+      if (refs.selectedRef.current !== null) {
+        reloadDetail(refs.selectedRef.current)
       }
     }, INBOX_LIST_POLL_MS)
     return () => window.clearInterval(timer)
-  }, [reloadDetail, reloadList, refs.filterRef, refs.selectedRef])
+  }, [reloadDetail, reloadList, refs.filterRef, refs.selectedRef, socketRef])
 
   useEffect(() => {
     let disposed = false
@@ -408,9 +413,13 @@ export const useInboxSideEffects = (
     socketRef.current = socket
 
     const handleResume = () => {
-      if (!document.hidden && navigator.onLine) {
-        scheduler.handleClose()
+      if (document.hidden || !navigator.onLine) {
+        return
       }
+      if (socketRef.current?.isOpen()) {
+        return
+      }
+      scheduler.handleClose()
     }
     window.addEventListener("online", handleResume)
     document.addEventListener("visibilitychange", handleResume)

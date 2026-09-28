@@ -18,6 +18,7 @@ const HandoffCardInner = ({ conversationId, isAdmin }: HandoffCardProps) => {
   const [handoff, setHandoff] = useState<HandoffContextRecord | null>(null)
   const [loadError, setLoadError] = useState(false)
   const [open, setOpen] = useState(false)
+  const [regenError, setRegenError] = useState(false)
 
   useEffect(() => {
     let ignore = false
@@ -39,7 +40,6 @@ const HandoffCardInner = ({ conversationId, isAdmin }: HandoffCardProps) => {
       setLoadError(false)
       const next = (await response.json()) as HandoffContextRecord
       setHandoff(next)
-      setOpen(next.outcome === null)
     }
     void load()
     return () => {
@@ -55,17 +55,17 @@ const HandoffCardInner = ({ conversationId, isAdmin }: HandoffCardProps) => {
     }
     const response = await staffWrite(`/api/handoffs/${handoff.id}/summary/regenerate`, "POST", {})
     if (!response.ok) {
+      setRegenError(true)
       return
     }
+    setRegenError(false)
     setHandoff((await response.json()) as HandoffContextRecord)
   }, [handoff])
   const handleResolved = useCallback((outcome: NonNullable<HandoffContextRecord["outcome"]>) => {
     setHandoff((current) => (current === null ? current : { ...current, outcome }))
   }, [])
 
-  if (loadError || handoff === null) {
-    return null
-  }
+  if (loadError || handoff === null) return null
 
   const reasonClass = REASON_STYLES[handoff.escalation_reason] ?? "bg-ice-2 text-ink"
   const resolved = handoff.outcome !== null
@@ -92,6 +92,7 @@ const HandoffCardInner = ({ conversationId, isAdmin }: HandoffCardProps) => {
         resolved={resolved}
         onOpenChange={handleOpenChange}
         onRegenerate={handleRegenerate}
+        regenError={regenError}
         onResolved={handleResolved}
       />
     </>
