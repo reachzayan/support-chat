@@ -28,27 +28,46 @@ const sourceFingerprint = (row: KbSourceRecord) =>
 const useKnowledgeSites = () => {
   const [sites, setSites] = useState<SiteRecord[]>([])
   const [siteId, setSiteId] = useState("")
+  const [loadError, setLoadError] = useState<string | null>(null)
+  const [retryNonce, setRetryNonce] = useState(0)
 
   useEffect(() => {
+    const request = retryNonce
     const load = async () => {
-      const response = await staffRead("/api/sites")
-      if (!response.ok) {
-        return
-      }
-      const payload = (await response.json()) as { items: SiteRecord[] }
-      setSites(payload.items)
-      if (payload.items[0]) {
-        setSiteId(payload.items[0].id)
+      try {
+        const response = await staffRead("/api/sites")
+        if (request !== retryNonce) {
+          return
+        }
+        if (!response.ok) {
+          setLoadError("Knowledge could not be loaded")
+          return
+        }
+        const payload = (await response.json()) as { items: SiteRecord[] }
+        setLoadError(null)
+        setSites(payload.items)
+        if (payload.items[0]) {
+          setSiteId(payload.items[0].id)
+        }
+      } catch {
+        if (request !== retryNonce) {
+          return
+        }
+        setLoadError("Knowledge could not be loaded")
       }
     }
     void load()
-  }, [])
+  }, [retryNonce])
 
   const handleSite = useCallback((nextSiteId: string) => {
     setSiteId(nextSiteId)
   }, [])
 
-  return { sites, siteId, handleSite }
+  const handleRetryLoad = useCallback(() => {
+    setRetryNonce((current) => current + 1)
+  }, [])
+
+  return { sites, siteId, handleSite, loadError, handleRetryLoad }
 }
 
 const applySourceList = (
@@ -182,7 +201,7 @@ const useKnowledgePages = (sources: KbSourceRecord[]) => {
 
 export const useKnowledgeCatalog = (isAdmin: boolean) => {
   const [urls, setUrls] = useState("")
-  const { sites, siteId, handleSite: selectSite } = useKnowledgeSites()
+  const { sites, siteId, handleSite: selectSite, loadError, handleRetryLoad } = useKnowledgeSites()
   const { sources, sourceId, setSources, setSourceId } = useKnowledgeSources(siteId)
   const { pages, pageDetail, setPages, setPageDetail } = useKnowledgePages(sources)
   const handleSite = useCallback(
@@ -217,6 +236,8 @@ export const useKnowledgeCatalog = (isAdmin: boolean) => {
     urls,
     setSources,
     handleSite,
+    loadError,
+    handleRetryLoad,
     ...sourceHandlers,
     ...pageHandlers,
   }

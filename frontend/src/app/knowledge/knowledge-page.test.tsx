@@ -26,6 +26,24 @@ import {
   multiPageFetch,
 } from "./knowledge-test-fetch"
 
+describe("knowledge load failure", () => {
+  test("a 503 shows Knowledge could not be loaded instead of an empty catalog", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: false,
+        status: 503,
+        json: async () => ({ detail: "unavailable" }),
+      }),
+    )
+    renderWithProviders(<KnowledgeConsole isAdmin={true} displayName="Riley Chen" />)
+    expect(await screen.findByRole("alert")).toHaveTextContent("Knowledge could not be loaded")
+    expect(
+      screen.queryByText("Add a website or trusted text this site should answer from."),
+    ).not.toBeInTheDocument()
+  })
+})
+
 describe("knowledge demo site", () => {
   beforeEach(() => {
     vi.stubGlobal("fetch", vi.fn(demoKnowledgeFetch))
