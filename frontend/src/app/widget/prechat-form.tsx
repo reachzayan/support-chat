@@ -268,10 +268,7 @@ const InquirySelect = () => {
       <label htmlFor="inquiry-type">Inquiry type</label>
       <input type="hidden" name="inquiryType" value={value} />
       <Select value={value} onValueChange={handleValueChange} items={INQUIRY_LABELS}>
-        <SelectTrigger
-          id="inquiry-type"
-          className="border-line bg-paper focus-visible:border-steel focus-visible:ring-steel h-11 w-full rounded-[8px] px-3 text-base font-normal"
-        >
+        <SelectTrigger id="inquiry-type" className={`${FIELD} w-full data-[size=default]:h-11`}>
           <SelectValue />
         </SelectTrigger>
         <SelectContent align="start" alignItemWithTrigger={false}>

@@ -32,10 +32,13 @@ export const statusLiteralForReason = (reason: string | null | undefined) => {
 export const ChatStatus = ({ reconnecting, systemReason = null }: ChatStatusProps) => {
   if (reconnecting) {
     return (
-      <p className="widget-enter text-mute mx-3 mt-1 flex items-center gap-2 rounded-2xl bg-white/66 px-3 py-2.5 text-xs font-semibold shadow-[0_6px_18px_rgba(13,31,58,0.06)] backdrop-blur-xl">
+      <output
+        aria-live="polite"
+        className="widget-enter text-mute mx-3 mt-1 flex items-center gap-2 rounded-2xl bg-white/66 px-3 py-2.5 text-xs font-semibold shadow-[0_6px_18px_rgba(13,31,58,0.06)] backdrop-blur-xl"
+      >
         <span className="bg-ember size-1.5 rounded-full" />
         Reconnecting…
-      </p>
+      </output>
     )
   }
   const status = statusLiteralForReason(systemReason)
@@ -43,9 +46,12 @@ export const ChatStatus = ({ reconnecting, systemReason = null }: ChatStatusProp
     return null
   }
   return (
-    <p className="widget-enter text-mute mx-3 mt-1 flex items-center gap-2 rounded-2xl bg-white/66 px-3 py-2.5 text-xs font-semibold shadow-[0_6px_18px_rgba(13,31,58,0.06)] backdrop-blur-xl">
+    <output
+      aria-live="polite"
+      className="widget-enter text-mute mx-3 mt-1 flex items-center gap-2 rounded-2xl bg-white/66 px-3 py-2.5 text-xs font-semibold shadow-[0_6px_18px_rgba(13,31,58,0.06)] backdrop-blur-xl"
+    >
       <span className="bg-steel size-1.5 rounded-full" />
       {status}
-    </p>
+    </output>
   )
 }

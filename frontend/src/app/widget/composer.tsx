@@ -46,7 +46,7 @@ export const Composer = ({ disabled, sending, onSend }: ComposerProps) => {
         transition={
           reducedMotion ? { duration: 0 } : { type: "spring", stiffness: 380, damping: 32 }
         }
-        className="focus-within:border-steel/45 focus-within:ring-steel/25 flex min-h-14 items-center gap-2 rounded-lg border border-white/80 bg-white/80 px-3 py-2 backdrop-blur-xl transition-[border-color,box-shadow] duration-200 ease-out focus-within:ring-4"
+        className="focus-within:border-steel/45 focus-within:ring-steel/25 border-line flex min-h-14 items-center gap-2 rounded-2xl border bg-white/80 px-3 py-2 shadow-[0_1px_2px_rgba(13,31,58,0.04)] backdrop-blur-xl transition-[border-color,box-shadow] duration-200 ease-out focus-within:ring-4"
       >
         <Input
           id="supportchat-message"

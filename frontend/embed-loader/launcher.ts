@@ -25,7 +25,7 @@ export const mountLauncher = (
     "padding:0",
     "border:0",
     "border-radius:50%",
-    "background:#0B0B0B",
+    "background:#0B2347",
     "cursor:pointer",
     "z-index:2147483646",
     "touch-action:manipulation",

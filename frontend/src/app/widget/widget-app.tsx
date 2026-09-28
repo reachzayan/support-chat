@@ -12,7 +12,12 @@ import {
 } from "@/lib/postmessage"
 
 import { applyHostFrame } from "./apply-host-frame"
-import { guessParentOrigin, postToParent } from "./host-bridge"
+import {
+  guessParentOrigin,
+  isTrustedHostFrame,
+  postToParent,
+  readPinnedParentOrigin,
+} from "./host-bridge"
 import { ReturningHome } from "./returning-home"
 import { useVisitorConnection, type SocketApi } from "./use-visitor-connection"
 import { useWidgetActions } from "./use-widget-actions"
@@ -122,7 +127,7 @@ const applyHostBootstrap = (
   setLoadingOlder: (loading: boolean) => void,
   setReturning: (view: ReturningView) => void,
 ) => {
-  if (event.source !== window.parent) {
+  if (!isTrustedHostFrame(event)) {
     return
   }
   const frame = parseHostToWidget(event.data)
@@ -153,7 +158,7 @@ const applyHostBootstrap = (
 }
 
 export const WidgetApp = () => {
-  const [parentOrigin, setParentOrigin] = useState("")
+  const [parentOrigin, setParentOrigin] = useState(readPinnedParentOrigin)
   const [config, setConfig] = useState<PublicWidgetConfig | null>(null)
   const [page, setPage] = useState({ page_url: "", page_title: "", referrer: "" })
   const [view, setView] = useState<ChatView>(emptyChat)

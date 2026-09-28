@@ -59,7 +59,7 @@ describe("supportchat loader", () => {
     expect(launcher?.style.height).toBe("56px")
     expect(launcher?.style.right).toBe("24px")
     expect(launcher?.style.bottom).toBe("24px")
-    expect(launcher?.style.background).toBe("rgb(11, 11, 11)")
+    expect(launcher?.style.background).toBe("rgb(11, 35, 71)")
     expect(launcher?.querySelector("img")).toBeNull()
     expect(launcher?.textContent).toBe("Chat")
   })

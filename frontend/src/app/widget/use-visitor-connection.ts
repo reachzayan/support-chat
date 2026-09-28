@@ -6,7 +6,7 @@ import { parseHostToWidget } from "@/lib/postmessage"
 import { createVisitorSocket, visitorSocketUrl } from "@/lib/widget-ws"
 import { createReconnectScheduler } from "@/lib/ws-reconnect"
 
-import { postToParent } from "./host-bridge"
+import { isTrustedHostFrame, postToParent } from "./host-bridge"
 import {
   applyVisitorFrame,
   isAck,
@@ -55,13 +55,14 @@ export const useVisitorConnection = (
     })
 
     const handleResume = () => {
-      if (!document.hidden && navigator.onLine) {
-        const socket = socketRef.current
-        if (socket === null) {
-          return
-        }
-        schedulerRef.current?.handleClose()
+      if (document.hidden || !navigator.onLine) {
+        return
       }
+      const socket = socketRef.current
+      if (socket === null || socket.isOpen()) {
+        return
+      }
+      schedulerRef.current?.handleClose()
     }
     window.addEventListener("online", handleResume)
     document.addEventListener("visibilitychange", handleResume)
@@ -71,6 +72,8 @@ export const useVisitorConnection = (
       schedulerRef.current?.dispose()
       window.removeEventListener("online", handleResume)
       document.removeEventListener("visibilitychange", handleResume)
+      socketRef.current?.close()
+      socketRef.current = null
     }
   }, [socketRef])
 
@@ -110,7 +113,7 @@ const handleBootstrap = (
   viewRef: ViewRef,
   schedulerRef: SchedulerRef,
 ) => {
-  if (event.source !== window.parent) {
+  if (!isTrustedHostFrame(event)) {
     return
   }
   const frame = parseHostToWidget(event.data)
