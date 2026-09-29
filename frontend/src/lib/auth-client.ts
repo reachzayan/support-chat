@@ -73,7 +73,7 @@ const fetchRefresh = async (): Promise<RefreshSessionResult> => {
       credentials: "include",
       headers: csrfHeaders(),
     })
-    if (response.status === 401) {
+    if (response.status === 401 || response.status === 403) {
       accessToken = null
       return { status: "unauthenticated" }
     }
@@ -97,6 +97,10 @@ const withRefreshLock = async (): Promise<RefreshSessionResult> => {
 }
 
 export const refreshSession = async (): Promise<RefreshSessionResult> => {
+  if (!readCookie("supportchat_csrf")) {
+    accessToken = null
+    return { status: "unauthenticated" }
+  }
   if (refreshInFlight !== null) {
     return refreshInFlight
   }
@@ -122,7 +126,7 @@ export const logout = async () => {
 }
 
 export const redirectToLogin = () => {
-  window.location.assign("/login")
+  window.location.replace("/login")
 }
 
 export const fetchMe = async () => {

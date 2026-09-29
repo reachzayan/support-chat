@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test, vi } from "vitest"
 
-import { refreshSession, setAccessToken, staffGet } from "./auth-client"
+import { redirectToLogin, refreshSession, setAccessToken, staffGet } from "./auth-client"
 
 const ALEX = {
   id: "11111111-1111-4111-8111-000000000001",
@@ -11,6 +11,7 @@ const ALEX = {
 
 const resetAuth = () => {
   setAccessToken(null)
+  document.cookie = "supportchat_csrf=; path=/; max-age=0"
   vi.unstubAllGlobals()
 }
 
@@ -44,6 +45,64 @@ describe("refreshSession", () => {
     expect(second.status).toBe("authenticated")
     expect(first).toEqual({ status: "authenticated", user: ALEX })
     expect(second).toEqual({ status: "authenticated", user: ALEX })
+  })
+
+  test("a logged-out browser is unauthenticated even when the staff API is unreachable", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("network")))
+
+    const result = await refreshSession()
+
+    expect(result).toEqual({ status: "unauthenticated" })
+  })
+
+  test("a CSRF rejection on refresh is a signed-out session, not an outage", async () => {
+    document.cookie = "supportchat_csrf=stale-csrf"
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: false,
+        status: 403,
+        json: async () => ({ detail: "CSRF failed" }),
+      }),
+    )
+
+    const result = await refreshSession()
+
+    expect(result).toEqual({ status: "unauthenticated" })
+  })
+
+  test("a signed-in browser still reports an outage when refresh cannot reach the API", async () => {
+    document.cookie = "supportchat_csrf=csrf-token"
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("network")))
+
+    const result = await refreshSession()
+
+    expect(result).toEqual({ status: "unavailable" })
+  })
+})
+
+describe("redirectToLogin", () => {
+  const originalLocation = window.location
+
+  afterEach(() => {
+    Object.defineProperty(window, "location", {
+      configurable: true,
+      value: originalLocation,
+    })
+  })
+
+  test("replaces the current history entry so Sign in is not behind the admin page", () => {
+    const replace = vi.fn()
+    const assign = vi.fn()
+    Object.defineProperty(window, "location", {
+      configurable: true,
+      value: { replace, assign, href: "http://localhost:3000/admin/inbox" },
+    })
+
+    redirectToLogin()
+
+    expect(replace).toHaveBeenCalledWith("/login")
+    expect(assign).not.toHaveBeenCalled()
   })
 })
 

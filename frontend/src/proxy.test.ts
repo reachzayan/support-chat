@@ -32,8 +32,12 @@ const isStaffPath = (pathname: string) => {
   return STAFF_PREFIXES.some((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`))
 }
 
-const requestFor = (url: string, host: string) => {
-  return new NextRequest(url, { headers: { host } })
+const requestFor = (url: string, host: string, cookie?: string) => {
+  const headers: Record<string, string> = { host }
+  if (cookie) {
+    headers.cookie = cookie
+  }
+  return new NextRequest(url, { headers })
 }
 
 describe("host surface routing", () => {
@@ -61,7 +65,9 @@ describe("host surface routing", () => {
   })
 
   test("staff origin keeps inbox", async () => {
-    const inbox = await proxy(requestFor("http://localhost:3000/inbox", "localhost:3000"))
+    const inbox = await proxy(
+      requestFor("http://localhost:3000/inbox", "localhost:3000", "supportchat_csrf=csrf-staff"),
+    )
     expect(inbox.status).toBe(200)
   })
 
@@ -171,5 +177,33 @@ describe("widget document CSP", () => {
 
     expect(response.headers.get("Content-Security-Policy")).toBe("frame-ancestors 'none'")
     expect(fetcher).not.toHaveBeenCalled()
+  })
+})
+
+describe("staff document auth gate", () => {
+  test("signed-out requests to the admin app are sent to Sign in", async () => {
+    const inbox = await proxy(requestFor("http://localhost:3000/admin/inbox", "localhost:3000"))
+    const blocked = await proxy(requestFor("http://localhost:3000/admin/blocked", "localhost:3000"))
+    const data = await proxy(requestFor("http://localhost:3000/admin/data", "localhost:3000"))
+
+    expect(inbox.status).toBe(307)
+    expect(blocked.status).toBe(307)
+    expect(data.status).toBe(307)
+    expect(new URL(inbox.headers.get("location") ?? "").pathname).toBe("/login")
+    expect(new URL(blocked.headers.get("location") ?? "").pathname).toBe("/login")
+    expect(new URL(data.headers.get("location") ?? "").pathname).toBe("/login")
+  })
+
+  test("Sign in stays reachable without a session cookie", async () => {
+    const login = await proxy(requestFor("http://localhost:3000/login", "localhost:3000"))
+    expect(login.status).toBe(200)
+  })
+
+  test("a specialist session cookie keeps the admin app", async () => {
+    const inbox = await proxy(
+      requestFor("http://localhost:3000/admin/inbox", "localhost:3000", "supportchat_csrf=csrf-staff"),
+    )
+    expect(inbox.status).toBe(200)
+    expect(inbox.headers.get("Cache-Control")).toBe("private, no-store")
   })
 })

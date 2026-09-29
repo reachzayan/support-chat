@@ -8,13 +8,14 @@ import { SettingsConsole } from "./settings-console"
 
 const originalLocation = window.location
 
-const stubAssign = () => {
+const stubReplace = () => {
+  const replace = vi.fn()
   const assign = vi.fn()
   Object.defineProperty(window, "location", {
     configurable: true,
     value: {
       assign,
-      replace: assign,
+      replace,
       href: "http://localhost:3000/admin/settings",
       origin: "http://localhost:3000",
       pathname: "/admin/settings",
@@ -22,7 +23,7 @@ const stubAssign = () => {
       hash: "",
     },
   })
-  return assign
+  return { replace, assign }
 }
 
 describe("settings console", () => {
@@ -49,7 +50,7 @@ describe("settings console", () => {
 
   test("Sign out posts logout with the CSRF header and sends the specialist to login", async () => {
     document.cookie = "supportchat_csrf=csrf-settings"
-    const assign = stubAssign()
+    const { replace, assign } = stubReplace()
     vi.stubGlobal(
       "fetch",
       vi.fn().mockResolvedValue({
@@ -65,7 +66,8 @@ describe("settings console", () => {
 
     await user.click(screen.getAllByRole("button", { name: "Sign out" })[0]!)
 
-    await waitFor(() => expect(assign).toHaveBeenCalledWith("/login"))
+    await waitFor(() => expect(replace).toHaveBeenCalledWith("/login"))
+    expect(assign).not.toHaveBeenCalled()
     const logoutCall = vi
       .mocked(fetch)
       .mock.calls.find((call) => String(call[0]) === "/auth/logout")

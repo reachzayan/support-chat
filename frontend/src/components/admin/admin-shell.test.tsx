@@ -1,8 +1,8 @@
 import { screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
-import { beforeEach, describe, expect, test, vi } from "vitest"
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest"
 
-import type { StaffUser } from "@/lib/auth-client"
+import { refreshSession, type StaffUser } from "@/lib/auth-client"
 import { renderWithProviders } from "@/test/render"
 
 import { AdminShell } from "./admin-shell"
@@ -37,6 +37,7 @@ const sidebarCookie = () => {
 const stubMedia = () => {
   document.cookie = "sidebar_state=; path=/; max-age=0"
   document.cookie = "supportchat_theme=; path=/; max-age=0"
+  vi.mocked(refreshSession).mockResolvedValue({ status: "authenticated", user: USER })
   Object.defineProperty(window, "matchMedia", {
     configurable: true,
     value: () => ({ matches: false, addEventListener: vi.fn(), removeEventListener: vi.fn() }),
@@ -154,5 +155,91 @@ describe("admin shell hover peek", () => {
     await user.unhover(sidebar)
     expect(knowledge).toHaveTextContent("Knowledge base")
     expect(sidebar.parentElement).toHaveAttribute("data-state", "expanded")
+  })
+})
+
+const stubLocation = () => {
+  const replace = vi.fn()
+  const assign = vi.fn()
+  Object.defineProperty(window, "location", {
+    configurable: true,
+    value: {
+      replace,
+      assign,
+      href: "http://localhost:3000/admin/inbox",
+      origin: "http://localhost:3000",
+      pathname: "/admin/inbox",
+      search: "",
+      hash: "",
+    },
+  })
+  return { replace, assign }
+}
+
+describe("admin shell session gate", () => {
+  const originalLocation = window.location
+
+  beforeEach(stubMedia)
+
+  afterEach(() => {
+    Object.defineProperty(window, "location", {
+      configurable: true,
+      value: originalLocation,
+    })
+  })
+
+  test("sends a signed-out specialist to Sign in and never shows the staff API outage", async () => {
+    const { replace, assign } = stubLocation()
+    vi.mocked(refreshSession).mockResolvedValue({ status: "unauthenticated" })
+
+    renderWithProviders(
+      <AdminShell>
+        <div id="main-content">Inbox view</div>
+      </AdminShell>,
+    )
+
+    await waitFor(() => expect(replace).toHaveBeenCalledWith("/login"))
+    expect(assign).not.toHaveBeenCalled()
+    expect(screen.queryByText("Could not reach the staff API.")).not.toBeInTheDocument()
+    expect(screen.queryByText("Inbox view")).not.toBeInTheDocument()
+  })
+
+  test("keeps the staff API outage when a signed-in session cannot reach refresh", async () => {
+    const { replace } = stubLocation()
+    vi.mocked(refreshSession).mockResolvedValue({ status: "unavailable" })
+
+    renderWithProviders(
+      <AdminShell>
+        <div id="main-content">Inbox view</div>
+      </AdminShell>,
+    )
+
+    await waitFor(() =>
+      expect(screen.getByText("Could not reach the staff API.")).toBeInTheDocument(),
+    )
+    expect(screen.getByRole("button", { name: "Retry" })).toBeInTheDocument()
+    expect(replace).not.toHaveBeenCalled()
+    expect(screen.queryByText("Inbox view")).not.toBeInTheDocument()
+  })
+
+  test("re-checks the session when the browser restores the admin page from history", async () => {
+    const { replace } = stubLocation()
+    vi.mocked(refreshSession)
+      .mockResolvedValueOnce({ status: "authenticated", user: USER })
+      .mockResolvedValueOnce({ status: "unauthenticated" })
+
+    renderWithProviders(
+      <AdminShell>
+        <div id="main-content">Inbox view</div>
+      </AdminShell>,
+    )
+    await waitFor(() => expect(screen.getByText("Inbox view")).toBeInTheDocument())
+
+    const pageshow = new Event("pageshow")
+    Object.defineProperty(pageshow, "persisted", { value: true })
+    window.dispatchEvent(pageshow)
+
+    await waitFor(() => expect(replace).toHaveBeenCalledWith("/login"))
+    expect(screen.queryByText("Could not reach the staff API.")).not.toBeInTheDocument()
   })
 })

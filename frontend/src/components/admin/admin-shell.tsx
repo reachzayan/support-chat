@@ -16,7 +16,7 @@ import {
 } from "lucide-react"
 import { motion } from "motion/react"
 import Link from "next/link"
-import { usePathname, useRouter } from "next/navigation"
+import { usePathname } from "next/navigation"
 import {
   createContext,
   useContext,
@@ -49,7 +49,12 @@ import {
   useSidebar,
 } from "@/components/ui/sidebar"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
-import { refreshSession, type StaffUser } from "@/lib/auth-client"
+import {
+  redirectToLogin,
+  refreshSession,
+  type RefreshSessionResult,
+  type StaffUser,
+} from "@/lib/auth-client"
 
 const MotionLink = motion.create(Link)
 
@@ -326,20 +331,17 @@ const AdminSidebar = ({ displayName }: { displayName: string }) => {
   )
 }
 
-const useAdminSession = (router: ReturnType<typeof useRouter>) => {
+const useAdminSession = () => {
   const [user, setUser] = useState<StaffUser | null>(null)
   const [checkingSession, setCheckingSession] = useState(true)
   const [sessionError, setSessionError] = useState(false)
 
   useEffect(() => {
     let active = true
-    const boot = async () => {
-      const result = await refreshSession()
-      if (!active) {
-        return
-      }
+    const apply = (result: RefreshSessionResult) => {
       if (result.status === "unauthenticated") {
-        router.replace("/login")
+        setUser(null)
+        redirectToLogin()
         return
       }
       if (result.status === "unavailable") {
@@ -351,27 +353,44 @@ const useAdminSession = (router: ReturnType<typeof useRouter>) => {
       setUser(result.user)
       setCheckingSession(false)
     }
+    const boot = async () => {
+      const result = await refreshSession()
+      if (!active) {
+        return
+      }
+      apply(result)
+    }
     void boot()
+    const handlePageShow = (event: Event) => {
+      if (!("persisted" in event) || !(event as PageTransitionEvent).persisted) {
+        return
+      }
+      void boot()
+    }
+    window.addEventListener("pageshow", handlePageShow)
     return () => {
       active = false
+      window.removeEventListener("pageshow", handlePageShow)
     }
-  }, [router])
+  }, [])
 
   const handleRetry = () => {
     setSessionError(false)
     setCheckingSession(true)
     void (async () => {
       const result = await refreshSession()
-      if (result.status === "authenticated") {
-        setUser(result.user)
+      if (result.status === "unauthenticated") {
+        setUser(null)
+        redirectToLogin()
+        return
+      }
+      if (result.status === "unavailable") {
+        setSessionError(true)
         setCheckingSession(false)
         return
       }
-      if (result.status === "unauthenticated") {
-        router.replace("/login")
-        return
-      }
-      setSessionError(true)
+      setSessionError(false)
+      setUser(result.user)
       setCheckingSession(false)
     })()
   }
@@ -380,9 +399,8 @@ const useAdminSession = (router: ReturnType<typeof useRouter>) => {
 }
 
 export const AdminShell = ({ children }: { children: ReactNode }) => {
-  const router = useRouter()
   const { sidebarOpen, setSidebarOpen } = usePreferences()
-  const { user, checkingSession, sessionError, handleRetry } = useAdminSession(router)
+  const { user, checkingSession, sessionError, handleRetry } = useAdminSession()
 
   const frame = sessionError ? (
     <SessionRetryPanel onRetry={handleRetry} />

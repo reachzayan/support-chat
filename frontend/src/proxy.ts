@@ -133,6 +133,29 @@ const applyWidgetCsp = async (request: NextRequest, response: NextResponse) => {
   return response
 }
 
+const redirectToStaffLogin = (request: NextRequest) => {
+  const loginUrl = request.nextUrl.clone()
+  loginUrl.pathname = "/login"
+  loginUrl.search = ""
+  const redirect = NextResponse.redirect(loginUrl)
+  redirect.headers.set("Cache-Control", "private, no-store")
+  return redirect
+}
+
+const staffDocumentResponse = (request: NextRequest, requestHeaders: Headers) => {
+  if (request.nextUrl.pathname !== "/login" && !request.cookies.get("supportchat_csrf")?.value) {
+    return redirectToStaffLogin(request)
+  }
+  const nonce = Buffer.from(crypto.randomUUID()).toString("base64")
+  const csp = staffDocumentCsp(nonce)
+  requestHeaders.set("x-nonce", nonce)
+  requestHeaders.set("Content-Security-Policy", csp)
+  const response = NextResponse.next({ request: { headers: requestHeaders } })
+  response.headers.set("Content-Security-Policy", csp)
+  response.headers.set("Cache-Control", "private, no-store")
+  return response
+}
+
 export const proxy = async (request: NextRequest) => {
   const host = request.headers.get("host") ?? request.nextUrl.host
   const pathname = request.nextUrl.pathname
@@ -147,13 +170,7 @@ export const proxy = async (request: NextRequest) => {
     requestHeaders.set("x-supportchat-surface", "widget")
   }
   if (isStaffDocumentPath(pathname)) {
-    const nonce = Buffer.from(crypto.randomUUID()).toString("base64")
-    const csp = staffDocumentCsp(nonce)
-    requestHeaders.set("x-nonce", nonce)
-    requestHeaders.set("Content-Security-Policy", csp)
-    const response = NextResponse.next({ request: { headers: requestHeaders } })
-    response.headers.set("Content-Security-Policy", csp)
-    return response
+    return staffDocumentResponse(request, requestHeaders)
   }
   return applyWidgetCsp(request, NextResponse.next({ request: { headers: requestHeaders } }))
 }
