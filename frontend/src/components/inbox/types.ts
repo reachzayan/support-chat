@@ -66,6 +66,8 @@ export type ConversationDetail = {
   messages: InboxMessage[]
   has_older?: boolean
   older_before_id?: number | null
+  blocked: boolean
+  block_id: string | null
 }
 
 export type CannedReply = {

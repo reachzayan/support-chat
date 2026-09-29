@@ -6,6 +6,7 @@ import { renderWithProviders } from "@/test/render"
 import { InboxConsole } from "./inbox-console"
 import {
   ALEX,
+  CONVO_ID,
   FakeSocket,
   adaDetail,
   emit,
@@ -69,6 +70,7 @@ describe("inbox layout", () => {
     expect(screen.getByRole("list", { name: "Conversations" })).toBeInTheDocument()
     expect(screen.getByRole("log", { name: "Transcript" })).toBeInTheDocument()
     expect(screen.getByRole("complementary", { name: "Visitor facts" })).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Block visitor" })).toBeInTheDocument()
     expect(screen.getByText("Chrome")).toBeInTheDocument()
     expect(screen.getByText("macOS")).toBeInTheDocument()
     expect(screen.getByText("New York, New York, United States")).toBeInTheDocument()
@@ -78,6 +80,12 @@ describe("inbox layout", () => {
     )
     expect(screen.queryByRole("link", { name: "javascript:alert(1)" })).not.toBeInTheDocument()
     expect(screen.getByText("javascript:alert(1)")).toBeInTheDocument()
+  })
+})
+
+describe("inbox transcript bubbles", () => {
+  beforeEach(() => {
+    resetInboxHarness()
   })
 
   test("admin transcript uses the same bubble shapes as the visitor widget", async () => {
@@ -100,6 +108,43 @@ describe("inbox layout", () => {
     expect(
       within(transcript).getByText("I can help with that.").closest('[data-slot="message"]'),
     ).toHaveAttribute("data-align", "end")
+  })
+})
+
+describe("inbox visitor block", () => {
+  beforeEach(() => {
+    resetInboxHarness()
+  })
+
+  test("a blocked visitor shows Unblock instead of Block", async () => {
+    setDetails({
+      [CONVO_ID]: { ...structuredClone(adaDetail), blocked: true, block_id: "block-1" },
+    })
+    await openQueuedAda()
+    expect(screen.getByRole("button", { name: "Unblock visitor" })).toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "Block visitor" })).not.toBeInTheDocument()
+  })
+
+  test("blocking from the rail switches the action to Unblock", async () => {
+    const user = await openQueuedAda()
+    await user.click(screen.getByRole("button", { name: "Block visitor" }))
+    const dialog = await screen.findByRole("dialog")
+    await user.click(within(dialog).getByRole("button", { name: "Block visitor" }))
+    await waitFor(() => expect(screen.getByText("Visitor blocked.")).toBeInTheDocument())
+    expect(screen.getByRole("button", { name: "Unblock visitor" })).toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "Block visitor" })).not.toBeInTheDocument()
+  })
+
+  test("a closed chat shows the closed pill in the transcript", async () => {
+    setDetails({
+      [CONVO_ID]: { ...structuredClone(adaDetail), state: "closed" },
+    })
+    await openQueuedAda()
+    const transcript = screen.getByRole("log", { name: "Transcript" })
+    expect(
+      within(transcript).getByText("This chat is closed").closest("[data-slot='marker-content']"),
+    ).not.toBeNull()
+    expect(within(transcript).queryByText("This chat was closed.")).not.toBeInTheDocument()
   })
 })
 

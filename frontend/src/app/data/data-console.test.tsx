@@ -37,6 +37,8 @@ const SUBMISSION_DEFAULTS: Omit<SubmissionRow, "id" | "visitor"> = {
   created_at: "2026-04-12T12:00:00Z",
   last_message_at: "2026-04-12T12:05:00Z",
   closed_at: null,
+  blocked: false,
+  block_id: null,
 }
 
 const submission = (
@@ -170,7 +172,7 @@ describe("data console table", () => {
     renderWithProviders(<DataConsole />)
 
     const table = await screen.findByRole("table", { name: "Form submissions" })
-    expect(within(table).getAllByRole("columnheader")).toHaveLength(24)
+    expect(within(table).getAllByRole("columnheader")).toHaveLength(25)
     expect(within(table).getByRole("columnheader", { name: /Location/ })).toBeInTheDocument()
     expect(within(table).getAllByText("New York, New York, United States")).toHaveLength(11)
     expect(within(table).getByText("Visitor 1")).toBeInTheDocument()
@@ -264,5 +266,157 @@ describe("data console sorting", () => {
       .slice(1)
       .map((row) => within(row).getAllByRole("cell")[0]?.textContent)
     expect(names).toEqual(["Alex Chen", "Blair Diaz", "Casey Ortiz"])
+  })
+})
+
+describe("data console export", () => {
+  test("export modal sends selected columns, dates, and site", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, _init?: RequestInit) => {
+      const url = String(input)
+      if (
+        url.startsWith("/api/conversations/submissions?") ||
+        url === "/api/conversations/submissions"
+      ) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ items: MIXED_ROWS }),
+        }
+      }
+      if (url === "/api/sites") {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            items: [{ id: "samplesite", name: "SampleSite Support" }],
+          }),
+        }
+      }
+      if (url === "/api/conversations/submissions/export") {
+        return {
+          ok: true,
+          status: 200,
+          blob: async () => new Blob(["Name\nAlex Chen"], { type: "text/csv" }),
+        }
+      }
+      return { ok: false, status: 404, json: async () => ({}) }
+    })
+    vi.stubGlobal("fetch", fetchMock)
+    vi.stubGlobal("URL", {
+      ...URL,
+      createObjectURL: () => "blob:export",
+      revokeObjectURL: vi.fn(),
+    })
+    renderWithProviders(<DataConsole />)
+    await screen.findByText("Alex Chen")
+    const user = userEvent.setup()
+    await user.click(screen.getByRole("button", { name: "Export" }))
+    expect(await screen.findByRole("heading", { name: "Export submissions" })).toBeInTheDocument()
+    await user.click(screen.getByRole("checkbox", { name: "Email" }))
+    await user.type(screen.getByLabelText("Export from date"), "2026-09-01")
+    await user.type(screen.getByLabelText("Export to date"), "2026-09-10")
+    await user.click(screen.getByLabelText("Export site"))
+    await user.click(await screen.findByRole("option", { name: "SampleSite Support" }))
+    await user.click(screen.getByRole("button", { name: "Download" }))
+    await waitFor(() => {
+      expect(
+        fetchMock.mock.calls.some(
+          ([request]) => String(request) === "/api/conversations/submissions/export",
+        ),
+      ).toBe(true)
+    })
+    const exportCall = fetchMock.mock.calls.find(
+      ([request]) => String(request) === "/api/conversations/submissions/export",
+    )
+    const body = JSON.parse(String(exportCall?.[1]?.body)) as {
+      columns: string[]
+      site_id: string | null
+      date_from: string | null
+      date_to: string | null
+    }
+    expect(body.site_id).toBe("samplesite")
+    expect(body.date_from).toBe("2026-09-01")
+    expect(body.date_to).toBe("2026-09-10")
+    expect(body.columns).toContain("Name")
+    expect(body.columns).not.toContain("Email")
+    expect(body.columns).not.toContain("Transcript")
+  })
+})
+
+describe("data console block", () => {
+  test("block action posts the checked identifiers for that visitor", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input)
+      if (url.startsWith("/api/conversations/submissions")) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ items: MIXED_ROWS }),
+        }
+      }
+      if (url === "/api/visitor-blocks" && init?.method === "POST") {
+        return {
+          ok: true,
+          status: 201,
+          json: async () => ({ id: "block-1" }),
+        }
+      }
+      return { ok: false, status: 404, json: async () => ({}) }
+    })
+    vi.stubGlobal("fetch", fetchMock)
+    renderWithProviders(<DataConsole />)
+    await screen.findByText("Alex Chen")
+    const user = userEvent.setup()
+    await user.click(screen.getByRole("button", { name: "Block Blair Diaz" }))
+    expect(await screen.findByRole("heading", { name: "Block visitor" })).toBeInTheDocument()
+    expect(screen.getByRole("checkbox", { name: /Phone/ })).toBeDisabled()
+    await user.click(screen.getByRole("checkbox", { name: /IP/ }))
+    await user.click(screen.getByRole("button", { name: "Block visitor" }))
+    await waitFor(() => expect(screen.getByText("Visitor blocked.")).toBeInTheDocument())
+    const blockCall = fetchMock.mock.calls.find(
+      ([request, init]) => String(request) === "/api/visitor-blocks" && init?.method === "POST",
+    )
+    expect(JSON.parse(String(blockCall?.[1]?.body))).toEqual({
+      site_id: "bgc",
+      email: "blair@sample-services.example.com",
+      phone: null,
+      ip: null,
+    })
+    expect(screen.getByRole("button", { name: "Unblock Blair Diaz" })).toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "Block Blair Diaz" })).not.toBeInTheDocument()
+  })
+})
+
+describe("data console unblock", () => {
+  test("unblock action deletes the block for that visitor", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input)
+      if (url.startsWith("/api/conversations/submissions")) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            items: MIXED_ROWS.map((row) => {
+              if (row.id !== "blair") {
+                return row
+              }
+              return Object.assign({}, row, { blocked: true, block_id: "block-1" })
+            }),
+          }),
+        }
+      }
+      if (url === "/api/visitor-blocks/block-1" && init?.method === "DELETE") {
+        return { ok: true, status: 204, json: async () => ({}) }
+      }
+      return { ok: false, status: 404, json: async () => ({}) }
+    })
+    vi.stubGlobal("fetch", fetchMock)
+    renderWithProviders(<DataConsole />)
+    await screen.findByText("Alex Chen")
+    expect(screen.getByRole("button", { name: "Unblock Blair Diaz" })).toBeInTheDocument()
+    await userEvent.setup().click(screen.getByRole("button", { name: "Unblock Blair Diaz" }))
+    await waitFor(() => expect(screen.getByText("Visitor unblocked.")).toBeInTheDocument())
+    expect(screen.getByRole("button", { name: "Block Blair Diaz" })).toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "Unblock Blair Diaz" })).not.toBeInTheDocument()
   })
 })

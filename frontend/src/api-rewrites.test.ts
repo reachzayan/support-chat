@@ -20,4 +20,15 @@ describe("API rewrites", () => {
     const logs = list.find((rule) => rule.source === "/api/logs/:path*")
     expect(logs?.destination).toBe("http://127.0.0.1:8000/api/logs/:path*")
   })
+
+  test("proxies visitor block routes to the backend", async () => {
+    const rules = await nextConfig.rewrites!()
+    const list = Array.isArray(rules)
+      ? rules
+      : [...(rules.beforeFiles ?? []), ...(rules.afterFiles ?? []), ...(rules.fallback ?? [])]
+    const exact = list.find((rule) => rule.source === "/api/visitor-blocks")
+    const nested = list.find((rule) => rule.source === "/api/visitor-blocks/:path*")
+    expect(exact?.destination).toBe("http://127.0.0.1:8000/api/visitor-blocks")
+    expect(nested?.destination).toBe("http://127.0.0.1:8000/api/visitor-blocks/:path*")
+  })
 })

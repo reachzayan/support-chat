@@ -18,6 +18,7 @@ from app.models.refresh_token import RefreshToken
 from app.models.site import Site
 from app.models.user import User
 from app.models.visitor import Visitor
+from app.models.visitor_block import VisitorBlock
 
 __all__ = [
     "AppLog",
@@ -40,4 +41,5 @@ __all__ = [
     "Site",
     "User",
     "Visitor",
+    "VisitorBlock",
 ]

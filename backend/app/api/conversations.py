@@ -1,8 +1,9 @@
-from datetime import datetime
+from datetime import date, datetime
 from typing import Annotated, Literal
 from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, Query, status
+from fastapi.responses import Response
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.db import SessionDep
@@ -82,6 +83,8 @@ class ConversationDetailOut(BaseModel):
     messages: list[MessageOut]
     has_older: bool = False
     older_before_id: int | None = None
+    blocked: bool
+    block_id: UUID | None
 
 
 class SubmissionVisitorOut(BaseModel):
@@ -112,6 +115,8 @@ class SubmissionItemOut(BaseModel):
     created_at: datetime
     last_message_at: datetime
     closed_at: datetime | None
+    blocked: bool
+    block_id: UUID | None
 
 
 class SubmissionListOut(BaseModel):
@@ -119,9 +124,22 @@ class SubmissionListOut(BaseModel):
     has_more: bool
 
 
+class SubmissionExportIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    columns: list[str] = Field(min_length=1)
+    site_id: UUID | None = None
+    date_from: date | None = None
+    date_to: date | None = None
+
+
 def _map_command_error(exc: CommandError) -> HTTPException:
     if exc.code == "not_found":
         return HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
+    if exc.code == "unknown_column":
+        return HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail="Unknown column."
+        )
     return HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid request")
 
 
@@ -152,6 +170,26 @@ async def list_submissions(
     service = ConversationQueries(session)
     items, has_more = await service.list_submissions(offset, limit)
     return SubmissionListOut.model_validate({"items": items, "has_more": has_more})
+
+
+@router.post("/api/conversations/submissions/export")
+async def export_submissions(
+    payload: SubmissionExportIn,
+    session: SessionDep,
+    _staff: CurrentUser,
+) -> Response:
+    service = ConversationQueries(session)
+    try:
+        csv_body = await service.export_submissions(
+            payload.columns, payload.site_id, payload.date_from, payload.date_to
+        )
+    except CommandError as exc:
+        raise _map_command_error(exc) from exc
+    return Response(
+        content=csv_body,
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": 'attachment; filename="supportchat-submissions.csv"'},
+    )
 
 
 @router.get("/api/conversations/{conversation_id}", response_model=ConversationDetailOut)

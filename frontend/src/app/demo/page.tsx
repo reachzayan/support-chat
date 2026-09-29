@@ -16,7 +16,7 @@ export default function DemoPage() {
         This is a demo website for the Chatbot widget.
       </h1>
       <script dangerouslySetInnerHTML={embedConfig} />
-      <Script src={`${widgetOrigin}/supportchat.js`} strategy="afterInteractive" />
+      <Script async src={`${widgetOrigin}/supportchat.js`} strategy="afterInteractive" />
     </main>
   )
 }

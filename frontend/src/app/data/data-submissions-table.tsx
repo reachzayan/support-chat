@@ -11,6 +11,11 @@ import {
   type CSSProperties,
 } from "react"
 
+import {
+  BlockVisitorDialog,
+  type BlockVisitorTarget,
+} from "@/components/admin/block-visitor-dialog"
+import { staffWrite } from "@/components/admin/staff-api"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
@@ -44,6 +49,21 @@ import {
   type ColumnLabel,
   type SubmissionRow,
 } from "./data-shared"
+
+type BlockState = { blocked: boolean; blockId: string | null }
+
+const applyBlockState = (rows: SubmissionRow[], blockStateById: Record<string, BlockState>) => {
+  const nextRows: SubmissionRow[] = []
+  for (const row of rows) {
+    const next = blockStateById[row.id]
+    if (next === undefined) {
+      nextRows.push(row)
+      continue
+    }
+    nextRows.push(Object.assign({}, row, { blocked: next.blocked, block_id: next.blockId }))
+  }
+  return nextRows
+}
 
 const DataColumnHeader = ({
   label,
@@ -141,12 +161,27 @@ const SortIndicator = ({
 
 const SubmissionRowView = ({
   row,
+  unblocking,
   onTranscript,
+  onBlock,
+  onUnblock,
 }: {
   row: SubmissionRow
+  unblocking: boolean
   onTranscript: (id: string) => void
+  onBlock: (row: SubmissionRow) => void
+  onUnblock: (row: SubmissionRow) => void
 }) => {
   const handleClick = useCallback(() => onTranscript(row.id), [onTranscript, row.id])
+  const handleAction = useCallback(() => {
+    if (row.blocked) {
+      void onUnblock(row)
+      return
+    }
+    onBlock(row)
+  }, [onBlock, onUnblock, row])
+  const visitorName = blank(row.visitor.name)
+  const actionLabel = row.blocked ? `Unblock ${visitorName}` : `Block ${visitorName}`
   return (
     <TableRow className="odd:bg-paper even:bg-ice-2/60">
       <Cell>{blank(row.visitor.name)}</Cell>
@@ -179,10 +214,23 @@ const SubmissionRowView = ({
           type="button"
           variant="ghost"
           onClick={handleClick}
-          aria-label={`Transcript for ${blank(row.visitor.name)}`}
+          aria-label={`Transcript for ${visitorName}`}
           className="border-line text-navy hover:bg-ice focus-visible:ring-steel cursor-pointer border px-3 py-1.5 text-xs font-bold focus-visible:ring-2 focus-visible:outline-none"
         >
           Transcript
+        </Button>
+      </TableCell>
+      <TableCell className="px-4 py-3">
+        <Button
+          type="button"
+          variant="ghost"
+          onClick={handleAction}
+          disabled={unblocking}
+          aria-label={actionLabel}
+          className="border-line text-navy hover:bg-ice focus-visible:ring-steel cursor-pointer border px-3 py-1.5 text-xs font-bold focus-visible:ring-2 focus-visible:outline-none"
+        >
+          {unblocking ? <Spinner data-icon="inline-start" /> : null}
+          {row.blocked ? "Unblock" : "Block"}
         </Button>
       </TableCell>
     </TableRow>
@@ -198,6 +246,7 @@ const Cell = ({ children, mono = false }: { children: string; mono?: boolean }) 
   </TableCell>
 )
 
+// oxlint-disable-next-line eslint/max-lines-per-function -- Filters, sort, export widths, and block dialog share one table state.
 export const SubmissionsTable = ({
   rows,
   hasMore,
@@ -215,6 +264,12 @@ export const SubmissionsTable = ({
 }) => {
   const [filters, setFilters] = useState<DataFilters>(EMPTY_FILTERS)
   const [sort, setSort] = useState<DataSort | null>(null)
+  const [blockTarget, setBlockTarget] = useState<(BlockVisitorTarget & { rowId: string }) | null>(
+    null,
+  )
+  const [blockStateById, setBlockStateById] = useState<Record<string, BlockState>>({})
+  const [pendingUnblockId, setPendingUnblockId] = useState<string | null>(null)
+  const [announcement, setAnnouncement] = useState("")
   const deferredSearch = useDeferredValue(filters.search)
   const widthsApi = useDataColumnWidths()
   const tableStyle = useMemo(
@@ -227,21 +282,71 @@ export const SubmissionsTable = ({
   )
   const visibleAll = useMemo(
     () =>
-      sortSubmissions(
-        filterSubmissions(rows, {
-          search: deferredSearch,
-          siteId: filters.siteId,
-          intent: filters.intent,
-          state: filters.state,
-        }),
-        sort,
+      applyBlockState(
+        sortSubmissions(
+          filterSubmissions(rows, {
+            search: deferredSearch,
+            siteId: filters.siteId,
+            intent: filters.intent,
+            state: filters.state,
+          }),
+          sort,
+        ),
+        blockStateById,
       ),
-    [deferredSearch, filters.intent, filters.siteId, filters.state, rows, sort],
+    [blockStateById, deferredSearch, filters.intent, filters.siteId, filters.state, rows, sort],
   )
   const handleFilters = useCallback((next: DataFilters) => setFilters(next), [])
   const handleSort = useCallback((label: ColumnLabel) => {
     setSort((current) => nextColumnSort(current, label))
   }, [])
+  const handleBlock = useCallback((row: SubmissionRow) => {
+    setBlockTarget({
+      rowId: row.id,
+      siteId: row.site_id,
+      visitorName: row.visitor.name?.trim() || "this visitor",
+      email: row.visitor.email,
+      phone: row.visitor.phone,
+      ip: row.visitor.ip,
+    })
+  }, [])
+  const handleCloseBlock = useCallback(() => setBlockTarget(null), [])
+  const handleBlocked = useCallback(
+    (blockId: string) => {
+      if (blockTarget === null) {
+        return
+      }
+      setBlockStateById((current) => ({
+        ...current,
+        [blockTarget.rowId]: { blocked: true, blockId },
+      }))
+      setBlockTarget(null)
+      setAnnouncement("Visitor blocked.")
+    },
+    [blockTarget],
+  )
+  const handleUnblock = useCallback(
+    async (row: SubmissionRow) => {
+      if (!row.block_id || pendingUnblockId) {
+        return
+      }
+      setPendingUnblockId(row.id)
+      try {
+        const response = await staffWrite(`/api/visitor-blocks/${row.block_id}`, "DELETE", {})
+        if (!response.ok) {
+          return
+        }
+        setBlockStateById((current) => ({
+          ...current,
+          [row.id]: { blocked: false, blockId: null },
+        }))
+        setAnnouncement("Visitor unblocked.")
+      } finally {
+        setPendingUnblockId(null)
+      }
+    },
+    [pendingUnblockId],
+  )
   const search = filters.search.trim()
   const emptyMessage = search
     ? `No submissions match “${search}”. Try fewer words or clear the filters.`
@@ -275,7 +380,21 @@ export const SubmissionsTable = ({
         onSort={handleSort}
         onLoadMore={onLoadMore}
         onTranscript={onTranscript}
+        onBlock={handleBlock}
+        onUnblock={handleUnblock}
+        pendingUnblockId={pendingUnblockId}
       />
+      {blockTarget ? (
+        <BlockVisitorDialog
+          key={`${blockTarget.siteId}-${blockTarget.email}-${blockTarget.ip}`}
+          target={blockTarget}
+          onClose={handleCloseBlock}
+          onBlocked={handleBlocked}
+        />
+      ) : null}
+      <p className="sr-only" aria-live="polite">
+        {announcement}
+      </p>
     </section>
   )
 }
@@ -294,6 +413,9 @@ type SubmissionsTableGridProps = {
   onSort: (label: ColumnLabel) => void
   onLoadMore: () => void
   onTranscript: (id: string) => void
+  onBlock: (row: SubmissionRow) => void
+  onUnblock: (row: SubmissionRow) => Promise<void>
+  pendingUnblockId: string | null
 }
 
 const SubmissionsTableGrid = ({
@@ -310,6 +432,9 @@ const SubmissionsTableGrid = ({
   onSort,
   onLoadMore,
   onTranscript,
+  onBlock,
+  onUnblock,
+  pendingUnblockId,
 }: SubmissionsTableGridProps) => {
   const scrollRef = useRef<HTMLDivElement>(null)
   const loadTriggerRef = useRef<HTMLDivElement>(null)
@@ -356,7 +481,10 @@ const SubmissionsTableGrid = ({
           empty={empty}
           emptyMessage={emptyMessage}
           rows={visibleRows}
+          pendingUnblockId={pendingUnblockId}
           onTranscript={onTranscript}
+          onBlock={onBlock}
+          onUnblock={onUnblock}
         />
       </Table>
       <InfiniteLoadStatus
@@ -398,12 +526,18 @@ const SubmissionTableBody = ({
   empty,
   emptyMessage,
   rows,
+  pendingUnblockId,
   onTranscript,
+  onBlock,
+  onUnblock,
 }: {
   empty: boolean
   emptyMessage: string
   rows: SubmissionRow[]
+  pendingUnblockId: string | null
   onTranscript: (id: string) => void
+  onBlock: (row: SubmissionRow) => void
+  onUnblock: (row: SubmissionRow) => Promise<void>
 }) => (
   <TableBody>
     {empty ? (
@@ -413,7 +547,16 @@ const SubmissionTableBody = ({
         </TableCell>
       </TableRow>
     ) : (
-      rows.map((row) => <SubmissionRowView key={row.id} row={row} onTranscript={onTranscript} />)
+      rows.map((row) => (
+        <SubmissionRowView
+          key={row.id}
+          row={row}
+          unblocking={pendingUnblockId === row.id}
+          onTranscript={onTranscript}
+          onBlock={onBlock}
+          onUnblock={onUnblock}
+        />
+      ))
     )}
   </TableBody>
 )

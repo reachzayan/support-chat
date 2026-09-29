@@ -53,6 +53,8 @@ const row = (overrides: {
   created_at: "2026-04-12T12:00:00Z",
   last_message_at: overrides.last_message_at,
   closed_at: overrides.closed_at ?? null,
+  blocked: false,
+  block_id: null,
 })
 
 const ALEX = row({

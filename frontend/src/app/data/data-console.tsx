@@ -1,12 +1,16 @@
 "use client"
 
+/* oxlint-disable react-perf/jsx-no-jsx-as-prop -- StaffHeader export action uses the current page state. */
+
 import { useCallback, useEffect, useRef, useState } from "react"
 
 import { StaffHeader } from "@/components/admin/staff-nav"
+import { Button } from "@/components/ui/button"
 import { staffGet } from "@/lib/auth-client"
 
 import { DataConsoleBody } from "./data-console-body"
 import { SubmissionDetailSheet } from "./data-detail-sheet"
+import { DataExportDialog } from "./data-export-dialog"
 import type { SubmissionRow } from "./data-shared"
 
 const PAGE_SIZE = 50
@@ -103,6 +107,7 @@ export const DataConsole = () => {
   const { rows, hasMore, loadError, loadMoreError, loadingMore, handleLoadMore } =
     useSubmissionsFeed()
   const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [exportOpen, setExportOpen] = useState(false)
   const selected = rows?.find((row) => row.id === selectedId) ?? null
 
   const handleSheetOpen = useCallback((open: boolean) => {
@@ -111,10 +116,20 @@ export const DataConsole = () => {
     }
   }, [])
 
+  const handleOpenExport = useCallback(() => setExportOpen(true), [])
+  const handleCloseExport = useCallback(() => setExportOpen(false), [])
+
   return (
     <div className="view-transition-enter bg-ice flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
       <div className="shrink-0">
-        <StaffHeader title="Data" />
+        <StaffHeader
+          title="Data"
+          action={
+            <Button variant="default" size="lg" className="font-bold" onClick={handleOpenExport}>
+              Export
+            </Button>
+          }
+        />
       </div>
       <div
         id="main-content"
@@ -133,6 +148,7 @@ export const DataConsole = () => {
       {selectedId && selected ? (
         <SubmissionDetailSheet key={selectedId} row={selected} onClose={handleSheetOpen} />
       ) : null}
+      {exportOpen ? <DataExportDialog open={exportOpen} onClose={handleCloseExport} /> : null}
     </div>
   )
 }

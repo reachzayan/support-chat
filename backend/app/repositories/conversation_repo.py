@@ -10,6 +10,7 @@ from app.models.message import Message
 from app.models.site import Site
 from app.models.user import User
 from app.models.visitor import Visitor
+from app.models.visitor_block import VisitorBlock
 
 
 class ConversationRepository:
@@ -222,12 +223,44 @@ class ConversationRepository:
             conversation.active_generation_id = None
         return rows
 
+    async def list_open_matching_identifiers(
+        self,
+        site_id: UUID,
+        *,
+        ip: str | None,
+        email: str | None,
+        phone: str | None,
+    ) -> list[Conversation]:
+        matches = []
+        if ip:
+            matches.append(Visitor.ip == ip)
+        if email:
+            matches.append(Visitor.email == email)
+        if phone:
+            matches.append(Visitor.phone == phone)
+        if not matches:
+            return []
+        result = await self._session.execute(
+            select(Conversation)
+            .join(Visitor, Visitor.id == Conversation.visitor_id)
+            .where(
+                Conversation.site_id == site_id,
+                Conversation.state != "closed",
+                or_(*matches),
+            )
+            .with_for_update()
+        )
+        return list(result.scalars().all())
+
     async def list_submissions(
         self,
         *,
         offset: int,
         limit: int,
-    ) -> list[tuple[Conversation, Visitor, Site, User | None, str | None]]:
+        site_id: UUID | None = None,
+        created_from: datetime | None = None,
+        created_before: datetime | None = None,
+    ) -> list[tuple[Conversation, Visitor, Site, User | None, str | None, UUID | None]]:
         opening_body = (
             select(Message.body)
             .where(Message.conversation_id == Conversation.id, Message.role == "visitor")
@@ -235,13 +268,36 @@ class ConversationRepository:
             .limit(1)
             .scalar_subquery()
         )
+        block_id = (
+            select(VisitorBlock.id)
+            .where(
+                VisitorBlock.site_id == Conversation.site_id,
+                or_(
+                    and_(
+                        VisitorBlock.email.is_not(None),
+                        VisitorBlock.email == func.lower(Visitor.email),
+                    ),
+                    and_(VisitorBlock.phone.is_not(None), VisitorBlock.phone == Visitor.phone),
+                    and_(VisitorBlock.ip.is_not(None), VisitorBlock.ip == Visitor.ip),
+                ),
+            )
+            .order_by(VisitorBlock.created_at.desc(), VisitorBlock.id.desc())
+            .limit(1)
+            .scalar_subquery()
+        )
         query = (
-            select(Conversation, Visitor, Site, User, opening_body)
+            select(Conversation, Visitor, Site, User, opening_body, block_id)
             .join(Visitor, Visitor.id == Conversation.visitor_id)
             .join(Site, Site.id == Conversation.site_id)
             .outerjoin(User, User.id == Conversation.assigned_agent_id)
             .where(Conversation.prechat_submission_id.is_not(None))
         )
+        if site_id is not None:
+            query = query.where(Conversation.site_id == site_id)
+        if created_from is not None:
+            query = query.where(Conversation.created_at >= created_from)
+        if created_before is not None:
+            query = query.where(Conversation.created_at < created_before)
         query = (
             query.order_by(Conversation.last_message_at.desc(), Conversation.id.desc())
             .offset(offset)
@@ -249,8 +305,8 @@ class ConversationRepository:
         )
         result = await self._session.execute(query)
         return [
-            (conversation, visitor, site, agent, opening)
-            for conversation, visitor, site, agent, opening in result.all()
+            (conversation, visitor, site, agent, opening, matched_block_id)
+            for conversation, visitor, site, agent, opening, matched_block_id in result.all()
         ]
 
     async def get_inbox_detail(

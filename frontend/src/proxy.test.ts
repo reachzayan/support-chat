@@ -116,6 +116,22 @@ describe("host surface routing", () => {
   })
 })
 
+describe("visitor block API routing", () => {
+  test("widget origin cannot reach visitor block APIs", async () => {
+    const listed = await proxy(
+      requestFor("http://widget.localhost:3000/api/visitor-blocks", "widget.localhost:3000"),
+    )
+    expect(listed.status).toBe(404)
+  })
+
+  test("staff origin keeps visitor block APIs", async () => {
+    const listed = await proxy(
+      requestFor("http://localhost:3000/api/visitor-blocks", "localhost:3000"),
+    )
+    expect(listed.status).toBe(200)
+  })
+})
+
 describe("widget document CSP", () => {
   afterEach(() => {
     vi.unstubAllGlobals()

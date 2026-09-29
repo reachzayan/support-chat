@@ -4,11 +4,12 @@
 
 import { cn } from "cn"
 import {
+  Ban,
   BookOpen,
-  MessageSquareText,
   ChevronDown,
   Globe2,
   Inbox,
+  MessageSquareText,
   ScrollText,
   Table2,
   type LucideIcon,
@@ -72,11 +73,8 @@ const workspaceLinks: AdminLink[] = [
   { href: "/admin/inbox", label: "Inbox", icon: Inbox },
   { href: "/admin/data", label: "Data", icon: Table2 },
   { href: "/admin/knowledge", label: "Knowledge base", icon: BookOpen },
-  {
-    href: "/admin/canned-responses",
-    label: "Canned responses",
-    icon: MessageSquareText,
-  },
+  { href: "/admin/canned-responses", label: "Canned responses", icon: MessageSquareText },
+  { href: "/admin/blocked", label: "Blocked", icon: Ban },
   { href: "/admin/sites", label: "Sites", icon: Globe2 },
   { href: "/admin/logs", label: "Logs", icon: ScrollText },
 ]

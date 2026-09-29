@@ -85,7 +85,7 @@ export const isClosedNotice = (line: TranscriptLine) => {
   }
   const body = line.body.trim()
   return (
-    /^(this chat is closed|this chat was closed by .+)\.?$/i.test(body) ||
+    /^(this chat is closed|this chat was closed(?: by .+)?)\.?$/i.test(body) ||
     body === IDLE_CLOSED ||
     /^this chat has been closed automatically\.?$/i.test(body)
   )
