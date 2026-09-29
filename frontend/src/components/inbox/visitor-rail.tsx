@@ -2,8 +2,11 @@
 
 import { ChevronDown } from "lucide-react"
 import { motion, useReducedMotion } from "motion/react"
-import { useCallback, useState, type ReactNode } from "react"
+import { useCallback, useMemo, useState, type ReactNode } from "react"
 
+import { BlockVisitorDialog } from "@/components/admin/block-visitor-dialog"
+import { staffWrite } from "@/components/admin/staff-api"
+import { Button } from "@/components/ui/button"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import { parseUserAgent, safeHttpUrl } from "@/lib/ua"
 
@@ -118,7 +121,19 @@ const VisitorRailHeader = ({
   </div>
 )
 
-const ContactSection = ({ detail }: { detail: ConversationDetail }) => (
+const ContactSection = ({
+  detail,
+  blocked,
+  pendingUnblock,
+  onBlock,
+  onUnblock,
+}: {
+  detail: ConversationDetail
+  blocked: boolean
+  pendingUnblock: boolean
+  onBlock: () => void
+  onUnblock: () => void
+}) => (
   <RailSection title="Contact">
     <Fact label="Email">{orNone(detail.visitor.email)}</Fact>
     <Fact label="Phone">{orNone(detail.visitor.phone)}</Fact>
@@ -126,8 +141,56 @@ const ContactSection = ({ detail }: { detail: ConversationDetail }) => (
       <span className="font-mono text-xs">{orNone(detail.visitor.ip)}</span>
     </Fact>
     <Fact label="Location">{orNone(detail.visitor.location)}</Fact>
+    <div className="pt-3 pb-1">
+      <BlockToggle
+        blocked={blocked}
+        pendingUnblock={pendingUnblock}
+        onBlock={onBlock}
+        onUnblock={onUnblock}
+      />
+    </div>
   </RailSection>
 )
+
+const BlockToggle = ({
+  blocked,
+  pendingUnblock,
+  onBlock,
+  onUnblock,
+}: {
+  blocked: boolean
+  pendingUnblock: boolean
+  onBlock: () => void
+  onUnblock: () => void
+}) => {
+  if (blocked) {
+    return (
+      <Button
+        type="button"
+        variant="outline"
+        size="sm"
+        onClick={onUnblock}
+        disabled={pendingUnblock}
+        aria-label="Unblock visitor"
+        className="border-line text-navy hover:bg-ice-2 w-full font-bold"
+      >
+        Unblock visitor
+      </Button>
+    )
+  }
+  return (
+    <Button
+      type="button"
+      variant="outline"
+      size="sm"
+      onClick={onBlock}
+      aria-label="Block visitor"
+      className="border-line text-navy hover:bg-ice-2 w-full font-bold"
+    >
+      Block visitor
+    </Button>
+  )
+}
 
 const ConversationSection = ({
   detail,
@@ -163,10 +226,56 @@ const TechnicalSection = ({ browser, os }: { browser: string; os: string }) => (
   </RailSection>
 )
 
+// oxlint-disable-next-line eslint/max-lines-per-function -- Block overlay, unblock, and dialog stay with the rail.
 export const VisitorRail = ({ detail }: VisitorRailProps) => {
   const device = parseUserAgent(detail.visitor.user_agent)
   const assigned = detail.assigned_agent?.display_name ?? "Unassigned"
   const name = detail.visitor.name ?? "Unknown visitor"
+  const [blockOpen, setBlockOpen] = useState(false)
+  const [announcement, setAnnouncement] = useState("")
+  const [pendingUnblock, setPendingUnblock] = useState(false)
+  const [overlay, setOverlay] = useState<{ blocked: boolean; blockId: string | null } | null>(null)
+  const blocked = overlay?.blocked ?? detail.blocked
+  const blockId = overlay?.blockId ?? detail.block_id
+  const handleOpenBlock = useCallback(() => setBlockOpen(true), [])
+  const handleCloseBlock = useCallback(() => setBlockOpen(false), [])
+  const handleBlocked = useCallback((nextBlockId: string) => {
+    setBlockOpen(false)
+    setOverlay({ blocked: true, blockId: nextBlockId })
+    setAnnouncement("Visitor blocked.")
+  }, [])
+  const handleUnblock = useCallback(async () => {
+    if (!blockId || pendingUnblock) {
+      return
+    }
+    setPendingUnblock(true)
+    try {
+      const response = await staffWrite(`/api/visitor-blocks/${blockId}`, "DELETE", {})
+      if (!response.ok) {
+        setAnnouncement("The visitor could not be unblocked. Try again.")
+        return
+      }
+      setOverlay({ blocked: false, blockId: null })
+      setAnnouncement("Visitor unblocked.")
+    } catch {
+      setAnnouncement("The visitor could not be unblocked. Try again.")
+    } finally {
+      setPendingUnblock(false)
+    }
+  }, [blockId, pendingUnblock])
+  const handleUnblockClick = useCallback(() => {
+    void handleUnblock()
+  }, [handleUnblock])
+  const blockTarget = useMemo(
+    () => ({
+      siteId: detail.site_id,
+      visitorName: name,
+      email: detail.visitor.email,
+      phone: detail.visitor.phone,
+      ip: detail.visitor.ip,
+    }),
+    [detail.site_id, detail.visitor.email, detail.visitor.ip, detail.visitor.phone, name],
+  )
   return (
     <aside
       aria-label="Visitor facts"
@@ -177,10 +286,27 @@ export const VisitorRail = ({ detail }: VisitorRailProps) => {
         siteName={detail.site_name}
         closed={detail.state === "closed"}
       />
-      <ContactSection detail={detail} />
+      <ContactSection
+        detail={detail}
+        blocked={blocked}
+        pendingUnblock={pendingUnblock}
+        onBlock={handleOpenBlock}
+        onUnblock={handleUnblockClick}
+      />
       <ConversationSection detail={detail} assigned={assigned} />
       <PageSection detail={detail} />
       <TechnicalSection browser={device.browser} os={device.os} />
+      {blockOpen ? (
+        <BlockVisitorDialog
+          key={detail.id}
+          target={blockTarget}
+          onClose={handleCloseBlock}
+          onBlocked={handleBlocked}
+        />
+      ) : null}
+      <p className="sr-only" aria-live="polite">
+        {announcement}
+      </p>
     </aside>
   )
 }

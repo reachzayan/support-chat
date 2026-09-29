@@ -77,6 +77,8 @@ export const adaDetail: ConversationDetail = {
   human_enabled: true,
   bot_enabled: true,
   assigned_agent: null,
+  blocked: false,
+  block_id: null,
   visitor: {
     name: "Ada Lopez",
     email: "ada@example.com",
@@ -156,17 +158,61 @@ const jsonResponse = (body: Json, status = 200) => {
   }
 }
 
-export const staffFetch = vi.fn<
-  (input: RequestInfo | URL) => Promise<ReturnType<typeof jsonResponse>>
->(async (input) => {
-  const url = String(input)
-  if (url.includes("/api/canned-replies")) {
-    const siteId = new URL(url, "http://localhost").searchParams.get("site_id")
-    if (siteId === EASY_SITE) {
-      return jsonResponse({ items: [{ shortcut: "hours", body: HOURS_BODY, scope: "website" }] })
-    }
-    return jsonResponse({ items: [] })
+type StaffResponse = ReturnType<typeof jsonResponse>
+
+const visitorBlockResponse = (url: string, method: string): StaffResponse | null => {
+  if (url === "/api/visitor-blocks" && method === "POST") {
+    return jsonResponse({ id: "block-1" }, 201)
   }
+  if (url.startsWith("/api/visitor-blocks/") && method === "DELETE") {
+    return jsonResponse({}, 204)
+  }
+  return null
+}
+
+const cannedResponse = (url: string): StaffResponse | null => {
+  if (!url.includes("/api/canned-replies")) {
+    return null
+  }
+  const siteId = new URL(url, "http://localhost").searchParams.get("site_id")
+  if (siteId === EASY_SITE) {
+    return jsonResponse({ items: [{ shortcut: "hours", body: HOURS_BODY, scope: "website" }] })
+  }
+  return jsonResponse({ items: [] })
+}
+
+const conversationListResponse = (url: string): StaffResponse => {
+  const parsed = new URL(url, "http://localhost")
+  const state = parsed.searchParams.get("state")
+  const cursor = parsed.searchParams.get("cursor")
+  const items = listItems.filter((item) => (state ? item.state === state : true))
+  const counts = {
+    human: listItems.filter((item) => item.state === "human").length,
+    bot: listItems.filter((item) => item.state === "bot").length,
+    queued: listItems.filter((item) => item.state === "queued").length,
+    closed: listItems.filter((item) => item.state === "closed").length,
+  }
+  if (cursor === "page-2") {
+    return jsonResponse({
+      items: [
+        {
+          id: "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
+          visitor_display: "Third Visitor",
+          site_name: "SampleSite",
+          state: "queued",
+          preview: "County search",
+          last_message_at: "2026-09-09T14:00:00+00:00",
+          assigned_agent: null,
+        },
+      ],
+      next_cursor: null,
+      counts,
+    })
+  }
+  return jsonResponse({ items, next_cursor: listCursor, counts })
+}
+
+const conversationResponse = (url: string): StaffResponse | null => {
   const detailMatch = /\/api\/conversations\/([0-9a-f-]+)/i.exec(url)
   if (detailMatch?.[1]) {
     const parsed = new URL(url, "http://localhost")
@@ -180,36 +226,22 @@ export const staffFetch = vi.fn<
     return jsonResponse(detail)
   }
   if (url.includes("/api/conversations")) {
-    const parsed = new URL(url, "http://localhost")
-    const state = parsed.searchParams.get("state")
-    const cursor = parsed.searchParams.get("cursor")
-    const items = listItems.filter((item) => (state ? item.state === state : true))
-    const counts = {
-      human: listItems.filter((item) => item.state === "human").length,
-      bot: listItems.filter((item) => item.state === "bot").length,
-      queued: listItems.filter((item) => item.state === "queued").length,
-      closed: listItems.filter((item) => item.state === "closed").length,
-    }
-    if (cursor === "page-2") {
-      return jsonResponse({
-        items: [
-          {
-            id: "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
-            visitor_display: "Third Visitor",
-            site_name: "SampleSite",
-            state: "queued",
-            preview: "County search",
-            last_message_at: "2026-09-09T14:00:00+00:00",
-            assigned_agent: null,
-          },
-        ],
-        next_cursor: null,
-        counts,
-      })
-    }
-    return jsonResponse({ items, next_cursor: listCursor, counts })
+    return conversationListResponse(url)
   }
-  return jsonResponse({ detail: "missing" }, 404)
+  return null
+}
+
+export const staffFetch = vi.fn<
+  (input: RequestInfo | URL, init?: RequestInit) => Promise<StaffResponse>
+>(async (input, init) => {
+  const url = String(input)
+  const method = init?.method ?? "GET"
+  return (
+    visitorBlockResponse(url, method) ??
+    cannedResponse(url) ??
+    conversationResponse(url) ??
+    jsonResponse({ detail: "missing" }, 404)
+  )
 })
 
 export const emit = (socket: FakeSocket | undefined, payload: unknown) => {

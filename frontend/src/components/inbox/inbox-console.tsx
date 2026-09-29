@@ -98,7 +98,7 @@ const InboxShell = ({ userId, isAdmin, inbox }: InboxShellProps) => {
           ) : (
             <EmptyTranscript loading={inbox.selectedId !== null} />
           )}
-          {detail ? <VisitorRail detail={detail} /> : null}
+          {detail ? <VisitorRail key={detail.id} detail={detail} /> : null}
         </div>
       </div>
     </div>

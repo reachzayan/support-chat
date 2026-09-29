@@ -235,6 +235,7 @@ export const TranscriptColumn = (props: TranscriptColumnProps) => {
         <TranscriptPane
           lines={lines}
           muted={closed}
+          closed={closed}
           companyName={siteName}
           agentName={props.agentName}
         />
