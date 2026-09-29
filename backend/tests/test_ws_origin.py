@@ -109,15 +109,23 @@ def test_resume_bootstrap_snapshot_includes_the_visitor_line(client: TestClient)
             visitor,
             lambda frames: any(frame.get("type") == "prechat_accepted" for frame in frames),
         )
+        collect_until(
+            visitor,
+            lambda frames: any(
+                frame.get("type") == "message" and frame.get("role") == "bot" for frame in frames
+            ),
+        )
 
-    body = post_bootstrap(
+    resume_response = post_bootstrap(
         client,
         {
             **bootstrap_payload(resume_token=resume),
             "action": "open",
             "conversation_id": conversation_id,
         },
-    ).json()
+    )
+    assert resume_response.status_code == 200, resume_response.text
+    body = resume_response.json()
     conversation = body["conversation"]
     bodies = [
         frame["body"]
