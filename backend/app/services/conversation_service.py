@@ -42,6 +42,7 @@ from app.repositories.message_repo import MessageRepository
 from app.repositories.origins import InvalidOrigin, canonicalize_origin, sanitize_visitor_url
 from app.repositories.site_repo import SiteRepository
 from app.repositories.user_repo import UserRepository
+from app.repositories.visitor_block_repo import VisitorBlockRepository
 from app.repositories.visitor_repo import VisitorRepository
 from app.services.bot_trace import record_trace
 from app.services.bot_turn_service import BotTurnService
@@ -119,6 +120,7 @@ class ConversationService:
         self._conversations = ConversationRepository(session)
         self._messages = MessageRepository(session)
         self._users = UserRepository(session)
+        self._blocks = VisitorBlockRepository(session)
         self._bot_turn = BotTurnService(
             session, responder, embedder, evidence_loader=self._retrieve_evidence
         )
@@ -200,12 +202,21 @@ class ConversationService:
             await self._forget_visitor(site.id, resume_token)
             return self._bootstrap_result(site, parent_origin, mode="forgotten")
 
+        peer = peer_ip(client_host)
+        await self._reject_if_blocked(site.id, ip=peer)
+
         visitor, issued_resume, recognized = await self._resolve_visitor(
             site.id,
             resume_token,
-            peer_ip(client_host),
+            peer,
             cap_user_agent(user_agent),
             create_if_missing=action == "identify",
+        )
+        await self._reject_if_blocked(
+            site.id,
+            ip=str(visitor.ip) if visitor.ip is not None else peer,
+            email=visitor.email,
+            phone=visitor.phone,
         )
         if not recognized:
             conversation = await self._open_or_create_conversation(site.id, visitor.id)
@@ -273,6 +284,22 @@ class ConversationService:
             return await self._conversation_bootstrap(site, visitor, current, parent_origin, None)
         conversation = current or await self._open_or_create_conversation(site.id, visitor.id)
         return await self._conversation_bootstrap(site, visitor, conversation, parent_origin, None)
+
+    async def _reject_if_blocked(
+        self,
+        site_id: UUID,
+        *,
+        ip: str | None = None,
+        email: str | None = None,
+        phone: str | None = None,
+    ) -> None:
+        clean_ip = peer_ip(ip)
+        clean_email = email.strip().lower() if email and email.strip() else None
+        clean_phone = phone.strip() if phone and phone.strip() else None
+        if await self._blocks.is_blocked(
+            site_id, ip=clean_ip, email=clean_email, phone=clean_phone
+        ):
+            raise CommandError("forbidden")
 
     @staticmethod
     def _validate_bootstrap_action(
@@ -427,6 +454,12 @@ class ConversationService:
         clean = normalize_prechat(name, email, phone, inquiry_type, message)
         conversation, site_key = await self._lock_visitor_conversation(
             conversation_id, visitor_id, parent_origin
+        )
+        await self._reject_if_blocked(
+            conversation.site_id,
+            ip=client_ip,
+            email=clean["email"],
+            phone=clean["phone"] or None,
         )
         payload_hash = prechat_payload_hash(
             clean["name"], clean["email"], clean["phone"], clean["inquiry_type"], clean["message"]
