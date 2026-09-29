@@ -160,6 +160,14 @@ def test_prechat_dot_question_reaches_subscribed_agent_once_and_agent_reply_is_c
             assert prechat["submission_id"] == PRECHAT_SUBMISSION_ID
             assert prechat["message_id"] is not None
 
+            agent.send_json({"v": 1, "type": "join", "conversation_id": conversation_id})
+            collect_until(
+                visitor,
+                lambda frames: any(
+                    frame.get("type") == "message" and frame.get("body") == JOIN_LINE_ALEX
+                    for frame in frames
+                ),
+            )
             agent_frames = collect_until(
                 agent,
                 lambda frames: any(
@@ -175,15 +183,6 @@ def test_prechat_dot_question_reaches_subscribed_agent_once_and_agent_reply_is_c
             assert len(visitor_rows) == 1
             assert visitor_rows[0]["role"] == "visitor"
             assert visitor_rows[0]["id"] == prechat["message_id"]
-
-            agent.send_json({"v": 1, "type": "join", "conversation_id": conversation_id})
-            collect_until(
-                visitor,
-                lambda frames: any(
-                    frame.get("type") == "message" and frame.get("body") == JOIN_LINE_ALEX
-                    for frame in frames
-                ),
-            )
             agent.send_json(
                 {
                     "v": 1,
