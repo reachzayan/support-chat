@@ -60,6 +60,7 @@ describe("admin shell", () => {
       "/admin/knowledge",
     )
     expect(screen.getByRole("link", { name: "Sites" })).toHaveAttribute("href", "/admin/sites")
+    expect(screen.getByRole("link", { name: "Blocked" })).toHaveAttribute("href", "/admin/blocked")
     expect(screen.getByRole("link", { name: "Logs" })).toHaveAttribute("href", "/admin/logs")
     const accountLink = screen.getByRole("link", { name: "Alex Morgan account" })
     expect(accountLink).toHaveAttribute("href", "/admin/settings")

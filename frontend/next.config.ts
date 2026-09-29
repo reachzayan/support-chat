@@ -107,6 +107,14 @@ const nextConfig: NextConfig = {
         source: "/api/logs/:path*",
         destination: `${apiOrigin}/api/logs/:path*`,
       },
+      {
+        source: "/api/visitor-blocks",
+        destination: `${apiOrigin}/api/visitor-blocks`,
+      },
+      {
+        source: "/api/visitor-blocks/:path*",
+        destination: `${apiOrigin}/api/visitor-blocks/:path*`,
+      },
     ]
   },
 }

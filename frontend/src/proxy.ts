@@ -64,6 +64,7 @@ export const STAFF_PREFIXES = [
   "/api/kb-chunks",
   "/api/handoffs",
   "/api/logs",
+  "/api/visitor-blocks",
 ]
 
 const isStaffPath = (pathname: string) => {
