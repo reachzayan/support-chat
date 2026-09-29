@@ -1,7 +1,9 @@
 """Read-only inbox and submission views. Never commits or invokes a provider."""
 
+import csv
 from base64 import urlsafe_b64decode, urlsafe_b64encode
-from datetime import datetime
+from datetime import UTC, date, datetime, timedelta
+from io import StringIO
 from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -14,6 +16,7 @@ from app.models.user import User
 from app.models.visitor import Visitor
 from app.repositories.conversation_repo import ConversationRepository
 from app.repositories.message_repo import MessageRepository
+from app.repositories.visitor_block_repo import VisitorBlockRepository
 from app.services.conversation_types import CommandError
 from app.settings import get_settings
 
@@ -21,12 +24,46 @@ PREVIEW_MAX = 80
 INBOX_PAGE = 50
 INBOX_STATES = frozenset({"bot", "queued", "human", "closed"})
 SUBMISSIONS_PAGE = 50
+EXPORT_MAX = 10_000
+EXPORTABLE_COLUMNS = (
+    "Name",
+    "Email",
+    "Phone",
+    "Inquiry",
+    "Intent",
+    "State",
+    "Site",
+    "Site key",
+    "Opening message",
+    "Page title",
+    "Page URL",
+    "Referrer",
+    "IP",
+    "Location",
+    "User agent",
+    "Country",
+    "Region",
+    "Attention",
+    "Assigned",
+    "Visitor since",
+    "Chat started",
+    "Last message",
+    "Closed",
+)
+STATE_LABEL = {
+    "prechat": "Prechat",
+    "bot": "Bot",
+    "queued": "Needs Attention",
+    "human": "Live",
+    "closed": "Closed",
+}
 
 
 class ConversationQueries:
     def __init__(self, session: AsyncSession) -> None:
         self._conversations = ConversationRepository(session)
         self._messages = MessageRepository(session)
+        self._blocks = VisitorBlockRepository(session)
 
     async def list_inbox(
         self, state: str | None, cursor: str | None
@@ -62,10 +99,44 @@ class ConversationQueries:
         extra = rows[page_size:]
         page = rows[:page_size]
         items = [
-            _submission_item(conversation, visitor, site, agent, opening)
-            for conversation, visitor, site, agent, opening in page
+            _submission_item(conversation, visitor, site, agent, opening, block_id)
+            for conversation, visitor, site, agent, opening, block_id in page
         ]
         return items, bool(extra)
+
+    async def export_submissions(
+        self,
+        columns: list[str],
+        site_id: UUID | None,
+        date_from: date | None,
+        date_to: date | None,
+    ) -> str:
+        if any(column not in EXPORTABLE_COLUMNS for column in columns):
+            raise CommandError("unknown_column")
+        created_from = (
+            datetime(date_from.year, date_from.month, date_from.day, tzinfo=UTC)
+            if date_from is not None
+            else None
+        )
+        created_before = (
+            datetime(date_to.year, date_to.month, date_to.day, tzinfo=UTC) + timedelta(days=1)
+            if date_to is not None
+            else None
+        )
+        rows = await self._conversations.list_submissions(
+            offset=0,
+            limit=EXPORT_MAX,
+            site_id=site_id,
+            created_from=created_from,
+            created_before=created_before,
+        )
+        buffer = StringIO()
+        writer = csv.writer(buffer)
+        writer.writerow(columns)
+        for conversation, visitor, site, agent, opening, block_id in rows:
+            item = _submission_item(conversation, visitor, site, agent, opening, block_id)
+            writer.writerow([_export_cell(column, item) for column in columns])
+        return buffer.getvalue()
 
     async def get_inbox_detail(
         self, conversation_id: UUID, *, before_id: int | None = None
@@ -82,6 +153,12 @@ class ConversationQueries:
         if has_older:
             rows = rows[1:]
         oldest_id = rows[0][0].id if rows else None
+        matched = await self._blocks.find_matching(
+            conversation.site_id,
+            ip=str(visitor.ip) if visitor.ip is not None else None,
+            email=visitor.email,
+            phone=visitor.phone,
+        )
         return {
             "id": str(conversation.id),
             "site_id": str(site.id),
@@ -110,6 +187,8 @@ class ConversationQueries:
             "messages": [self._inbox_message(message, author) for message, author in rows],
             "has_older": has_older,
             "older_before_id": oldest_id if has_older else None,
+            "blocked": matched is not None,
+            "block_id": str(matched.id) if matched is not None else None,
         }
 
     @staticmethod
@@ -214,6 +293,7 @@ def _submission_item(
     site: Site,
     agent: User | None,
     opening: str | None,
+    block_id: UUID | None,
 ) -> dict:
     return {
         "id": str(conversation.id),
@@ -245,4 +325,43 @@ def _submission_item(
         "created_at": conversation.created_at,
         "last_message_at": conversation.last_message_at,
         "closed_at": conversation.closed_at,
+        "blocked": block_id is not None,
+        "block_id": str(block_id) if block_id is not None else None,
     }
+
+
+def _export_cell(column: str, item: dict) -> str:
+    visitor = item["visitor"]
+    page = item["page"]
+    assigned = item["assigned_agent"]
+    values: dict[str, object] = {
+        "Name": visitor["name"],
+        "Email": visitor["email"],
+        "Phone": visitor["phone"],
+        "Inquiry": item["inquiry_type"],
+        "Intent": item["intent"],
+        "State": STATE_LABEL.get(item["state"], item["state"]),
+        "Site": item["site_name"],
+        "Site key": item["site_key"],
+        "Opening message": item["opening_message"],
+        "Page title": page["title"],
+        "Page URL": page["url"],
+        "Referrer": page["referrer"],
+        "IP": visitor["ip"],
+        "Location": visitor["location"],
+        "User agent": visitor["user_agent"],
+        "Country": visitor["geo_country"],
+        "Region": visitor["geo_region"],
+        "Attention": "Yes" if item["attention_needed"] else "No",
+        "Assigned": assigned["display_name"] if assigned else None,
+        "Visitor since": visitor["created_at"],
+        "Chat started": item["created_at"],
+        "Last message": item["last_message_at"],
+        "Closed": item["closed_at"],
+    }
+    value = values[column]
+    if value is None:
+        return ""
+    if isinstance(value, datetime):
+        return value.isoformat()
+    return str(value)
