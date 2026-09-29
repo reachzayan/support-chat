@@ -32,6 +32,8 @@ export type SubmissionRow = {
   created_at: string
   last_message_at: string
   closed_at: string | null
+  blocked: boolean
+  block_id: string | null
 }
 
 export const STATE_LABEL: Record<string, string> = {
@@ -67,9 +69,14 @@ export const COLUMNS = [
   "Last message",
   "Closed",
   "Transcript",
+  "Block",
 ] as const
 
 export type ColumnLabel = (typeof COLUMNS)[number]
+
+export const EXPORT_COLUMNS = COLUMNS.filter(
+  (column) => column !== "Transcript" && column !== "Block",
+)
 
 export const DEFAULT_WIDTHS: Record<ColumnLabel, number> = {
   Name: 148,
@@ -96,6 +103,7 @@ export const DEFAULT_WIDTHS: Record<ColumnLabel, number> = {
   "Last message": 148,
   Closed: 148,
   Transcript: 124,
+  Block: 100,
 }
 
 export const WIDTHS_KEY = "supportchat.data.column-widths"
