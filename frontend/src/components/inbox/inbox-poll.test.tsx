@@ -8,6 +8,7 @@ import { renderWithProviders } from "@/test/render"
 import {
   ALEX,
   CONVO_ID,
+  EASY_SITE,
   OTHER_CONVO,
   adaDetail,
   adaQueued,
@@ -130,6 +131,7 @@ describe("inbox views", () => {
       {
         id: "ffffffff-ffff-4fff-8fff-ffffffffffff",
         visitor_display: "Bot Visitor",
+        site_id: EASY_SITE,
         site_name: "SampleSite",
         state: "bot",
         preview: "How fast are results?",

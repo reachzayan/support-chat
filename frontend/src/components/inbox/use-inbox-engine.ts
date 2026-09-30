@@ -14,6 +14,7 @@ import {
   type InboxCounts,
   type InboxFilter,
   type InboxListItem,
+  type InboxSite,
 } from "./types"
 
 export type SocketApi = ReturnType<typeof createAgentSocket>
@@ -23,10 +24,12 @@ export type InboxRefs = {
   selectedRef: { current: string | null }
   lastIdRef: { current: number }
   filterRef: { current: InboxFilter }
+  siteIdRef: { current: string | null }
   userRef: { current: string }
   liveRef: { current: InboxLive }
   markSelected: (id: string | null) => void
   markFilter: (filter: InboxFilter) => void
+  markSiteId: (siteId: string | null) => void
   resetLive: (live: InboxLive) => void
 }
 
@@ -34,11 +37,13 @@ export const useInboxSyncRefs = (
   selectedId: string | null,
   live: InboxLive,
   filter: InboxFilter,
+  siteId: string | null,
   userId: string,
 ): InboxRefs => {
   const selectedRef = useRef(selectedId)
   const lastIdRef = useRef(0)
   const filterRef = useRef(filter)
+  const siteIdRef = useRef(siteId)
   const userRef = useRef(userId)
   const liveRef = useRef(live)
   const markSelected = useCallback((id: string | null) => {
@@ -46,6 +51,9 @@ export const useInboxSyncRefs = (
   }, [])
   const markFilter = useCallback((nextFilter: InboxFilter) => {
     filterRef.current = nextFilter
+  }, [])
+  const markSiteId = useCallback((nextSiteId: string | null) => {
+    siteIdRef.current = nextSiteId
   }, [])
   const resetLive = useCallback((nextLive: InboxLive) => {
     liveRef.current = nextLive
@@ -55,13 +63,26 @@ export const useInboxSyncRefs = (
       selectedRef,
       lastIdRef,
       filterRef,
+      siteIdRef,
       userRef,
       liveRef,
       markSelected,
       markFilter,
+      markSiteId,
       resetLive,
     }),
-    [selectedRef, lastIdRef, filterRef, userRef, liveRef, markSelected, markFilter, resetLive],
+    [
+      selectedRef,
+      lastIdRef,
+      filterRef,
+      siteIdRef,
+      userRef,
+      liveRef,
+      markSelected,
+      markFilter,
+      markSiteId,
+      resetLive,
+    ],
   )
   useEffect(() => {
     selectedRef.current = selectedId
@@ -72,6 +93,9 @@ export const useInboxSyncRefs = (
   useEffect(() => {
     filterRef.current = filter
   }, [filter])
+  useEffect(() => {
+    siteIdRef.current = siteId
+  }, [siteId])
   useEffect(() => {
     userRef.current = userId
   }, [userId])
@@ -193,24 +217,32 @@ const applyFetchedDetail = (
   socketRef.current?.subscribe(conversationId, lastIdRef.current)
 }
 
-const mergeInboxPages = async (filter: InboxFilter, extraCursors: string[]) => {
-  const first = await fetchInboxList(filter)
-  if (first === null) {
-    return null
+const mergeInboxPages = async (
+  filter: InboxFilter,
+  extraCursors: string[],
+  siteId: string | null,
+) => {
+  const first = await fetchInboxList(filter, null, siteId)
+  if (first === null || first === "invalid_site") {
+    return first
   }
-  const pages = await Promise.all(extraCursors.map((extra) => fetchInboxList(filter, extra)))
+  const pages = await Promise.all(
+    extraCursors.map((extra) => fetchInboxList(filter, extra, siteId)),
+  )
   const items = [...first.items]
   let nextCursor = first.next_cursor
   let counts = first.counts
+  let sites = first.sites
   for (const page of pages) {
-    if (page === null) {
-      return { items, nextCursor, counts }
+    if (page === null || page === "invalid_site") {
+      return { items, nextCursor, counts, sites }
     }
     items.push(...page.items)
     nextCursor = page.next_cursor
     counts = page.counts
+    sites = page.sites
   }
-  return { items, nextCursor, counts }
+  return { items, nextCursor, counts, sites }
 }
 
 type InboxListReloadRefs = {
@@ -218,55 +250,147 @@ type InboxListReloadRefs = {
   extraCursorsRef: { current: string[] }
   loadedCursorsRef: { current: Set<string> }
   filterRef: { current: InboxFilter }
+  siteIdRef: { current: string | null }
 }
 
-const runInboxListReload = async (
+const isCurrentListQuery = (
+  reloadRefs: InboxListReloadRefs,
+  generation: number,
   nextFilter: InboxFilter,
-  cursor: string | null | undefined,
+  siteId: string | null,
+) => {
+  return (
+    generation === reloadRefs.listGenerationRef.current &&
+    reloadRefs.filterRef.current === nextFilter &&
+    reloadRefs.siteIdRef.current === siteId
+  )
+}
+
+const isInboxListFailure = (next: object | null | "invalid_site"): next is null | "invalid_site" =>
+  next === null || next === "invalid_site"
+
+const applyInboxListFailure = (
+  next: null | "invalid_site",
+  setLoadError: Dispatch<SetStateAction<boolean>>,
+  onUnknownSite: () => void,
+) => {
+  if (next === "invalid_site") {
+    onUnknownSite()
+    return
+  }
+  setLoadError(true)
+}
+
+const appendInboxCursorPage = async (
+  nextFilter: InboxFilter,
+  cursor: string,
+  siteId: string | null,
+  generation: number,
   reloadRefs: InboxListReloadRefs,
   setItems: Dispatch<SetStateAction<InboxListItem[]>>,
   setNextCursor: Dispatch<SetStateAction<string | null>>,
   setCounts: Dispatch<SetStateAction<InboxCounts>>,
+  setSites: Dispatch<SetStateAction<InboxSite[]>>,
+  setLoadError: Dispatch<SetStateAction<boolean>>,
+  onUnknownSite: () => void,
 ) => {
-  const generation = reloadRefs.listGenerationRef.current
-  if (cursor) {
-    if (reloadRefs.loadedCursorsRef.current.has(cursor)) {
-      return
-    }
-    reloadRefs.loadedCursorsRef.current.add(cursor)
-    reloadRefs.extraCursorsRef.current.push(cursor)
-    const next = await fetchInboxList(nextFilter, cursor)
-    if (
-      next === null ||
-      generation !== reloadRefs.listGenerationRef.current ||
-      reloadRefs.filterRef.current !== nextFilter
-    ) {
-      reloadRefs.loadedCursorsRef.current.delete(cursor)
-      return
-    }
-    setItems((current) => {
-      const seen = new Set(current.map((item) => item.id))
-      const fresh = next.items.filter((item) => !seen.has(item.id))
-      return [...current, ...fresh]
-    })
-    setNextCursor(next.next_cursor)
-    setCounts(next.counts)
+  if (reloadRefs.loadedCursorsRef.current.has(cursor)) {
     return
   }
-  const merged = await mergeInboxPages(nextFilter, reloadRefs.extraCursorsRef.current)
+  reloadRefs.loadedCursorsRef.current.add(cursor)
+  reloadRefs.extraCursorsRef.current.push(cursor)
+  const next = await fetchInboxList(nextFilter, cursor, siteId)
+  if (isInboxListFailure(next) || !isCurrentListQuery(reloadRefs, generation, nextFilter, siteId)) {
+    reloadRefs.loadedCursorsRef.current.delete(cursor)
+    if (isInboxListFailure(next)) {
+      applyInboxListFailure(next, setLoadError, onUnknownSite)
+    }
+    return
+  }
+  setLoadError(false)
+  setItems((current) => {
+    const seen = new Set(current.map((item) => item.id))
+    const fresh = next.items.filter((item) => !seen.has(item.id))
+    return [...current, ...fresh]
+  })
+  setNextCursor(next.next_cursor)
+  setCounts(next.counts)
+  setSites(next.sites)
+}
+
+const replaceInboxMergedPages = async (
+  nextFilter: InboxFilter,
+  siteId: string | null,
+  generation: number,
+  reloadRefs: InboxListReloadRefs,
+  setItems: Dispatch<SetStateAction<InboxListItem[]>>,
+  setNextCursor: Dispatch<SetStateAction<string | null>>,
+  setCounts: Dispatch<SetStateAction<InboxCounts>>,
+  setSites: Dispatch<SetStateAction<InboxSite[]>>,
+  setLoadError: Dispatch<SetStateAction<boolean>>,
+  onUnknownSite: () => void,
+) => {
+  const merged = await mergeInboxPages(nextFilter, reloadRefs.extraCursorsRef.current, siteId)
   if (
-    merged === null ||
-    generation !== reloadRefs.listGenerationRef.current ||
-    reloadRefs.filterRef.current !== nextFilter
+    isInboxListFailure(merged) ||
+    !isCurrentListQuery(reloadRefs, generation, nextFilter, siteId)
   ) {
+    if (isInboxListFailure(merged)) {
+      applyInboxListFailure(merged, setLoadError, onUnknownSite)
+    }
     return
   }
   const unique = merged.items.filter(
     (item, index, items) => items.findIndex((row) => row.id === item.id) === index,
   )
+  setLoadError(false)
   setItems(unique)
   setNextCursor(merged.nextCursor)
   setCounts(merged.counts)
+  setSites(merged.sites)
+}
+
+const runInboxListReload = async (
+  nextFilter: InboxFilter,
+  cursor: string | null | undefined,
+  siteId: string | null,
+  reloadRefs: InboxListReloadRefs,
+  setItems: Dispatch<SetStateAction<InboxListItem[]>>,
+  setNextCursor: Dispatch<SetStateAction<string | null>>,
+  setCounts: Dispatch<SetStateAction<InboxCounts>>,
+  setSites: Dispatch<SetStateAction<InboxSite[]>>,
+  setLoadError: Dispatch<SetStateAction<boolean>>,
+  onUnknownSite: () => void,
+) => {
+  const generation = reloadRefs.listGenerationRef.current
+  if (cursor) {
+    await appendInboxCursorPage(
+      nextFilter,
+      cursor,
+      siteId,
+      generation,
+      reloadRefs,
+      setItems,
+      setNextCursor,
+      setCounts,
+      setSites,
+      setLoadError,
+      onUnknownSite,
+    )
+    return
+  }
+  await replaceInboxMergedPages(
+    nextFilter,
+    siteId,
+    generation,
+    reloadRefs,
+    setItems,
+    setNextCursor,
+    setCounts,
+    setSites,
+    setLoadError,
+    onUnknownSite,
+  )
 }
 
 const loadInboxDetail = async (
@@ -306,6 +430,9 @@ export const useInboxLoaders = (
   setLive: Dispatch<SetStateAction<InboxLive>>,
   setNextCursor: Dispatch<SetStateAction<string | null>>,
   setCounts: Dispatch<SetStateAction<InboxCounts>>,
+  setSites: Dispatch<SetStateAction<InboxSite[]>>,
+  setLoadError: Dispatch<SetStateAction<boolean>>,
+  onUnknownSite: () => void,
 ) => {
   const extraCursorsRef = useRef<string[]>([])
   const loadedCursorsRef = useRef<Set<string>>(new Set())
@@ -322,18 +449,32 @@ export const useInboxLoaders = (
       void runInboxListReload(
         nextFilter,
         cursor,
+        refs.siteIdRef.current,
         {
           listGenerationRef,
           extraCursorsRef,
           loadedCursorsRef,
           filterRef: refs.filterRef,
+          siteIdRef: refs.siteIdRef,
         },
         setItems,
         setNextCursor,
         setCounts,
+        setSites,
+        setLoadError,
+        onUnknownSite,
       )
     },
-    [refs.filterRef, setCounts, setItems, setNextCursor],
+    [
+      onUnknownSite,
+      refs.filterRef,
+      refs.siteIdRef,
+      setCounts,
+      setItems,
+      setLoadError,
+      setNextCursor,
+      setSites,
+    ],
   )
 
   const reloadDetail = useCallback(
@@ -355,8 +496,66 @@ export const useInboxLoaders = (
   return { reloadList, reloadDetail, clearLoadedCursors }
 }
 
+const useInboxListFetch = (
+  filter: InboxFilter,
+  siteId: string | null,
+  refs: InboxRefs,
+  clearLoadedCursors: () => void,
+  setItems: Dispatch<SetStateAction<InboxListItem[]>>,
+  setNextCursor: Dispatch<SetStateAction<string | null>>,
+  setCounts: Dispatch<SetStateAction<InboxCounts>>,
+  setSites: Dispatch<SetStateAction<InboxSite[]>>,
+  setLoadError: Dispatch<SetStateAction<boolean>>,
+  onUnknownSite: () => void,
+) => {
+  useEffect(() => {
+    let cancelled = false
+    clearLoadedCursors()
+    const load = async () => {
+      const next = await fetchInboxList(filter, null, siteId)
+      if (cancelled || refs.filterRef.current !== filter || refs.siteIdRef.current !== siteId) {
+        return
+      }
+      if (next === "invalid_site") {
+        onUnknownSite()
+        return
+      }
+      if (next === null) {
+        setLoadError(true)
+        return
+      }
+      if (siteId !== null && !next.sites.some((site) => site.id === siteId)) {
+        onUnknownSite()
+        return
+      }
+      setLoadError(false)
+      setItems(next.items)
+      setNextCursor(next.next_cursor)
+      setCounts(next.counts)
+      setSites(next.sites)
+    }
+    void load()
+    return () => {
+      cancelled = true
+    }
+  }, [
+    clearLoadedCursors,
+    filter,
+    onUnknownSite,
+    refs.filterRef,
+    refs.siteIdRef,
+    setCounts,
+    setItems,
+    setLoadError,
+    setNextCursor,
+    setSites,
+    siteId,
+  ])
+}
+
 export const useInboxSideEffects = (
   filter: InboxFilter,
+  siteId: string | null,
   refs: InboxRefs,
   socketRef: { current: SocketApi | null },
   reloadList: (filter: InboxFilter) => void,
@@ -366,23 +565,22 @@ export const useInboxSideEffects = (
   setLive: Dispatch<SetStateAction<InboxLive>>,
   setNextCursor: Dispatch<SetStateAction<string | null>>,
   setCounts: Dispatch<SetStateAction<InboxCounts>>,
+  setSites: Dispatch<SetStateAction<InboxSite[]>>,
+  setLoadError: Dispatch<SetStateAction<boolean>>,
+  onUnknownSite: () => void,
 ) => {
-  useEffect(() => {
-    let cancelled = false
-    clearLoadedCursors()
-    const load = async () => {
-      const next = await fetchInboxList(filter)
-      if (!cancelled && next !== null && refs.filterRef.current === filter) {
-        setItems(next.items)
-        setNextCursor(next.next_cursor)
-        setCounts(next.counts)
-      }
-    }
-    void load()
-    return () => {
-      cancelled = true
-    }
-  }, [clearLoadedCursors, filter, refs.filterRef, setCounts, setItems, setNextCursor])
+  useInboxListFetch(
+    filter,
+    siteId,
+    refs,
+    clearLoadedCursors,
+    setItems,
+    setNextCursor,
+    setCounts,
+    setSites,
+    setLoadError,
+    onUnknownSite,
+  )
 
   useEffect(() => {
     const timer = window.setInterval(() => {

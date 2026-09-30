@@ -228,28 +228,34 @@ def test_detail_returns_ada_lopez_facts_and_hello_does_not_add_a_row(
     boot = post_bootstrap(client, bootstrap_payload(EASY_KEY, EASY_PUBLIC_KEY))
     assert boot.status_code == 200
     claims = decode_widget_token(boot.json()["bootstrap_token"])
-    conversation_id = uuid.UUID(claims["conversation_id"])
     visitor_id = uuid.UUID(claims["visitor_id"])
 
     session = _session()
     try:
         visitor = session.get(Visitor, visitor_id)
         assert visitor is not None
+        site = session.get(Site, visitor.site_id)
+        assert site is not None
         visitor.name = ADA_NAME
         visitor.email = ADA_EMAIL
         visitor.phone = None
         visitor.ip = IPv4Address(ADA_IP)
         visitor.user_agent = ADA_UA
         visitor.location = "New York, New York, United States"
-        conversation = session.get(Conversation, conversation_id)
-        assert conversation is not None
-        conversation.state = "queued"
-        conversation.inquiry_type = "results"
-        conversation.intent = "turnaround"
-        conversation.page_title = PAGE_TITLE
-        conversation.page_url = PAGE_URL
-        conversation.referrer = REFERRER
         now = datetime(2026, 9, 9, 16, 0, tzinfo=UTC)
+        conversation = _insert_conversation(
+            session,
+            site,
+            visitor,
+            "queued",
+            last_message_at=now + timedelta(minutes=1),
+            inquiry_type="results",
+            intent="turnaround",
+            page_title=PAGE_TITLE,
+            page_url=PAGE_URL,
+            referrer=REFERRER,
+        )
+        conversation_id = conversation.id
         first = _insert_visitor_message(session, conversation.id, DOT_QUESTION, now)
         second = _insert_visitor_message(
             session, conversation.id, SECOND_VISITOR_LINE, now + timedelta(minutes=1)
@@ -500,3 +506,111 @@ def test_submissions_offset_pages_newest_first_and_skips_unsubmitted(
 
     unauthenticated = client.get("/api/conversations/submissions", params={"offset": 0, "limit": 2})
     assert unauthenticated.status_code == 401
+
+
+BG_NAME = "Sample Services"
+BG_KEY = "sample-services"
+
+
+def _seed_two_site_inbox(session: Session) -> tuple[str, str, str, str]:
+    easy = _insert_site(session, EASY_KEY, EASY_NAME)
+    bg = _insert_site(session, BG_KEY, BG_NAME)
+    now = datetime(2026, 9, 9, 16, 0, tzinfo=UTC)
+    easy_queued = [
+        _insert_visitor(session, easy, name="Easy Queued One"),
+        _insert_visitor(session, easy, name="Easy Queued Two"),
+        _insert_visitor(session, easy, name="Easy Queued Three"),
+    ]
+    inbox_assistant = _insert_visitor(session, easy, name="Easy Bot")
+    bg_queued = [
+        _insert_visitor(session, bg, name="Bg Queued One"),
+        _insert_visitor(session, bg, name="Bg Queued Two"),
+    ]
+    bg_closed = _insert_visitor(session, bg, name="Bg Closed")
+    for index, visitor in enumerate(easy_queued):
+        _insert_conversation(
+            session, easy, visitor, "queued", last_message_at=now - timedelta(minutes=index)
+        )
+    _insert_conversation(
+        session, easy, inbox_assistant, "bot", last_message_at=now - timedelta(minutes=10)
+    )
+    for index, visitor in enumerate(bg_queued):
+        _insert_conversation(
+            session, bg, visitor, "queued", last_message_at=now - timedelta(minutes=20 + index)
+        )
+    _insert_conversation(
+        session,
+        bg,
+        bg_closed,
+        "closed",
+        last_message_at=now - timedelta(hours=1),
+        closed_at=now - timedelta(minutes=30),
+    )
+    session.commit()
+    return str(easy.id), str(bg.id), easy.name, bg.name
+
+
+def test_inbox_site_filter_returns_only_that_site_queued_rows(client: TestClient) -> None:
+    session = _session()
+    try:
+        easy_id, bg_id, _, _ = _seed_two_site_inbox(session)
+    finally:
+        session.close()
+
+    token = _seed_staff(client)
+    listed = client.get(
+        "/api/conversations",
+        params={"state": "queued", "site_id": easy_id},
+        headers=_auth(token),
+    )
+    assert listed.status_code == 200
+    names = [item["visitor_display"] for item in listed.json()["items"]]
+    assert names == ["Easy Queued One", "Easy Queued Two", "Easy Queued Three"]
+    assert all(item["site_id"] == easy_id for item in listed.json()["items"])
+    assert "Bg Queued One" not in names
+    assert bg_id not in [item["site_id"] for item in listed.json()["items"]]
+
+
+def test_inbox_queued_counts_are_hand_counted_per_site(client: TestClient) -> None:
+    session = _session()
+    try:
+        easy_id, bg_id, _, _ = _seed_two_site_inbox(session)
+    finally:
+        session.close()
+
+    token = _seed_staff(client)
+    all_sites = client.get("/api/conversations", params={"state": "queued"}, headers=_auth(token))
+    easy_only = client.get(
+        "/api/conversations",
+        params={"state": "queued", "site_id": easy_id},
+        headers=_auth(token),
+    )
+    assert all_sites.status_code == 200
+    assert easy_only.status_code == 200
+    assert all_sites.json()["counts"] == {
+        "bot": 1,
+        "queued": 5,
+        "human": 0,
+        "closed": 1,
+    }
+    assert easy_only.json()["counts"] == {
+        "bot": 1,
+        "queued": 3,
+        "human": 0,
+        "closed": 0,
+    }
+    sites = {row["id"]: row for row in all_sites.json()["sites"]}
+    assert sites[easy_id] == {"id": easy_id, "name": EASY_NAME, "queued": 3}
+    assert sites[bg_id] == {"id": bg_id, "name": BG_NAME, "queued": 2}
+    assert easy_only.json()["sites"] == all_sites.json()["sites"]
+
+
+def test_inbox_unknown_site_id_is_rejected(client: TestClient) -> None:
+    token = _seed_staff(client)
+    listed = client.get(
+        "/api/conversations",
+        params={"state": "queued", "site_id": str(uuid.uuid4())},
+        headers=_auth(token),
+    )
+    assert listed.status_code == 400
+    assert listed.json()["detail"] == "Invalid request"

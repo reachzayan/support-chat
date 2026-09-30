@@ -13,6 +13,7 @@ export type AssignedAgent = {
 export type InboxListItem = {
   id: string
   visitor_display: string
+  site_id: string
   site_name: string
   state: string
   preview: string
@@ -79,6 +80,12 @@ export type CannedReply = {
 export type InboxFilter = "human" | "bot" | "queued" | "closed"
 
 export type InboxCounts = Record<InboxFilter, number>
+
+export type InboxSite = {
+  id: string
+  name: string
+  queued: number
+}
 
 export const EMPTY_INBOX_COUNTS: InboxCounts = {
   human: 0,

@@ -2,9 +2,17 @@
 
 import { useCallback, useRef, useState, type Dispatch, type SetStateAction } from "react"
 
+import { persistInboxSiteId, readStoredInboxSiteId } from "@/lib/pane-width"
+
 import { fetchInboxDetailPage, mergeInboxMessages } from "./inbox-api"
 import { emptyLive, type InboxLive } from "./inbox-session"
-import { EMPTY_INBOX_COUNTS, type CannedReply, type InboxFilter, type InboxListItem } from "./types"
+import {
+  EMPTY_INBOX_COUNTS,
+  type CannedReply,
+  type InboxFilter,
+  type InboxListItem,
+  type InboxSite,
+} from "./types"
 import {
   useInboxActions,
   useInboxLoaders,
@@ -53,8 +61,58 @@ const useOlderMessages = (refs: InboxRefs, setLive: Dispatch<SetStateAction<Inbo
   return { loadingOlder, handleLoadOlder }
 }
 
+const useInboxQueryHandlers = (
+  refs: InboxRefs,
+  filter: InboxFilter,
+  siteId: string | null,
+  setFilter: Dispatch<SetStateAction<InboxFilter>>,
+  setSiteId: Dispatch<SetStateAction<string | null>>,
+  setSelectedId: Dispatch<SetStateAction<string | null>>,
+  setLive: Dispatch<SetStateAction<InboxLive>>,
+) => {
+  const clearOpenChat = useCallback(() => {
+    refs.markSelected(null)
+    const nextLive = emptyLive()
+    refs.resetLive(nextLive)
+    setSelectedId(null)
+    setLive(nextLive)
+  }, [refs, setLive, setSelectedId])
+  const handleFilter = useCallback(
+    (nextFilter: InboxFilter) => {
+      if (nextFilter === filter) {
+        return
+      }
+      refs.markFilter(nextFilter)
+      clearOpenChat()
+      setFilter(nextFilter)
+    },
+    [clearOpenChat, filter, refs, setFilter],
+  )
+  const handleSite = useCallback(
+    (nextSiteId: string | null) => {
+      if (nextSiteId === siteId) {
+        return
+      }
+      persistInboxSiteId(nextSiteId)
+      refs.markSiteId(nextSiteId)
+      clearOpenChat()
+      setSiteId(nextSiteId)
+    },
+    [clearOpenChat, refs, setSiteId, siteId],
+  )
+  const handleUnknownSite = useCallback(() => {
+    persistInboxSiteId(null)
+    refs.markSiteId(null)
+    setSiteId(null)
+  }, [refs, setSiteId])
+  return { handleFilter, handleSite, handleUnknownSite }
+}
+
 export const useInboxLive = (userId: string) => {
   const [filter, setFilter] = useState<InboxFilter>("human")
+  const [siteId, setSiteId] = useState<string | null>(readStoredInboxSiteId)
+  const [sites, setSites] = useState<InboxSite[]>([])
+  const [loadError, setLoadError] = useState(false)
   const [items, setItems] = useState<InboxListItem[]>([])
   const [nextCursor, setNextCursor] = useState<string | null>(null)
   const [selectedId, setSelectedId] = useState<string | null>(null)
@@ -62,7 +120,16 @@ export const useInboxLive = (userId: string) => {
   const [canned, setCanned] = useState<CannedReply[]>([])
   const [counts, setCounts] = useState(EMPTY_INBOX_COUNTS)
   const socketRef = useRef<SocketApi | null>(null)
-  const refs = useInboxSyncRefs(selectedId, live, filter, userId)
+  const refs = useInboxSyncRefs(selectedId, live, filter, siteId, userId)
+  const query = useInboxQueryHandlers(
+    refs,
+    filter,
+    siteId,
+    setFilter,
+    setSiteId,
+    setSelectedId,
+    setLive,
+  )
   const { reloadList, reloadDetail, clearLoadedCursors } = useInboxLoaders(
     refs,
     socketRef,
@@ -71,9 +138,13 @@ export const useInboxLive = (userId: string) => {
     setLive,
     setNextCursor,
     setCounts,
+    setSites,
+    setLoadError,
+    query.handleUnknownSite,
   )
   useInboxSideEffects(
     filter,
+    siteId,
     refs,
     socketRef,
     reloadList,
@@ -83,27 +154,24 @@ export const useInboxLive = (userId: string) => {
     setLive,
     setNextCursor,
     setCounts,
+    setSites,
+    setLoadError,
+    query.handleUnknownSite,
   )
   const actions = useInboxActions(refs, socketRef, setSelectedId, setLive, reloadDetail, reloadList)
   const olderMessages = useOlderMessages(refs, setLive)
-  const handleFilter = useCallback(
-    (nextFilter: InboxFilter) => {
-      if (nextFilter === filter) {
-        return
-      }
-      refs.markFilter(nextFilter)
-      refs.markSelected(null)
-      const nextLive = emptyLive()
-      refs.resetLive(nextLive)
-      setFilter(nextFilter)
-      setSelectedId(null)
-      setLive(nextLive)
-    },
-    [filter, refs, setLive, setSelectedId],
-  )
+  const handleRetryLoad = useCallback(() => {
+    setLoadError(false)
+    reloadList(refs.filterRef.current)
+  }, [refs.filterRef, reloadList])
   return {
     filter,
-    setFilter: handleFilter,
+    setFilter: query.handleFilter,
+    siteId,
+    sites,
+    setSite: query.handleSite,
+    loadError,
+    handleRetryLoad,
     items,
     nextCursor,
     selectedId,

@@ -59,13 +59,18 @@ const InboxShell = ({ userId, isAdmin, inbox }: InboxShellProps) => {
         <div className="flex min-h-0 flex-1 flex-col lg:flex-row">
           <ConversationList
             filter={inbox.filter}
+            siteId={inbox.siteId}
+            sites={inbox.sites}
             items={inbox.items}
             selectedId={inbox.selectedId}
             nextCursor={inbox.nextCursor}
             counts={inbox.counts}
+            loadError={inbox.loadError}
             onFilter={inbox.setFilter}
+            onSite={inbox.setSite}
             onSelect={inbox.handleSelect}
             onLoadMore={inbox.handleLoadMore}
+            onRetryLoad={inbox.handleRetryLoad}
           />
           {detail ? (
             <TranscriptColumn

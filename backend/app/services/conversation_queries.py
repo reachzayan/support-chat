@@ -66,15 +66,22 @@ class ConversationQueries:
         self._blocks = VisitorBlockRepository(session)
 
     async def list_inbox(
-        self, state: str | None, cursor: str | None
-    ) -> tuple[list[dict], str | None, dict[str, int]]:
+        self, state: str | None, cursor: str | None, site_id: UUID | None = None
+    ) -> tuple[list[dict], str | None, dict[str, int], list[dict]]:
         filter_state = _inbox_state(state)
         cursor_ts, cursor_id = _decode_inbox_cursor(cursor)
+        sites = [
+            {"id": str(site.id), "name": site.name, "queued": queued}
+            for site, queued in await self._conversations.list_inbox_sites()
+        ]
+        if site_id is not None and all(row["id"] != str(site_id) for row in sites):
+            raise CommandError("invalid")
         rows = await self._conversations.list_inbox(
             state=filter_state,
             cursor_ts=cursor_ts,
             cursor_id=cursor_id,
             limit=INBOX_PAGE + 1,
+            site_id=site_id,
         )
         extra = rows[INBOX_PAGE:]
         page = rows[:INBOX_PAGE]
@@ -86,8 +93,8 @@ class ConversationQueries:
         if extra and page:
             last = page[-1][0]
             next_cursor = _encode_inbox_cursor(last.last_message_at, last.id)
-        counts = await self._conversations.count_inbox_by_state()
-        return items, next_cursor, counts
+        counts = await self._conversations.count_inbox_by_state(site_id)
+        return items, next_cursor, counts, sites
 
     async def list_submissions(self, offset: int, limit: int | None) -> tuple[list[dict], bool]:
         page_size = SUBMISSIONS_PAGE if limit is None else min(max(limit, 1), SUBMISSIONS_PAGE)
@@ -279,6 +286,7 @@ def _inbox_list_item(
     return {
         "id": str(conversation.id),
         "visitor_display": _visitor_display(visitor),
+        "site_id": str(site.id),
         "site_name": site.name,
         "state": conversation.state,
         "preview": _preview(preview),
