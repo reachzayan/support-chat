@@ -26,12 +26,13 @@ SEND_TIMEOUT = 3.0
 @dataclass
 class VisitorConnection:
     websocket: WebSocket
-    conversation_id: UUID
+    conversation_id: UUID | None
     visitor_id: UUID
     site_id: UUID
     parent_origin: str
     last_event_id: int = 0
     origin_checked_at: float = 0.0
+    pending_hello: tuple[str, str | None, str | None] | None = None
 
 
 @dataclass
@@ -84,7 +85,7 @@ class ConnectionManager:
     def oldest_message_cursor(self, conversation_id: UUID) -> int | None:
         cursors: list[int] = []
         for visitor in self._visitors.values():
-            if visitor.conversation_id == conversation_id:
+            if visitor.conversation_id is not None and visitor.conversation_id == conversation_id:
                 cursors.append(visitor.last_event_id)
         for agent in self._agents.values():
             cursor = agent.subscriptions.get(conversation_id)
@@ -101,6 +102,9 @@ class ConnectionManager:
         if visitor is not None:
             if last_event_id is not None:
                 visitor.last_event_id = last_event_id
+            if visitor.conversation_id is None:
+                await self.send_pending_prechat(websocket)
+                return
             await self._replay_visitor(visitor)
             return
         agent = self.agent_for(websocket)
@@ -170,6 +174,11 @@ class ConnectionManager:
         self, websocket: WebSocket, conversation: Conversation, assigned: dict | None
     ) -> None:
         await self._send(websocket, state_frame(conversation, assigned))
+
+    async def send_pending_prechat(self, websocket: WebSocket) -> None:
+        await self._send(
+            websocket, {"v": 1, "type": "state", "state": "prechat", "assigned_agent": None}
+        )
 
     async def send_typing(self, websocket: WebSocket, active: bool) -> None:
         await self._send(websocket, {"v": 1, "type": "typing", "active": active})
@@ -241,12 +250,13 @@ class ConnectionManager:
                 if not messages or len(messages) < limit:
                     break
                 after = messages[-1].id
-        except Exception:
+        except Exception as exc:
             log.info(
                 "wakeup_catch_up_failed",
                 conversation_id=str(conversation_id),
                 role="system",
                 length=0,
+                error_class=type(exc).__name__,
             )
 
     async def _fanout_visitor(

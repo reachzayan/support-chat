@@ -16,8 +16,8 @@ from tests.ws_helpers import (
     auth_agent,
     auth_visitor,
     collect_until,
+    conversation_id_from_state,
     conversation_state,
-    decode_widget_token,
     frames_of_type,
     login_staff,
     message_count,
@@ -51,11 +51,9 @@ def _require_redis() -> None:
 def _prechat_and_join(client: TestClient) -> dict:
     seed_demo_world()
     boot = post_bootstrap(client)
-    claims = decode_widget_token(boot.json()["bootstrap_token"])
     access_token = login_staff(client)
     return {
         "bootstrap_token": boot.json()["bootstrap_token"],
-        "conversation_id": claims["conversation_id"],
         "access_token": access_token,
     }
 
@@ -67,19 +65,10 @@ def test_heartbeat_catch_up_delivers_committed_row_when_wakeup_suppressed(
     from app.chat.connection_manager import connection_manager
 
     ctx = _prechat_and_join(client)
-    conversation_id = ctx["conversation_id"]
     monkeypatch.setattr(connection_manager, "suppress_wakeups", True)
 
     with client.websocket_connect("/ws/agent", headers={"Origin": STAFF_ORIGIN}) as agent:
         auth_agent(agent, ctx["access_token"])
-        agent.send_json(
-            {
-                "v": 1,
-                "type": "subscribe",
-                "conversation_id": conversation_id,
-                "last_event_id": 0,
-            }
-        )
         with client.websocket_connect("/ws/visitor", headers={"Origin": WIDGET_ORIGIN}) as visitor:
             auth_visitor(visitor, ctx["bootstrap_token"])
             collect_until(
@@ -97,9 +86,18 @@ def test_heartbeat_catch_up_delivers_committed_row_when_wakeup_suppressed(
                     "message": DOT_QUESTION,
                 }
             )
-            collect_until(
+            started = collect_until(
                 visitor,
                 lambda frames: any(frame.get("type") == "prechat_accepted" for frame in frames),
+            )
+            conversation_id = conversation_id_from_state(started)
+            agent.send_json(
+                {
+                    "v": 1,
+                    "type": "subscribe",
+                    "conversation_id": conversation_id,
+                    "last_event_id": 0,
+                }
             )
             agent.send_json({"v": 1, "type": "join", "conversation_id": conversation_id})
             collect_until(
@@ -160,7 +158,6 @@ def test_reconnect_after_cursor_11_replays_only_later_ids_then_state(
 ) -> None:
     _require_redis()
     ctx = _prechat_and_join(client)
-    conversation_id = ctx["conversation_id"]
 
     with client.websocket_connect("/ws/visitor", headers={"Origin": WIDGET_ORIGIN}) as visitor:
         auth_visitor(visitor, ctx["bootstrap_token"])
@@ -177,10 +174,11 @@ def test_reconnect_after_cursor_11_replays_only_later_ids_then_state(
                 "message": DOT_QUESTION,
             }
         )
-        collect_until(
+        started = collect_until(
             visitor,
             lambda frames: any(frame.get("type") == "prechat_accepted" for frame in frames),
         )
+        conversation_id = conversation_id_from_state(started)
         collect_until(
             visitor,
             lambda frames: any(

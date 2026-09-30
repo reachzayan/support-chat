@@ -219,10 +219,7 @@ class ConversationService:
             phone=visitor.phone,
         )
         if not recognized:
-            conversation = await self._open_or_create_conversation(site.id, visitor.id)
-            return await self._conversation_bootstrap(
-                site, visitor, conversation, parent_origin, issued_resume
-            )
+            return self._pending_prechat_bootstrap(site, visitor, parent_origin, issued_resume)
 
         return await self._recognized_bootstrap(
             site,
@@ -259,10 +256,8 @@ class ConversationService:
                 site, visitor, conversation, parent_origin, None
             )
         if action == "reset":
-            conversation = await self._reset_current_conversation(site.id, visitor.id)
-            return await self._conversation_bootstrap(
-                site, visitor, conversation, parent_origin, None
-            )
+            await self._reset_current_conversation(site.id, visitor.id)
+            return self._pending_prechat_bootstrap(site, visitor, parent_origin, None)
         if action != "identify":
             raise CommandError("invalid")
 
@@ -276,14 +271,11 @@ class ConversationService:
                 visitor_id=visitor.id,
                 identity=self._returning_identity(visitor, chat_count),
             )
-        if (
-            current is not None
-            and current.state == "prechat"
-            and current.prechat_submission_id is None
+        if current is not None and not (
+            current.state == "prechat" and current.prechat_submission_id is None
         ):
             return await self._conversation_bootstrap(site, visitor, current, parent_origin, None)
-        conversation = current or await self._open_or_create_conversation(site.id, visitor.id)
-        return await self._conversation_bootstrap(site, visitor, conversation, parent_origin, None)
+        return self._pending_prechat_bootstrap(site, visitor, parent_origin, None)
 
     async def _reject_if_blocked(
         self,
@@ -338,6 +330,25 @@ class ConversationService:
             assigned_agent=assigned,
             messages=messages,
             messages_has_older=has_older,
+        )
+
+    def _pending_prechat_bootstrap(
+        self,
+        site: Site,
+        visitor: Visitor,
+        parent_origin: str,
+        resume_token: str | None,
+    ) -> BootstrapResult:
+        return self._bootstrap_result(
+            site,
+            parent_origin,
+            mode="conversation",
+            resume_token=resume_token,
+            visitor_id=visitor.id,
+            conversation_state="prechat",
+            assigned_agent=None,
+            messages=[],
+            messages_has_older=False,
         )
 
     async def _history_bootstrap(
@@ -405,6 +416,20 @@ class ConversationService:
             chat_count=chat_count,
         )
 
+    @staticmethod
+    def sanitize_hello_page(
+        parent_origin: str, page_url: str, page_title: str, referrer: str
+    ) -> tuple[str, str | None, str | None]:
+        try:
+            clean_url = sanitize_visitor_url(page_url, parent_origin, MAX_URL)
+            clean_ref = ""
+            if referrer:
+                clean_ref = sanitize_visitor_url(referrer, parent_origin, MAX_URL)
+        except InvalidOrigin as exc:
+            raise CommandError("invalid") from exc
+        title = (page_title or "").strip()[:MAX_TITLE]
+        return clean_url, title or None, clean_ref or None
+
     async def hello(
         self,
         conversation_id: UUID,
@@ -414,20 +439,15 @@ class ConversationService:
         page_title: str,
         referrer: str,
     ) -> CommandResult:
-        try:
-            clean_url = sanitize_visitor_url(page_url, parent_origin, MAX_URL)
-            clean_ref = ""
-            if referrer:
-                clean_ref = sanitize_visitor_url(referrer, parent_origin, MAX_URL)
-        except InvalidOrigin as exc:
-            raise CommandError("invalid") from exc
-        title = (page_title or "").strip()[:MAX_TITLE]
+        clean_url, title, clean_ref = self.sanitize_hello_page(
+            parent_origin, page_url, page_title, referrer
+        )
         conversation, site_key = await self._lock_visitor_conversation(
             conversation_id, visitor_id, parent_origin
         )
         conversation.page_url = clean_url
-        conversation.page_title = title or None
-        conversation.referrer = clean_ref or None
+        conversation.page_title = title
+        conversation.referrer = clean_ref
         await self._session.commit()
         log.info(
             "hello",
@@ -440,7 +460,7 @@ class ConversationService:
 
     async def submit_prechat(
         self,
-        conversation_id: UUID,
+        conversation_id: UUID | None,
         visitor_id: UUID,
         parent_origin: str,
         submission_id: UUID,
@@ -450,10 +470,11 @@ class ConversationService:
         inquiry_type: str,
         message: str,
         client_ip: str | None = None,
+        pending_hello: tuple[str, str | None, str | None] | None = None,
     ) -> CommandResult:
         clean = normalize_prechat(name, email, phone, inquiry_type, message)
-        conversation, site_key = await self._lock_visitor_conversation(
-            conversation_id, visitor_id, parent_origin
+        conversation, site_key = await self._lock_or_open_visitor_conversation(
+            conversation_id, visitor_id, parent_origin, pending_hello
         )
         await self._reject_if_blocked(
             conversation.site_id,
@@ -1451,7 +1472,7 @@ class ConversationService:
         _, replacement_hash = issue_resume_token()
         visitor.resume_token_hash = replacement_hash
 
-    async def _reset_current_conversation(self, site_id: UUID, visitor_id: UUID) -> Conversation:
+    async def _reset_current_conversation(self, site_id: UUID, visitor_id: UUID) -> None:
         await self._visitors.lock_by_id(visitor_id)
         current = await self._conversations.get_open_for_visitor(
             site_id, visitor_id, for_update=True
@@ -1464,9 +1485,14 @@ class ConversationService:
                 await self._insert_message(current, "system", RESET_LINE)
                 self._bootstrap_wakeups.append(current)
             await self._session.flush()
-        return await self._conversations.create(
-            site_id, visitor_id, _transition(None, "start_prechat")
-        )
+
+    async def open_submitted_conversation_id(self, site_id: UUID, visitor_id: UUID) -> UUID | None:
+        current = await self._conversations.get_open_for_visitor(site_id, visitor_id)
+        if current is None:
+            return None
+        if current.state == "prechat" and current.prechat_submission_id is None:
+            return None
+        return current.id
 
     async def _refresh_conversation(
         self,
@@ -1544,6 +1570,32 @@ class ConversationService:
             if recovered is None:
                 raise
             return recovered
+
+    async def _lock_or_open_visitor_conversation(
+        self,
+        conversation_id: UUID | None,
+        visitor_id: UUID,
+        parent_origin: str,
+        pending_hello: tuple[str, str | None, str | None] | None,
+    ) -> tuple[Conversation, str]:
+        if conversation_id is not None:
+            conversation, site_key = await self._lock_visitor_conversation(
+                conversation_id, visitor_id, parent_origin
+            )
+        else:
+            visitor = await self._visitors.lock_by_id(visitor_id)
+            if visitor is None:
+                raise CommandError("invalid")
+            site = await self._sites.get_by_id(visitor.site_id)
+            if site is None:
+                raise CommandError("invalid")
+            if parent_origin not in site.allowed_origins:
+                raise CommandError("origin_revoked")
+            conversation = await self._open_or_create_conversation(site.id, visitor_id)
+            site_key = site.key
+        if pending_hello is not None:
+            conversation.page_url, conversation.page_title, conversation.referrer = pending_hello
+        return conversation, site_key
 
     async def _lock_visitor_conversation(
         self, conversation_id: UUID, visitor_id: UUID, parent_origin: str

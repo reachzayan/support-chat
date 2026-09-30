@@ -292,6 +292,13 @@ def collect_until(
     return frames
 
 
+def conversation_id_from_state(frames: list[dict[str, Any]]) -> str:
+    for frame in reversed(frames):
+        if frame.get("type") == "state" and isinstance(frame.get("conversation_id"), str):
+            return frame["conversation_id"]
+    raise AssertionError(f"no conversation_id in state; got {frames!r}")
+
+
 def frames_of_type(frames: list[dict[str, Any]], frame_type: str) -> list[dict[str, Any]]:
     return [frame for frame in frames if frame.get("type") == frame_type]
 

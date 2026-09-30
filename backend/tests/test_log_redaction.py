@@ -129,6 +129,7 @@ async def test_wakeup_catch_up_failure_logs_conversation_id(migrated_db, monkeyp
     matching = [entry for entry in logs if entry.get("event") == "wakeup_catch_up_failed"]
     assert len(matching) == 1
     assert matching[0]["conversation_id"] == str(conversation_id)
+    assert matching[0]["error_class"] == "RuntimeError"
     serialized = json.dumps(logs)
     assert "replay failed" not in serialized
 
