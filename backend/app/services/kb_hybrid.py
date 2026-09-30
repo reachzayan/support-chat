@@ -64,6 +64,10 @@ class ChunkHit:
     structured: bool = False
 
 
+def _escape_like(value: str) -> str:
+    return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
 def _normalized(value: str) -> str:
     text_value = unicodedata.normalize("NFKC", value or "").casefold()
     return " ".join(text_value.split())
@@ -243,6 +247,7 @@ class HybridKbSearch:
         query = _normalized(visitor_text)
         if len(query) < 3:
             return None
+        escaped = _escape_like(query)
         result = await self._session.execute(
             select(KbChunk, KbPage, KbSource)
             .join(KbPage, KbPage.id == KbChunk.page_id)
@@ -257,7 +262,7 @@ class HybridKbSearch:
                 KbSnapshot.state == "live",
                 or_(
                     func.lower(func.coalesce(KbChunk.canonical_question, "")) == query,
-                    cast(KbChunk.aliases, String).ilike(f'%"{query}"%'),
+                    cast(KbChunk.aliases, String).ilike(f'%"{escaped}"%', escape="\\"),
                 ),
             )
             .order_by(KbChunk.id)
