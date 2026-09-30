@@ -253,12 +253,14 @@ def test_password_change_revokes_old_credentials(client: TestClient) -> None:
         json={"current_password": ALEX_PASSWORD, "new_password": new_password},
     )
     assert changed.status_code == 200
+    refresh_clear = _cookie_line(changed, "supportchat_refresh")
+    assert "max-age=0" in refresh_clear.lower().replace(" ", "")
 
     stale_me = client.get("/auth/me", headers={"Authorization": f"Bearer {access}"})
     assert stale_me.status_code == 401
 
-    stale_refresh = client.post("/auth/refresh", headers=_csrf_headers(client))
-    assert stale_refresh.status_code == 401
+    stale_refresh = client.post("/auth/refresh")
+    assert stale_refresh.status_code == 403
 
     old_login = _login(client, {"email": ALEX_EMAIL, "password": ALEX_PASSWORD})
     assert old_login.status_code == 401

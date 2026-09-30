@@ -28,6 +28,7 @@ def _production_settings() -> Settings:
         staff_app_origin=STAFF_ORIGIN,
         widget_origin=WIDGET_ORIGIN,
         marketing_host_origin=MARKETING_ORIGIN,
+        trusted_proxy_cidrs="172.18.0.1/32",
         anthropic_api_key="sk-ant-test-not-a-real-key",
         openai_api_key="sk-test-not-a-real-key",
     )

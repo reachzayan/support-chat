@@ -5,6 +5,8 @@ from typing import Any
 
 import httpx
 
+from app.services.kb_crawl import FetchError, public_fetch_url
+
 LOOKUP_TIMEOUT_SECONDS = 1.0
 
 
@@ -25,6 +27,10 @@ async def lookup_location(raw_ip: str | None, *, provider_url: str | None) -> st
     except ValueError:
         return None
     if not address.is_global:
+        return None
+    try:
+        public_fetch_url(provider_url)
+    except FetchError:
         return None
 
     try:

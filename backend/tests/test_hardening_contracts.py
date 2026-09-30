@@ -3,8 +3,11 @@ from uuid import uuid4
 
 import jwt
 import pytest
+from fastapi import Response
 
+from app.security.cookies import CSRF_COOKIE, REFRESH_COOKIE, clear_session_cookies
 from app.security.jwt import create_access_token, decode_access_token
+from app.security.widget_tokens import decode_widget_token
 from app.services import app_log, site_admin
 from app.settings import Settings
 
@@ -51,6 +54,42 @@ def test_access_token_rejects_missing_or_wrong_security_context(payload: dict) -
 
     with pytest.raises(jwt.PyJWTError):
         decode_access_token(token, settings)
+
+
+def test_clearing_session_cookies_matches_the_secure_flag() -> None:
+    settings = Settings(
+        database_url="postgresql://chat:chat@127.0.0.1:55432/support_chat_test",
+        jwt_secret="jwt-secret-" + "a" * 64,
+        widget_token_secret="widget-secret-" + "b" * 64,
+        rate_key_secret="rate-secret-" + "c" * 64,
+        cookie_secure=True,
+    )
+    response = Response()
+    clear_session_cookies(response, settings)
+    lines = [line.lower() for line in response.headers.getlist("set-cookie")]
+    refresh = next(line for line in lines if line.startswith(f"{REFRESH_COOKIE}="))
+    csrf = next(line for line in lines if line.startswith(f"{CSRF_COOKIE}="))
+    assert "secure" in refresh
+    assert "secure" in csrf
+    assert "httponly" in refresh
+
+
+def test_widget_token_without_expiry_is_rejected() -> None:
+    settings = _settings()
+    token = jwt.encode(
+        {
+            "typ": "widget",
+            "site_id": str(uuid4()),
+            "visitor_id": str(uuid4()),
+            "conversation_id": str(uuid4()),
+            "parent_origin": "https://sample-site.example.com",
+        },
+        settings.widget_token_secret,
+        algorithm="HS256",
+    )
+
+    with pytest.raises(jwt.PyJWTError):
+        decode_widget_token(token, settings)
 
 
 def test_log_sanitization_removes_secrets_from_messages_and_nested_values() -> None:

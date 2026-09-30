@@ -15,7 +15,7 @@ class RateLimitUnavailable(Exception):
 
 INCR_EXPIRE = """
 local current = redis.call("incr", KEYS[1])
-if current == 1 then
+if redis.call("ttl", KEYS[1]) < 0 then
     redis.call("expire", KEYS[1], tonumber(ARGV[1]))
 end
 return current
@@ -31,7 +31,7 @@ for index, key in ipairs(KEYS) do
 end
 for _, key in ipairs(KEYS) do
     local current = redis.call("incr", key)
-    if current == 1 then
+    if redis.call("ttl", key) < 0 then
         redis.call("expire", key, window)
     end
 end

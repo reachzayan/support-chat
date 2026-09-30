@@ -185,6 +185,21 @@ async def test_visitor_message_fails_closed_when_limiter_is_down(migrated_db, mo
     assert message_count(conversation_id, role="visitor") == 0
 
 
+async def test_hit_restores_ttl_when_the_counter_has_none(migrated_db) -> None:
+    from app.redis import get_redis
+    from app.services.rate_limit import RateLimiter
+
+    limiter = RateLimiter()
+    await limiter.hit("ttl-restore", 100, 60, "fixture")
+    keys = await get_redis().keys("rate:ttl-restore:*")
+    assert keys
+    key = keys[0]
+    await get_redis().persist(key)
+    assert await get_redis().ttl(key) == -1
+    await limiter.hit("ttl-restore", 100, 60, "fixture")
+    assert await get_redis().ttl(key) > 0
+
+
 async def test_bootstrap_rate_key_hashes_site_key_and_sets_ttl(migrated_db) -> None:
     from app.redis import get_redis
     from app.services.rate_limit import RateLimiter
