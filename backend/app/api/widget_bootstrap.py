@@ -92,7 +92,6 @@ def _bootstrap_response_body(result: BootstrapResult) -> dict[str, Any]:
     }
     if result.mode == "conversation":
         assert result.visitor_id is not None
-        assert result.conversation_id is not None
         assert result.conversation_state is not None
         body["bootstrap_token"] = create_widget_token(
             result.site_id,
@@ -101,13 +100,15 @@ def _bootstrap_response_body(result: BootstrapResult) -> dict[str, Any]:
             result.parent_origin,
             get_settings(),
         )
-        body["conversation"] = {
-            "id": str(result.conversation_id),
+        conversation: dict[str, Any] = {
             "state": result.conversation_state,
             "assigned_agent": result.assigned_agent,
             "messages": [message_frame(message) for message in (result.messages or [])],
             "has_older": result.messages_has_older,
         }
+        if result.conversation_id is not None:
+            conversation["id"] = str(result.conversation_id)
+        body["conversation"] = conversation
     if result.identity is not None:
         body["identity"] = {
             "display_name": result.identity.display_name,

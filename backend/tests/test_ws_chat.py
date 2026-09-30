@@ -9,6 +9,7 @@ from fastapi.testclient import TestClient
 from app.chat.outcome_copy import keep_helping_line
 from app.models.conversation import Conversation
 from app.models.message import Message
+from app.models.visitor import Visitor
 from tests.ws_helpers import (
     AGENT_HELP,
     AGENT_MESSAGE_ID,
@@ -33,6 +34,7 @@ from tests.ws_helpers import (
     bot_row_count,
     collect_until,
     conversation_count,
+    conversation_id_from_state,
     conversation_state,
     decode_widget_token,
     frames_of_type,
@@ -58,19 +60,41 @@ def _boot(client: TestClient) -> dict:
     return {
         "bootstrap_token": body["bootstrap_token"],
         "resume_token": body["resume_token"],
-        "conversation_id": claims["conversation_id"],
         "visitor_id": claims["visitor_id"],
         "access_token": login_staff(client),
     }
 
 
+def _delay_bot_turn(monkeypatch: pytest.MonkeyPatch, seconds: float = 0.5) -> None:
+    """Hold the bot long enough for an agent Join to clear the generation lease."""
+    from app.services.conversation_service import ConversationService
+
+    original = ConversationService.run_bot_turn
+
+    async def slow(self, conversation_id, generation_id, **kwargs):
+        await asyncio.sleep(seconds)
+        return await original(self, conversation_id, generation_id, **kwargs)
+
+    monkeypatch.setattr(ConversationService, "run_bot_turn", slow)
+
+
 def test_widget_bootstrap_and_socket_page_older_messages(client: TestClient) -> None:
     ctx = _boot(client)
-    conversation_id = uuid.UUID(ctx["conversation_id"])
+    visitor_id = uuid.UUID(ctx["visitor_id"])
     session = next(sync_session())
     try:
-        conversation = session.get(Conversation, conversation_id)
-        assert conversation is not None
+        visitor = session.get(Visitor, visitor_id)
+        assert visitor is not None
+        conversation = Conversation(
+            site_id=visitor.site_id,
+            visitor_id=visitor.id,
+            state="bot",
+            prechat_submission_id=uuid.uuid4(),
+            prechat_payload_hash="a" * 64,
+        )
+        session.add(conversation)
+        session.flush()
+        conversation_id = conversation.id
         session.add_all(
             Message(
                 conversation_id=conversation_id,
@@ -90,6 +114,8 @@ def test_widget_bootstrap_and_socket_page_older_messages(client: TestClient) -> 
             "site_key": DEMO_SITE_KEY,
             "public_key": DEMO_PUBLIC_KEY,
             "resume_token": ctx["resume_token"],
+            "action": "open",
+            "conversation_id": str(conversation_id),
         },
     )
     assert response.status_code == 200
@@ -121,20 +147,13 @@ def test_widget_bootstrap_and_socket_page_older_messages(client: TestClient) -> 
 
 def test_prechat_dot_question_reaches_subscribed_agent_once_and_agent_reply_is_canonical(
     client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    _delay_bot_turn(monkeypatch)
     ctx = _boot(client)
-    conversation_id = ctx["conversation_id"]
 
     with client.websocket_connect("/ws/agent", headers={"Origin": STAFF_ORIGIN}) as agent:
         auth_agent(agent, ctx["access_token"])
-        agent.send_json(
-            {
-                "v": 1,
-                "type": "subscribe",
-                "conversation_id": conversation_id,
-                "last_event_id": 0,
-            }
-        )
         with client.websocket_connect("/ws/visitor", headers={"Origin": WIDGET_ORIGIN}) as visitor:
             auth_visitor(visitor, ctx["bootstrap_token"])
             collect_until(
@@ -156,9 +175,18 @@ def test_prechat_dot_question_reaches_subscribed_agent_once_and_agent_reply_is_c
                 visitor,
                 lambda frames: any(frame.get("type") == "prechat_accepted" for frame in frames),
             )
+            conversation_id = conversation_id_from_state(accepted)
             prechat = frames_of_type(accepted, "prechat_accepted")[-1]
             assert prechat["submission_id"] == PRECHAT_SUBMISSION_ID
             assert prechat["message_id"] is not None
+            agent.send_json(
+                {
+                    "v": 1,
+                    "type": "subscribe",
+                    "conversation_id": conversation_id,
+                    "last_event_id": 0,
+                }
+            )
 
             agent.send_json({"v": 1, "type": "join", "conversation_id": conversation_id})
             collect_until(
@@ -231,7 +259,6 @@ def test_duplicate_client_ids_ack_once_and_conflict_on_payload_change(
     client: TestClient,
 ) -> None:
     ctx = _boot(client)
-    conversation_id = uuid.UUID(ctx["conversation_id"])
     empty_submission = "10000000-0000-4000-8000-000000000099"
 
     with client.websocket_connect("/ws/visitor", headers={"Origin": WIDGET_ORIGIN}) as visitor:
@@ -253,6 +280,7 @@ def test_duplicate_client_ids_ack_once_and_conflict_on_payload_change(
             visitor,
             lambda frames: any(frame.get("type") == "prechat_accepted" for frame in frames),
         )
+        conversation_id = uuid.UUID(conversation_id_from_state(empty_frames))
         empty_ack = frames_of_type(empty_frames, "prechat_accepted")[-1]
         assert empty_ack["message_id"] is None
         assert message_count(conversation_id, role="visitor") == 0
@@ -331,6 +359,12 @@ def test_duplicate_client_ids_ack_once_and_conflict_on_payload_change(
             visitor, lambda frames: any(frame.get("type") == "ack" for frame in frames)
         )
         first_ack = frames_of_type(first, "ack")[-1]
+        collect_until(
+            visitor,
+            lambda frames: any(
+                frame.get("type") == "typing" and frame.get("active") is False for frame in frames
+            ),
+        )
         visitor.send_json(
             {
                 "v": 1,
@@ -373,7 +407,6 @@ def test_visitor_escalate_frame_stays_with_the_bot(
     client: TestClient,
 ) -> None:
     ctx = _boot(client)
-    conversation_id = uuid.UUID(ctx["conversation_id"])
     keep_helping = keep_helping_line(DEMO_NAME)
     offered: list[dict] = []
 
@@ -396,10 +429,11 @@ def test_visitor_escalate_frame_stays_with_the_bot(
                 "message": "",
             }
         )
-        collect_until(
+        started = collect_until(
             visitor,
             lambda frames: any(frame.get("type") == "prechat_accepted" for frame in frames),
         )
+        conversation_id = uuid.UUID(conversation_id_from_state(started))
 
         visitor.send_json({"v": 1, "type": "escalate"})
         visitor.send_json({"v": 1, "type": "heartbeat"})
@@ -423,20 +457,13 @@ def test_visitor_escalate_frame_stays_with_the_bot(
 
 def test_join_inserts_named_system_row_and_visitor_message_does_not_create_bot_rows(
     client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    _delay_bot_turn(monkeypatch)
     ctx = _boot(client)
-    conversation_id = ctx["conversation_id"]
 
     with client.websocket_connect("/ws/agent", headers={"Origin": STAFF_ORIGIN}) as agent:
         auth_agent(agent, ctx["access_token"])
-        agent.send_json(
-            {
-                "v": 1,
-                "type": "subscribe",
-                "conversation_id": conversation_id,
-                "last_event_id": 0,
-            }
-        )
         with client.websocket_connect("/ws/visitor", headers={"Origin": WIDGET_ORIGIN}) as visitor:
             auth_visitor(visitor, ctx["bootstrap_token"])
             collect_until(
@@ -454,9 +481,18 @@ def test_join_inserts_named_system_row_and_visitor_message_does_not_create_bot_r
                     "message": DOT_QUESTION,
                 }
             )
-            collect_until(
+            started = collect_until(
                 visitor,
                 lambda frames: any(frame.get("type") == "prechat_accepted" for frame in frames),
+            )
+            conversation_id = conversation_id_from_state(started)
+            agent.send_json(
+                {
+                    "v": 1,
+                    "type": "subscribe",
+                    "conversation_id": conversation_id,
+                    "last_event_id": 0,
+                }
             )
             agent.send_json({"v": 1, "type": "join", "conversation_id": conversation_id})
             visitor_join = collect_until(
@@ -509,7 +545,6 @@ def test_two_agents_race_join_one_winner_loser_cannot_send(client: TestClient) -
     ctx = _boot(client)
     insert_staff(JORDAN_EMAIL, JORDAN_NAME, JORDAN_PASSWORD)
     jordan_token = login_staff(client, JORDAN_EMAIL, JORDAN_PASSWORD)
-    conversation_id = ctx["conversation_id"]
 
     with client.websocket_connect("/ws/visitor", headers={"Origin": WIDGET_ORIGIN}) as visitor:
         auth_visitor(visitor, ctx["bootstrap_token"])
@@ -526,10 +561,11 @@ def test_two_agents_race_join_one_winner_loser_cannot_send(client: TestClient) -
                 "message": "",
             }
         )
-        collect_until(
+        started = collect_until(
             visitor,
             lambda frames: any(frame.get("type") == "prechat_accepted" for frame in frames),
         )
+        conversation_id = conversation_id_from_state(started)
 
         with client.websocket_connect("/ws/agent", headers={"Origin": STAFF_ORIGIN}) as alex:
             auth_agent(alex, ctx["access_token"])
@@ -599,18 +635,9 @@ ASSISTANT_LINE = "You're now chatting with the assistant."
 
 def test_agent_can_transfer_joined_chat_back_to_the_assistant(client: TestClient) -> None:
     ctx = _boot(client)
-    conversation_id = ctx["conversation_id"]
 
     with client.websocket_connect("/ws/agent", headers={"Origin": STAFF_ORIGIN}) as agent:
         auth_agent(agent, ctx["access_token"])
-        agent.send_json(
-            {
-                "v": 1,
-                "type": "subscribe",
-                "conversation_id": conversation_id,
-                "last_event_id": 0,
-            }
-        )
         with client.websocket_connect("/ws/visitor", headers={"Origin": WIDGET_ORIGIN}) as visitor:
             auth_visitor(visitor, ctx["bootstrap_token"])
             collect_until(
@@ -628,9 +655,18 @@ def test_agent_can_transfer_joined_chat_back_to_the_assistant(client: TestClient
                     "message": DOT_QUESTION,
                 }
             )
-            collect_until(
+            started = collect_until(
                 visitor,
                 lambda frames: any(frame.get("type") == "prechat_accepted" for frame in frames),
+            )
+            conversation_id = conversation_id_from_state(started)
+            agent.send_json(
+                {
+                    "v": 1,
+                    "type": "subscribe",
+                    "conversation_id": conversation_id,
+                    "last_event_id": 0,
+                }
             )
             agent.send_json({"v": 1, "type": "join", "conversation_id": conversation_id})
             collect_until(
@@ -666,7 +702,7 @@ def test_agent_can_transfer_joined_chat_back_to_the_assistant(client: TestClient
     assert message_count(uuid.UUID(conversation_id), role="system", body=JOIN_LINE_ALEX) == 1
 
 
-def test_concurrent_bootstraps_with_one_resume_token_share_one_open_conversation(
+def test_concurrent_identifies_with_one_resume_token_create_no_conversation(
     client: TestClient,
 ) -> None:
     seed_demo_world()
@@ -674,29 +710,29 @@ def test_concurrent_bootstraps_with_one_resume_token_share_one_open_conversation
     resume = first.json()["resume_token"]
     first_claims = decode_widget_token(first.json()["bootstrap_token"])
 
-    def _again() -> str:
+    def _again() -> None:
         response = post_bootstrap(
             client,
             {"site_key": DEMO_SITE_KEY, "public_key": DEMO_PUBLIC_KEY, "resume_token": resume},
         )
         assert response.status_code == 200
-        return decode_widget_token(response.json()["bootstrap_token"])["conversation_id"]
+        claims = decode_widget_token(response.json()["bootstrap_token"])
+        assert "conversation_id" not in claims
 
     with ThreadPoolExecutor(max_workers=2) as pool:
         left = pool.submit(_again)
         right = pool.submit(_again)
-        ids = {left.result(), right.result()}
+        left.result()
+        right.result()
 
     visitor_id = uuid.UUID(first_claims["visitor_id"])
-    assert len(ids) == 1
     assert visitor_count() == 1
-    assert conversation_count(visitor_id=visitor_id, open_only=True) == 1
-    assert len(open_conversations_for_visitor(visitor_id)) == 1
+    assert conversation_count(visitor_id=visitor_id, open_only=True) == 0
+    assert len(open_conversations_for_visitor(visitor_id)) == 0
 
 
 def test_oversize_body_and_foreign_page_url_persist_nothing(client: TestClient) -> None:
     ctx = _boot(client)
-    conversation_id = uuid.UUID(ctx["conversation_id"])
 
     with client.websocket_connect("/ws/visitor", headers={"Origin": WIDGET_ORIGIN}) as visitor:
         auth_visitor(visitor, ctx["bootstrap_token"])
@@ -726,10 +762,11 @@ def test_oversize_body_and_foreign_page_url_persist_nothing(client: TestClient) 
                 "message": DOT_QUESTION,
             }
         )
-        collect_until(
+        started = collect_until(
             visitor,
             lambda frames: any(frame.get("type") == "prechat_accepted" for frame in frames),
         )
+        conversation_id = uuid.UUID(conversation_id_from_state(started))
         visitor.send_json(
             {
                 "v": 1,
@@ -813,7 +850,6 @@ def test_visitor_socket_stays_open_during_long_bot_turn(
 
     monkeypatch.setattr(ConversationService, "run_bot_turn", slow)
     ctx = _boot(client)
-    conversation_id = uuid.UUID(ctx["conversation_id"])
     with client.websocket_connect("/ws/visitor", headers={"Origin": WIDGET_ORIGIN}) as visitor:
         auth_visitor(visitor, ctx["bootstrap_token"])
         collect_until(visitor, lambda frames: any(frame.get("type") == "state" for frame in frames))
@@ -829,6 +865,11 @@ def test_visitor_socket_stays_open_during_long_bot_turn(
                 "message": DOT_QUESTION,
             }
         )
+        started = collect_until(
+            visitor,
+            lambda frames: any(frame.get("type") == "prechat_accepted" for frame in frames),
+        )
+        conversation_id = uuid.UUID(conversation_id_from_state(started))
         frames: list[dict] = []
         deadline = time.monotonic() + 12.0
         while time.monotonic() < deadline:
@@ -857,9 +898,7 @@ def test_visitor_socket_stays_open_during_long_bot_turn(
     assert bot_row_count() + message_count(conversation_id, role="system") >= 1
 
 
-async def test_parallel_bootstrap_after_close_shares_one_open_conversation(migrated_db) -> None:
-    from datetime import UTC, datetime
-
+async def test_parallel_identify_reuses_the_visitor_without_opening_a_chat(migrated_db) -> None:
     from sqlalchemy import func, select
 
     from app.db import session_maker
@@ -878,17 +917,13 @@ async def test_parallel_bootstrap_after_close_shares_one_open_conversation(migra
             "203.0.113.9",
             "Mozilla/5.0",
         )
-        conversation = await session.get(Conversation, first.conversation_id)
-        assert conversation is not None
-        conversation.state = "closed"
-        conversation.closed_at = datetime.now(UTC)
-        await session.commit()
+        assert first.conversation_id is None
         site_key = site.key
         public_key = site.public_key
         resume = first.resume_token
         visitor_id = first.visitor_id
 
-    async def once() -> uuid.UUID:
+    async def once() -> uuid.UUID | None:
         async with session_maker()() as session:
             result = await ConversationService(session).bootstrap(
                 site_key,
@@ -899,11 +934,11 @@ async def test_parallel_bootstrap_after_close_shares_one_open_conversation(migra
                 "Mozilla/5.0",
             )
             assert result.mode == "conversation"
-            assert result.conversation_id is not None
-            return result.conversation_id
+            assert result.conversation_id is None
+            return result.visitor_id
 
     left, right = await asyncio.gather(once(), once())
-    assert left == right
+    assert left == right == visitor_id
     async with session_maker()() as session:
         open_count = int(
             await session.scalar(
@@ -913,4 +948,4 @@ async def test_parallel_bootstrap_after_close_shares_one_open_conversation(migra
             )
             or 0
         )
-    assert open_count == 1
+    assert open_count == 0

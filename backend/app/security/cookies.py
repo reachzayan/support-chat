@@ -31,6 +31,18 @@ def set_csrf_cookie(response: Response, token: str, settings: Settings) -> None:
     )
 
 
-def clear_session_cookies(response: Response) -> None:
-    response.delete_cookie(REFRESH_COOKIE, path="/auth")
-    response.delete_cookie(CSRF_COOKIE, path="/")
+def clear_session_cookies(response: Response, settings: Settings) -> None:
+    response.delete_cookie(
+        REFRESH_COOKIE,
+        path="/auth",
+        secure=settings.cookie_secure,
+        httponly=True,
+        samesite="lax",
+    )
+    response.delete_cookie(
+        CSRF_COOKIE,
+        path="/",
+        secure=settings.cookie_secure,
+        httponly=False,
+        samesite="lax",
+    )

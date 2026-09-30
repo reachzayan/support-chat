@@ -40,7 +40,13 @@ SELECT format('GRANT USAGE ON SCHEMA public TO %I', :'app_user') \gexec
 SELECT format('GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO %I', :'app_user') \gexec
 SELECT format('GRANT USAGE, SELECT, UPDATE ON ALL SEQUENCES IN SCHEMA public TO %I', :'app_user') \gexec
 SELECT format('GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA public TO %I', :'app_user') \gexec
-SELECT format('GRANT USAGE ON ALL TYPES IN SCHEMA public TO %I', :'app_user') \gexec
+-- GRANT USAGE ON ALL TYPES IN SCHEMA public (Postgres has no bulk TYPE grant; enumerate types)
+SELECT format('GRANT USAGE ON TYPE %I.%I TO %I', n.nspname, t.typname, :'app_user')
+FROM pg_type t
+JOIN pg_namespace n ON n.oid = t.typnamespace
+WHERE n.nspname = 'public'
+  AND t.typtype IN ('e', 'c', 'd')
+\gexec
 SELECT format('ALTER DEFAULT PRIVILEGES FOR ROLE %I IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO %I', :'migration_user', :'app_user') \gexec
 SELECT format('ALTER DEFAULT PRIVILEGES FOR ROLE %I IN SCHEMA public GRANT USAGE, SELECT, UPDATE ON SEQUENCES TO %I', :'migration_user', :'app_user') \gexec
 SELECT format('ALTER DEFAULT PRIVILEGES FOR ROLE %I IN SCHEMA public GRANT EXECUTE ON FUNCTIONS TO %I', :'migration_user', :'app_user') \gexec

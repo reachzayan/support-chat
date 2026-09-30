@@ -35,6 +35,32 @@ class KbChunk(Base):
     __tablename__ = "kb_chunks"
     __table_args__ = (
         Index("ix_kb_chunks_site_enabled", "site_id", "enabled"),
+        Index("ix_kb_chunks_search", "search_document", postgresql_using="gin"),
+        Index(
+            "ix_kb_chunks_embedding_hnsw",
+            "embedding",
+            postgresql_using="hnsw",
+            postgresql_ops={"embedding": "vector_cosine_ops"},
+            postgresql_with={"m": 16, "ef_construction": 64},
+        ),
+        Index(
+            "ix_kb_chunks_grounded_trgm",
+            text(
+                "lower("
+                "coalesce(canonical_question, '') || ' ' || "
+                "kb_aliases_as_text(aliases) || ' ' || "
+                "coalesce(heading, '') || ' ' || "
+                "coalesce(topic_label, '')"
+                ")"
+            ),
+            postgresql_using="gin",
+            postgresql_ops={
+                "lower(coalesce(canonical_question, '') || ' ' || "
+                "kb_aliases_as_text(aliases) || ' ' || "
+                "coalesce(heading, '') || ' ' || "
+                "coalesce(topic_label, ''))": "gin_trgm_ops"
+            },
+        ),
         CheckConstraint(
             "kind IN ('faq','section','table','definition','prose','refusal','fact')",
             name="ck_kb_chunks_kind",

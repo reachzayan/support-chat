@@ -1,7 +1,7 @@
 from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
-from sqlalchemy import and_, func, or_, select, tuple_
+from sqlalchemy import and_, case, func, or_, select, tuple_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.chat.state_machine import apply_event
@@ -169,6 +169,7 @@ class ConversationRepository:
         cursor_ts: datetime | None,
         cursor_id: UUID | None,
         limit: int,
+        site_id: UUID | None = None,
     ) -> list[tuple[Conversation, Visitor, Site, User | None, str | None]]:
         latest_body = (
             select(Message.body)
@@ -185,6 +186,8 @@ class ConversationRepository:
         )
         if state is not None:
             query = query.where(Conversation.state == state)
+        if site_id is not None:
+            query = query.where(Conversation.site_id == site_id)
         if cursor_ts is not None and cursor_id is not None:
             query = query.where(
                 tuple_(Conversation.last_message_at, Conversation.id) < (cursor_ts, cursor_id)
@@ -198,16 +201,30 @@ class ConversationRepository:
             for conversation, visitor, site, agent, preview in result.all()
         ]
 
-    async def count_inbox_by_state(self) -> dict[str, int]:
+    async def count_inbox_by_state(self, site_id: UUID | None = None) -> dict[str, int]:
         counts = {"bot": 0, "queued": 0, "human": 0, "closed": 0}
-        result = await self._session.execute(
-            select(Conversation.state, func.count())
-            .where(Conversation.state.in_(("bot", "queued", "human", "closed")))
-            .group_by(Conversation.state)
+        query = select(Conversation.state, func.count()).where(
+            Conversation.state.in_(("bot", "queued", "human", "closed"))
         )
+        if site_id is not None:
+            query = query.where(Conversation.site_id == site_id)
+        result = await self._session.execute(query.group_by(Conversation.state))
         for state, total in result.all():
             counts[str(state)] = int(total)
         return counts
+
+    async def list_inbox_sites(self) -> list[tuple[Site, int]]:
+        queued = func.coalesce(
+            func.sum(case((Conversation.state == "queued", 1), else_=0)),
+            0,
+        )
+        result = await self._session.execute(
+            select(Site, queued)
+            .outerjoin(Conversation, Conversation.site_id == Site.id)
+            .group_by(Site.id)
+            .order_by(Site.name, Site.id)
+        )
+        return [(site, int(total)) for site, total in result.all()]
 
     async def close_queued_for_site(self, site_id: UUID) -> list[Conversation]:
         result = await self._session.execute(

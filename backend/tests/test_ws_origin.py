@@ -28,6 +28,8 @@ from tests.ws_helpers import (
     auth_visitor,
     bootstrap_payload,
     collect_until,
+    conversation_count,
+    conversation_id_from_state,
     decode_widget_token,
     insert_site,
     insert_staff,
@@ -60,11 +62,12 @@ def test_allowed_host_bootstrap_returns_widget_config_and_scoped_token(
     assert claims["parent_origin"] == HOST_ORIGIN
     assert claims["site_id"]
     assert claims["visitor_id"]
-    assert claims["conversation_id"]
+    assert "conversation_id" not in claims
     assert response.headers["access-control-allow-origin"] == HOST_ORIGIN
     assert "origin" in response.headers["vary"].lower()
     assert response.headers["cache-control"] == "no-store"
     assert visitor_count() == 1
+    assert conversation_count() == 0
 
 
 def test_new_bootstrap_snapshot_is_empty_prechat(client: TestClient) -> None:
@@ -74,13 +77,14 @@ def test_new_bootstrap_snapshot_is_empty_prechat(client: TestClient) -> None:
 
     claims = decode_widget_token(body["bootstrap_token"])
     assert body["mode"] == "conversation"
+    assert "conversation_id" not in claims
     assert body["conversation"] == {
-        "id": claims["conversation_id"],
         "state": "prechat",
         "assigned_agent": None,
         "messages": [],
         "has_older": False,
     }
+    assert conversation_count() == 0
 
 
 def test_resume_bootstrap_snapshot_includes_the_visitor_line(client: TestClient) -> None:
@@ -88,7 +92,6 @@ def test_resume_bootstrap_snapshot_includes_the_visitor_line(client: TestClient)
     first = post_bootstrap(client)
     resume = first.json()["resume_token"]
     token = first.json()["bootstrap_token"]
-    conversation_id = decode_widget_token(token)["conversation_id"]
 
     with client.websocket_connect("/ws/visitor", headers={"Origin": WIDGET_ORIGIN}) as visitor:
         auth_visitor(visitor, token)
@@ -105,10 +108,11 @@ def test_resume_bootstrap_snapshot_includes_the_visitor_line(client: TestClient)
                 "message": DOT_QUESTION,
             }
         )
-        collect_until(
+        accepted = collect_until(
             visitor,
             lambda frames: any(frame.get("type") == "prechat_accepted" for frame in frames),
         )
+        conversation_id = conversation_id_from_state(accepted)
         collect_until(
             visitor,
             lambda frames: any(
@@ -172,12 +176,13 @@ def test_site_a_resume_token_on_site_b_exposes_no_site_a_identity(client: TestCl
     other_claims = decode_widget_token(other_body["bootstrap_token"])
 
     assert visitor_count(easy_id) == 1
+    assert conversation_count() == 0
     assert other_claims["visitor_id"] != easy_claims["visitor_id"]
-    assert other_claims["conversation_id"] != easy_claims["conversation_id"]
+    assert "conversation_id" not in easy_claims
+    assert "conversation_id" not in other_claims
     assert other_claims["site_id"] != easy_claims["site_id"]
     dumped = json.dumps(other_body)
     assert easy_claims["visitor_id"] not in dumped
-    assert easy_claims["conversation_id"] not in dumped
     assert easy_resume not in dumped
 
 

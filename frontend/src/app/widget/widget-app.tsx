@@ -64,10 +64,7 @@ const shouldKeepClosedView = (
   if (current.conversation !== "closed") {
     return false
   }
-  const isExplicitNewChat =
-    snapshot.state === "prechat" &&
-    snapshot.id !== undefined &&
-    snapshot.id !== current.conversationId
+  const isExplicitNewChat = snapshot.state === "prechat" && snapshot.id !== current.conversationId
   return !isExplicitNewChat
 }
 

@@ -310,6 +310,8 @@ class Settings(BaseSettings):
             raise ValueError("OPENAI_EMBED_DIM must be 1536 in production")
         _validate_provider_key("OPENAI_API_KEY", self.openai_api_key)
         _validate_provider_key("ANTHROPIC_API_KEY", self.anthropic_api_key)
+        if not self.trusted_proxy_networks():
+            raise ValueError("TRUSTED_PROXY_CIDRS must list at least one CIDR in production")
         return self
 
     @property

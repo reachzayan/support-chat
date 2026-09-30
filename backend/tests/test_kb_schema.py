@@ -66,6 +66,13 @@ def _live_snapshot(session: Session, source: KbSource) -> KbSnapshot:
     return snapshot
 
 
+def test_chunk_model_declares_live_search_indexes() -> None:
+    names = {index.name for index in KbChunk.__table__.indexes}
+    assert "ix_kb_chunks_search" in names
+    assert "ix_kb_chunks_embedding_hnsw" in names
+    assert "ix_kb_chunks_grounded_trgm" in names
+
+
 def test_chunk_search_is_isolated_to_site_id(client) -> None:
     session = _session()
     try:

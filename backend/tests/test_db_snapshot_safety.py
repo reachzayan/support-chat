@@ -6,7 +6,7 @@ from pathlib import Path
 
 BACKEND_ROOT = Path(__file__).resolve().parents[1]
 SNAPSHOT_DIR = BACKEND_ROOT / "docker" / "db-snapshot"
-COMPOSE_FILE = BACKEND_ROOT / "docker-compose.yml"
+COMPOSE_FILE = BACKEND_ROOT.parent / "docker-compose.yml"
 FORBIDDEN_DOC_SUBSTRINGS = (
     "01_support_chat.sql",
     "test-password-15",

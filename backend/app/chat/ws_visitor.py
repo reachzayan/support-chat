@@ -48,6 +48,8 @@ async def _conversation_idle_watch(websocket: WebSocket, connection: VisitorConn
             await asyncio.sleep(15)
             if websocket.application_state != WebSocketState.CONNECTED:
                 return
+            if connection.conversation_id is None:
+                continue
             async with session_maker()() as session:
                 result = await ConversationService(session).tick_idle(connection.conversation_id)
             if result is None:
@@ -122,16 +124,22 @@ async def _authenticate_visitor(websocket: WebSocket, settings) -> VisitorConnec
         await websocket.close(code=4401)
         return None
     site_id = UUID(str(claims["site_id"]))
+    visitor_id = UUID(str(claims["visitor_id"]))
     parent = str(parent_origin)
+    raw_conversation_id = claims.get("conversation_id")
+    conversation_id = UUID(str(raw_conversation_id)) if raw_conversation_id else None
     async with session_maker()() as session:
-        allowed = await ConversationService(session).parent_origin_allowed(site_id, parent)
+        service = ConversationService(session)
+        allowed = await service.parent_origin_allowed(site_id, parent)
+        if allowed and conversation_id is None:
+            conversation_id = await service.open_submitted_conversation_id(site_id, visitor_id)
     if not allowed:
         await websocket.close(code=4403)
         return None
     return VisitorConnection(
         websocket=websocket,
-        conversation_id=UUID(str(claims["conversation_id"])),
-        visitor_id=UUID(str(claims["visitor_id"])),
+        conversation_id=conversation_id,
+        visitor_id=visitor_id,
         site_id=site_id,
         parent_origin=parent,
         last_event_id=last_event_id,
@@ -219,6 +227,25 @@ async def _handle_visitor_resume(
     await connection_manager.catch_up_socket(websocket, last_event_id=cursor)
 
 
+async def _handle_visitor_older(
+    websocket: WebSocket, connection: VisitorConnection, frame: dict
+) -> None:
+    before_id = frame.get("before_id")
+    if (
+        not isinstance(before_id, int)
+        or isinstance(before_id, bool)
+        or not 1 <= before_id <= MAX_MESSAGE_ID
+    ):
+        await connection_manager.send_error(websocket, "invalid")
+        return
+    if not await _parent_still_allowed(websocket, connection):
+        return
+    if connection.conversation_id is None:
+        await connection_manager.send_error(websocket, "invalid")
+        return
+    await connection_manager.send_older(websocket, connection.conversation_id, before_id)
+
+
 async def _handle_visitor_frame(
     websocket: WebSocket, connection: VisitorConnection, frame: dict
 ) -> None:
@@ -238,16 +265,7 @@ async def _handle_visitor_frame(
         await _handle_visitor_resume(websocket, connection, frame)
         return
     if frame_type == "older":
-        before_id = frame.get("before_id")
-        if (
-            not isinstance(before_id, int)
-            or isinstance(before_id, bool)
-            or not 1 <= before_id <= MAX_MESSAGE_ID
-        ):
-            await connection_manager.send_error(websocket, "invalid")
-            return
-        if await _parent_still_allowed(websocket, connection):
-            await connection_manager.send_older(websocket, connection.conversation_id, before_id)
+        await _handle_visitor_older(websocket, connection, frame)
         return
     if frame_type in {"hello", "prechat", "message", "escalate"}:
         await _run_visitor_command(websocket, connection, frame_type, frame)
@@ -277,28 +295,12 @@ async def _parent_still_allowed(
     return False
 
 
-async def _run_visitor_command(
-    websocket: WebSocket, connection: VisitorConnection, kind: str, frame: dict
+async def _deliver_visitor_result(
+    websocket: WebSocket, connection: VisitorConnection, kind: str, result
 ) -> None:
-    async with session_maker()() as session:
-        service = ConversationService(session)
-        allowed = await service.parent_origin_allowed(connection.site_id, connection.parent_origin)
-        if not allowed:
-            await websocket.close(code=4403)
-            return
-        try:
-            result = await _dispatch_visitor(
-                service, connection, kind, frame, _socket_ip(websocket)
-            )
-        except CommandError as exc:
-            if exc.code == "origin_revoked":
-                await websocket.close(code=4403)
-                return
-            await connection_manager.send_error(websocket, exc.code, **exc.extra)
-            return
-        except (IllegalTransition, ValueError, KeyError, TypeError):
-            await connection_manager.send_error(websocket, "invalid")
-            return
+    if kind == "prechat":
+        connection.conversation_id = result.conversation.id
+        connection.pending_hello = None
     assigned = None
     async with session_maker()() as session:
         assigned = await ConversationService(session).assigned_agent_view(result.conversation)
@@ -324,6 +326,33 @@ async def _run_visitor_command(
         task = asyncio.create_task(_shielded_bot_generation(websocket, result))
         _bot_generation_tasks.add(task)
         task.add_done_callback(_bot_generation_tasks.discard)
+
+
+async def _run_visitor_command(
+    websocket: WebSocket, connection: VisitorConnection, kind: str, frame: dict
+) -> None:
+    async with session_maker()() as session:
+        service = ConversationService(session)
+        allowed = await service.parent_origin_allowed(connection.site_id, connection.parent_origin)
+        if not allowed:
+            await websocket.close(code=4403)
+            return
+        try:
+            result = await _dispatch_visitor(
+                service, connection, kind, frame, _socket_ip(websocket)
+            )
+        except CommandError as exc:
+            if exc.code == "origin_revoked":
+                await websocket.close(code=4403)
+                return
+            await connection_manager.send_error(websocket, exc.code, **exc.extra)
+            return
+        except (IllegalTransition, ValueError, KeyError, TypeError):
+            await connection_manager.send_error(websocket, "invalid")
+            return
+        if result is None:
+            return
+    await _deliver_visitor_result(websocket, connection, kind, result)
 
 
 async def _shielded_bot_generation(websocket: WebSocket, result) -> None:
@@ -377,6 +406,14 @@ async def _dispatch_visitor(
     visitor_id = connection.visitor_id
     parent_origin = connection.parent_origin
     if kind == "hello":
+        if conversation_id is None:
+            connection.pending_hello = ConversationService.sanitize_hello_page(
+                parent_origin,
+                str(frame.get("page_url") or ""),
+                str(frame.get("page_title") or ""),
+                str(frame.get("referrer") or ""),
+            )
+            return None
         return await service.hello(
             conversation_id,
             visitor_id,
@@ -397,7 +434,10 @@ async def _dispatch_visitor(
             str(frame.get("inquiry_type") or "other"),
             str(frame.get("message") or ""),
             client_ip,
+            pending_hello=connection.pending_hello,
         )
+    if conversation_id is None:
+        raise CommandError("invalid")
     if kind == "message":
         return await service.visitor_message(
             conversation_id,

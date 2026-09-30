@@ -18,6 +18,7 @@ _PROD = {
     "widget_origin": "https://widget.sample-site.example.com",
     "marketing_host_origin": "https://sample-site.example.com",
     "redis_url": "rediss://app:prod-redis-secret@127.0.0.1:6379/0",
+    "trusted_proxy_cidrs": "172.18.0.1/32",
 }
 
 
@@ -73,6 +74,7 @@ def test_production_startup_accepts_https_origins_and_secure_cookies() -> None:
         widget_origin="https://widget.sample-site.example.com",
         marketing_host_origin="https://sample-site.example.com",
         redis_url="rediss://app:prod-redis-secret@127.0.0.1:6379/0",
+        trusted_proxy_cidrs="172.18.0.1/32",
         anthropic_api_key="sk-ant-test-not-a-real-key",
         openai_api_key="sk-test-not-a-real-key",
     )
@@ -201,6 +203,19 @@ def test_production_startup_rejects_shared_marketing_and_widget_origin() -> None
             },
             anthropic_api_key="sk-ant-test-not-a-real-key",
             openai_api_key="sk-test-not-a-real-key",
+        )
+
+
+def test_production_startup_rejects_empty_trusted_proxy_cidrs() -> None:
+    with pytest.raises(ValueError, match="TRUSTED_PROXY_CIDRS"):
+        Settings(
+            **{
+                **_SECRETS,
+                **_PROD,
+                "trusted_proxy_cidrs": "",
+                "anthropic_api_key": "sk-ant-test-not-a-real-key",
+                "openai_api_key": "sk-test-not-a-real-key",
+            }
         )
 
 

@@ -4,25 +4,53 @@
 
 import { cn } from "cn"
 import { Inbox as InboxIcon, Search } from "lucide-react"
-import { LayoutGroup, motion, useReducedMotion } from "motion/react"
+import { AnimatePresence, LayoutGroup, motion, useReducedMotion } from "motion/react"
 import { useCallback, useDeferredValue, useMemo, useState, type ChangeEvent } from "react"
 
+import { ResizableListPane } from "@/components/admin/pane-resize-handle"
+import { RetryError } from "@/components/admin/retry-error"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { linkUnderlineClass } from "@/components/ui/link-button"
+import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
+import {
+  INBOX_LIST_DEFAULT_WIDTH,
+  INBOX_LIST_WIDTH_KEY,
+  MAX_PANE_WIDTH,
+  MIN_PANE_WIDTH,
+  usePaneWidth,
+} from "@/lib/pane-width"
 import { matchesSearchQuery } from "@/lib/search"
 
-import { INBOX_FILTERS, type InboxCounts, type InboxFilter, type InboxListItem } from "./types"
+import {
+  INBOX_FILTERS,
+  type InboxCounts,
+  type InboxFilter,
+  type InboxListItem,
+  type InboxSite,
+} from "./types"
 
 type ConversationListProps = {
   filter: InboxFilter
+  siteId: string | null
+  sites: InboxSite[]
   items: InboxListItem[]
   selectedId: string | null
   nextCursor: string | null
   counts: InboxCounts
+  loadError: boolean
   onFilter: (filter: InboxFilter) => void
+  onSite: (siteId: string | null) => void
   onSelect: (id: string) => void
   onLoadMore: (cursor: string) => void
+  onRetryLoad: () => void
 }
 
 const stateLabel = (state: string) => {
@@ -86,6 +114,16 @@ const FILTER_SLIDER_SPRING = {
 } as const
 
 const FILTER_SLIDER_INSTANT = { duration: 0 } as const
+const ROW_RAIL_SPRING = { type: "spring", stiffness: 500, damping: 42 } as const
+const ROW_FADE = { duration: 0.16, ease: [0.22, 1, 0.36, 1] } as const
+const hiddenChip = { opacity: 0, y: 4 }
+const shownChip = { opacity: 1, y: 0 }
+const hiddenRow = { opacity: 0, y: 6 }
+const shownRow = { opacity: 1, y: 0 }
+const exitRow = { opacity: 0, y: -4 }
+const exitChip = { opacity: 0, y: -2 }
+
+type SliderTransition = typeof FILTER_SLIDER_SPRING | typeof FILTER_SLIDER_INSTANT
 
 const avatarClassFor = (seed: string) => {
   let hash = 0
@@ -113,13 +151,33 @@ const formatTime = (iso: string) => {
 type RowProps = {
   item: InboxListItem
   selected: boolean
+  showSite: boolean
   onSelect: (id: string) => void
 }
 
-const ConversationRow = ({ item, selected, onSelect }: RowProps) => {
+const SiteChip = ({ name, reducedMotion }: { name: string; reducedMotion: boolean }) => (
+  <motion.span
+    initial={reducedMotion ? false : hiddenChip}
+    animate={shownChip}
+    exit={reducedMotion ? undefined : exitChip}
+    transition={reducedMotion ? FILTER_SLIDER_INSTANT : ROW_FADE}
+    className="bg-ice-2 text-mute mt-0.5 inline-flex rounded px-1.5 py-0.5 text-[10px] font-semibold tracking-wide"
+  >
+    {name}
+  </motion.span>
+)
+
+const ConversationRow = ({ item, selected, showSite, onSelect }: RowProps) => {
   const handleSelect = useCallback(() => onSelect(item.id), [item.id, onSelect])
+  const reducedMotion = Boolean(useReducedMotion())
   return (
-    <li className="border-line border-b px-2 py-1 last:border-b-0">
+    <motion.li
+      initial={reducedMotion ? false : hiddenRow}
+      animate={shownRow}
+      exit={reducedMotion ? undefined : exitRow}
+      transition={reducedMotion ? FILTER_SLIDER_INSTANT : ROW_FADE}
+      className="border-line border-b px-2 py-1 last:border-b-0"
+    >
       <MotionButton
         type="button"
         variant="ghost"
@@ -134,7 +192,7 @@ const ConversationRow = ({ item, selected, onSelect }: RowProps) => {
         {selected ? (
           <motion.span
             layoutId="conversation-active-rail"
-            transition={{ type: "spring", stiffness: 500, damping: 42 }}
+            transition={reducedMotion ? FILTER_SLIDER_INSTANT : ROW_RAIL_SPRING}
             aria-hidden="true"
             className="bg-ember absolute top-2 bottom-2 left-0 w-0.5 rounded-full"
           />
@@ -155,7 +213,11 @@ const ConversationRow = ({ item, selected, onSelect }: RowProps) => {
               {formatTime(item.last_message_at)}
             </time>
           </span>
-          <span className="text-mute block truncate text-[11px]">{item.site_name}</span>
+          <AnimatePresence initial={false}>
+            {showSite ? (
+              <SiteChip key="site-chip" name={item.site_name} reducedMotion={reducedMotion} />
+            ) : null}
+          </AnimatePresence>
           <span className="text-ink line-clamp-2 text-xs leading-5">{item.preview}</span>
           <span aria-hidden="true" className={stateChipClass(item.state)}>
             <span className={`size-1.5 rounded-full ${stateDotClass(item.state)}`} />
@@ -163,22 +225,28 @@ const ConversationRow = ({ item, selected, onSelect }: RowProps) => {
           </span>
         </span>
       </MotionButton>
-    </li>
+    </motion.li>
   )
 }
 
 export const ConversationList = ({
   filter,
+  siteId,
+  sites,
   items,
   selectedId,
   nextCursor,
   counts,
+  loadError,
   onFilter,
+  onSite,
   onSelect,
   onLoadMore,
+  onRetryLoad,
 }: ConversationListProps) => {
   const [query, setQuery] = useState("")
   const deferredQuery = useDeferredValue(query)
+  const pane = usePaneWidth(INBOX_LIST_WIDTH_KEY, INBOX_LIST_DEFAULT_WIDTH)
   const handleLoadMoreClick = useCallback(() => {
     if (nextCursor) {
       onLoadMore(nextCursor)
@@ -196,35 +264,213 @@ export const ConversationList = ({
     )
   }, [deferredQuery, items])
   return (
-    <section className="border-line bg-paper flex min-h-0 w-full flex-col border-r lg:w-[420px] lg:shrink-0">
-      <div className="border-line flex h-16 items-center border-b px-5">
-        <h2 className="text-navy heading text-sm">Conversations</h2>
-      </div>
-      <label htmlFor="conversation-search" className="relative mx-4 mt-4 mb-3 block">
-        <span className="sr-only">Search chats</span>
-        <Search aria-hidden="true" className="text-mute absolute top-2.5 left-3 size-4" />
-        <Input
-          id="conversation-search"
-          name="query"
-          autoComplete="off"
-          spellCheck={false}
-          type="search"
-          value={query}
-          onChange={handleSearch}
-          placeholder="Search conversations"
-          className="border-line bg-ice-2/60 text-ink placeholder:text-mute focus-visible:ring-steel dark:bg-ice-2/60 h-10 rounded-lg border pr-3 pl-9 text-sm outline-none focus-visible:ring-2"
-        />
-      </label>
-      <InboxFilterNav filter={filter} counts={counts} onFilter={onFilter} />
-      <ConversationRows
+    <ResizableListPane
+      label="conversation list"
+      width={pane.width}
+      dragging={pane.dragging}
+      min={MIN_PANE_WIDTH}
+      max={MAX_PANE_WIDTH}
+      className="border-line bg-paper flex min-h-0 w-full min-w-0 flex-col overflow-hidden border-r"
+      onResizeStart={pane.handleResizeStart}
+      onResizeKeyDown={pane.handleResizeKeyDown}
+      onResizeReset={pane.handleResizeReset}
+    >
+      <ConversationListBody
+        filter={filter}
+        siteId={siteId}
+        sites={sites}
         items={visibleItems}
         selectedId={selectedId}
         nextCursor={nextCursor}
+        counts={counts}
+        loadError={loadError}
         query={query}
+        onFilter={onFilter}
+        onSite={onSite}
         onSelect={onSelect}
+        onSearch={handleSearch}
         onLoadMore={handleLoadMoreClick}
+        onRetryLoad={onRetryLoad}
       />
-    </section>
+    </ResizableListPane>
+  )
+}
+
+const ConversationListBody = ({
+  filter,
+  siteId,
+  sites,
+  items,
+  selectedId,
+  nextCursor,
+  counts,
+  loadError,
+  query,
+  onFilter,
+  onSite,
+  onSelect,
+  onSearch,
+  onLoadMore,
+  onRetryLoad,
+}: {
+  filter: InboxFilter
+  siteId: string | null
+  sites: InboxSite[]
+  items: InboxListItem[]
+  selectedId: string | null
+  nextCursor: string | null
+  counts: InboxCounts
+  loadError: boolean
+  query: string
+  onFilter: (filter: InboxFilter) => void
+  onSite: (siteId: string | null) => void
+  onSelect: (id: string) => void
+  onSearch: (event: ChangeEvent<HTMLInputElement>) => void
+  onLoadMore: () => void
+  onRetryLoad: () => void
+}) => {
+  return (
+    <>
+      <div className="border-line flex h-16 items-center border-b px-5">
+        <h2 className="text-navy heading text-sm">Conversations</h2>
+      </div>
+      <div className="mx-4 mt-4 mb-3 inline-flex w-fit max-w-full flex-col gap-3 self-start">
+        <label htmlFor="conversation-search" className="relative block w-full min-w-0">
+          <span className="sr-only">Search chats</span>
+          <Search aria-hidden="true" className="text-mute absolute top-2.5 left-3 size-4" />
+          <Input
+            id="conversation-search"
+            name="query"
+            autoComplete="off"
+            spellCheck={false}
+            type="search"
+            size={1}
+            value={query}
+            onChange={onSearch}
+            placeholder="Search conversations"
+            className="border-line bg-ice-2/60 text-ink placeholder:text-mute focus-visible:ring-steel dark:bg-ice-2/60 h-10 w-full min-w-0 rounded-lg border pr-3 pl-9 text-sm outline-none focus-visible:ring-2"
+          />
+        </label>
+        <InboxSiteNav sites={sites} siteId={siteId} onSite={onSite} />
+        <InboxFilterNav filter={filter} counts={counts} onFilter={onFilter} />
+      </div>
+      {loadError ? (
+        <div className="px-4 pb-3">
+          <RetryError text="Inbox could not be loaded" onRetry={onRetryLoad} className="mt-0" />
+        </div>
+      ) : (
+        <ConversationRows
+          items={items}
+          selectedId={selectedId}
+          nextCursor={nextCursor}
+          query={query}
+          showSite={siteId === null}
+          onSelect={onSelect}
+          onLoadMore={onLoadMore}
+        />
+      )}
+    </>
+  )
+}
+
+const ALL_INBOXES = "all"
+
+const inboxOptionLabel = (name: string, count: number) => `${name} ${count}`
+
+const queuedElsewhere = (sites: InboxSite[], siteId: string | null) => {
+  if (siteId === null) {
+    return 0
+  }
+  return sites.reduce((sum, site) => (site.id === siteId ? sum : sum + site.queued), 0)
+}
+
+const orderInboxSites = (sites: InboxSite[]) =>
+  [...sites].toSorted((left, right) => {
+    if (right.queued !== left.queued) {
+      return right.queued - left.queued
+    }
+    return left.name.localeCompare(right.name)
+  })
+
+const inboxSelectItems = (sites: InboxSite[], siteId: string | null, queuedAll: number) => {
+  const next: Record<string, string> = {
+    [ALL_INBOXES]: inboxOptionLabel("All", queuedAll),
+  }
+  for (const site of sites) {
+    next[site.id] = inboxOptionLabel(site.name, site.queued)
+  }
+  if (siteId !== null && next[siteId] === undefined) {
+    next[siteId] = "Inbox"
+  }
+  return next
+}
+
+const InboxElsewhereBadge = ({ count }: { count: number }) => (
+  <span
+    aria-label={`${count} needs attention in other inboxes`}
+    className="bg-ember text-paper ml-auto inline-flex h-5 min-w-5 shrink-0 items-center justify-center rounded-[6px] px-1.5 font-mono text-[10px] font-bold tabular-nums"
+  >
+    +{count}
+  </span>
+)
+
+const InboxSiteNav = ({
+  sites,
+  siteId,
+  onSite,
+}: {
+  sites: InboxSite[]
+  siteId: string | null
+  onSite: (siteId: string | null) => void
+}) => {
+  const queuedAll = sites.reduce((sum, site) => sum + site.queued, 0)
+  const elsewhere = queuedElsewhere(sites, siteId)
+  const orderedSites = useMemo(() => orderInboxSites(sites), [sites])
+  const items = useMemo(
+    () => inboxSelectItems(sites, siteId, queuedAll),
+    [queuedAll, siteId, sites],
+  )
+  const handleSiteChange = useCallback(
+    (value: unknown) => {
+      if (typeof value !== "string") {
+        return
+      }
+      onSite(value === ALL_INBOXES ? null : value)
+    },
+    [onSite],
+  )
+  const triggerLabel =
+    elsewhere > 0 ? `Inbox, ${elsewhere} needs attention in other inboxes` : "Inbox"
+  return (
+    <div className="min-w-0">
+      <Select value={siteId ?? ALL_INBOXES} onValueChange={handleSiteChange} items={items}>
+        <SelectTrigger
+          aria-label={triggerLabel}
+          className="border-line bg-paper text-navy hover:border-navy focus-visible:border-steel focus-visible:ring-steel/40 h-10 w-full min-w-0 rounded-[8px] border px-3 text-sm font-semibold shadow-none data-[size=default]:h-10"
+        >
+          <SelectValue className="min-w-0 truncate font-semibold" />
+          {elsewhere > 0 ? <InboxElsewhereBadge count={elsewhere} /> : null}
+        </SelectTrigger>
+        <SelectContent
+          align="start"
+          alignItemWithTrigger={false}
+          className="border-line bg-paper text-ink w-max min-w-(--anchor-width) rounded-[8px] border shadow-none ring-1 ring-[rgba(13,31,58,0.12)]"
+        >
+          <SelectGroup>
+            <SelectItem value={ALL_INBOXES}>{inboxOptionLabel("All", queuedAll)}</SelectItem>
+            {orderedSites.map((site) => (
+              <SelectItem
+                key={site.id}
+                value={site.id}
+                className={site.queued > 0 ? "font-semibold" : undefined}
+              >
+                {inboxOptionLabel(site.name, site.queued)}
+              </SelectItem>
+            ))}
+          </SelectGroup>
+        </SelectContent>
+      </Select>
+    </div>
   )
 }
 
@@ -239,7 +485,7 @@ const InboxFilterButton = ({
   active: boolean
   count: number
   onFilter: (filter: InboxFilter) => void
-  sliderTransition: typeof FILTER_SLIDER_SPRING | typeof FILTER_SLIDER_INSTANT
+  sliderTransition: SliderTransition
 }) => {
   const handleClick = useCallback(() => onFilter(item.id), [item.id, onFilter])
   return (
@@ -285,7 +531,7 @@ const InboxFilterNav = ({
     <LayoutGroup id="inbox-filters">
       <nav
         aria-label="Inbox filters"
-        className="border-line bg-ice-2/70 mx-4 mb-3 flex h-10 flex-nowrap items-center justify-between gap-0.5 overflow-visible rounded-full border p-1"
+        className="border-line bg-ice-2/70 flex h-10 w-fit max-w-full [scrollbar-width:none] flex-nowrap items-center gap-0.5 overflow-x-auto rounded-full border p-1"
       >
         {INBOX_FILTERS.map((item) => (
           <InboxFilterButton
@@ -307,6 +553,7 @@ type RowsProps = {
   selectedId: string | null
   nextCursor: string | null
   query: string
+  showSite: boolean
   onSelect: (id: string) => void
   onLoadMore: () => void
 }
@@ -316,6 +563,7 @@ const ConversationRows = ({
   selectedId,
   nextCursor,
   query,
+  showSite,
   onSelect,
   onLoadMore,
 }: RowsProps) => {
@@ -342,14 +590,17 @@ const ConversationRows = ({
           </p>
         </li>
       ) : null}
-      {items.map((item) => (
-        <ConversationRow
-          key={item.id}
-          item={item}
-          selected={selectedId === item.id}
-          onSelect={onSelect}
-        />
-      ))}
+      <AnimatePresence initial={false}>
+        {items.map((item) => (
+          <ConversationRow
+            key={item.id}
+            item={item}
+            selected={selectedId === item.id}
+            showSite={showSite}
+            onSelect={onSelect}
+          />
+        ))}
+      </AnimatePresence>
       {nextCursor ? (
         <li className="p-3">
           <Button

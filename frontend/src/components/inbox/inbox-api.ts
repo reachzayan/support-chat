@@ -7,6 +7,7 @@ import type {
   InboxFilter,
   InboxListItem,
   InboxMessage,
+  InboxSite,
 } from "./types"
 import { EMPTY_INBOX_COUNTS } from "./types"
 
@@ -14,6 +15,7 @@ export type InboxListPage = {
   items: InboxListItem[]
   next_cursor: string | null
   counts: InboxCounts
+  sites: InboxSite[]
 }
 
 export const mergeInboxMessages = (...pages: InboxMessage[][]) =>
@@ -21,12 +23,22 @@ export const mergeInboxMessages = (...pages: InboxMessage[][]) =>
     (left, right) => left.id - right.id,
   )
 
-export const fetchInboxList = async (filter: InboxFilter, cursor?: string | null) => {
+export const fetchInboxList = async (
+  filter: InboxFilter,
+  cursor?: string | null,
+  siteId?: string | null,
+) => {
   const params = new URLSearchParams({ state: filter })
   if (cursor) {
     params.set("cursor", cursor)
   }
+  if (siteId) {
+    params.set("site_id", siteId)
+  }
   const response = await staffGet(`/api/conversations?${params.toString()}`)
+  if (response.status === 400) {
+    return siteId && !cursor ? ("invalid_site" as const) : null
+  }
   if (!response.ok) {
     return null
   }
@@ -34,11 +46,13 @@ export const fetchInboxList = async (filter: InboxFilter, cursor?: string | null
     items: InboxListItem[]
     next_cursor?: string | null
     counts?: InboxCounts
+    sites?: InboxSite[]
   }
   return {
     items: body.items,
     next_cursor: body.next_cursor ?? null,
     counts: body.counts ?? EMPTY_INBOX_COUNTS,
+    sites: body.sites ?? [],
   } satisfies InboxListPage
 }
 

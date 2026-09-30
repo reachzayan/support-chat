@@ -1,7 +1,15 @@
 import { useDeferredValue, useMemo, useState } from "react"
 
+import { ResizableListPane } from "@/components/admin/pane-resize-handle"
 import type { KbPageRecord, KbSourceRecord } from "@/components/admin/staff-api"
 import { ScrollArea } from "@/components/ui/scroll-area"
+import {
+  KNOWLEDGE_SOURCE_DEFAULT_WIDTH,
+  KNOWLEDGE_SOURCE_WIDTH_KEY,
+  MAX_PANE_WIDTH,
+  MIN_PANE_WIDTH,
+  usePaneWidth,
+} from "@/lib/pane-width"
 import { matchesSearchQuery } from "@/lib/search"
 
 import { PaneSearch } from "./knowledge-pane-search"
@@ -33,6 +41,7 @@ const sourceMatchesQuery = (
   }
   return sourcePages.some((page) => matchesSearchQuery([page.title, page.url], needle))
 }
+
 export const SourcePane = ({
   isAdmin,
   sources,
@@ -54,56 +63,108 @@ export const SourcePane = ({
       sourceMatchesQuery(source, pagesBySource[source.id] ?? EMPTY_PAGES, deferredQuery),
     )
   }, [deferredQuery, pagesBySource, sources])
+  const pane = usePaneWidth(KNOWLEDGE_SOURCE_WIDTH_KEY, KNOWLEDGE_SOURCE_DEFAULT_WIDTH)
   return (
-    <section className="border-line bg-paper flex min-h-0 w-full flex-col border-b lg:w-[28rem] lg:shrink-0 lg:border-r lg:border-b-0">
-      <div className="flex h-14 items-center justify-between gap-3 px-5">
-        <h2 className="text-navy heading text-sm">Sources</h2>
-        <span className="text-mute text-xs font-semibold">{sources.length} connected</span>
-      </div>
-      {sources.length === 0 ? (
-        <div className="flex flex-1 items-center justify-center px-6 py-12 text-center">
-          <p className="text-ink heading text-sm">
-            Add a website or trusted text this site should answer from.
-          </p>
-        </div>
-      ) : (
-        <>
-          <div className="px-4 pb-3">
-            <PaneSearch
-              id="knowledge-source-search"
-              label="Search sources"
-              value={query}
-              onQuery={setQuery}
-              placeholder="Search sources"
-            />
-          </div>
-          <ScrollArea className="min-h-0 flex-1">
-            {filtered.length === 0 ? (
-              <div className="px-6 py-10 text-center">
-                <p className="text-ink heading text-sm">No sources match “{query.trim()}”</p>
-                <p className="text-mute mt-1 text-xs">Try fewer words or a page URL.</p>
-              </div>
-            ) : (
-              <SourceList
-                sources={filtered}
-                pagesBySource={pagesBySource}
-                selectedSourceId={selectedSourceId}
-                selectedPageId={selectedPageId}
-                isAdmin={isAdmin}
-                onSelect={onSelect}
-                onSync={onSync}
-                onToggle={onToggle}
-                onDelete={onDelete}
-                onSelectPage={onSelectPage}
-                onViewChanges={onViewChanges}
-              />
-            )}
-          </ScrollArea>
-        </>
-      )}
-    </section>
+    <ResizableListPane
+      label="source list"
+      width={pane.width}
+      dragging={pane.dragging}
+      min={MIN_PANE_WIDTH}
+      max={MAX_PANE_WIDTH}
+      className="border-line bg-paper flex min-h-0 w-full flex-col border-b lg:border-r lg:border-b-0"
+      onResizeStart={pane.handleResizeStart}
+      onResizeKeyDown={pane.handleResizeKeyDown}
+      onResizeReset={pane.handleResizeReset}
+    >
+      <SourcePaneBody
+        isAdmin={isAdmin}
+        sources={sources}
+        filtered={filtered}
+        pagesBySource={pagesBySource}
+        selectedSourceId={selectedSourceId}
+        selectedPageId={selectedPageId}
+        query={query}
+        onQuery={setQuery}
+        onSync={onSync}
+        onToggle={onToggle}
+        onDelete={onDelete}
+        onSelect={onSelect}
+        onSelectPage={onSelectPage}
+        onViewChanges={onViewChanges}
+      />
+    </ResizableListPane>
   )
 }
+
+const SourcePaneBody = ({
+  isAdmin,
+  sources,
+  filtered,
+  pagesBySource,
+  selectedSourceId,
+  selectedPageId,
+  query,
+  onQuery,
+  onSync,
+  onToggle,
+  onDelete,
+  onSelect,
+  onSelectPage,
+  onViewChanges,
+}: Omit<SourcePaneProps, "pages"> & {
+  filtered: KbSourceRecord[]
+  pagesBySource: Record<string, KbPageRecord[]>
+  query: string
+  onQuery: (query: string) => void
+}) => (
+  <>
+    <div className="flex h-14 items-center justify-between gap-3 px-5">
+      <h2 className="text-navy heading text-sm">Sources</h2>
+      <span className="text-mute text-xs font-semibold">{sources.length} connected</span>
+    </div>
+    {sources.length === 0 ? (
+      <div className="flex flex-1 items-center justify-center px-6 py-12 text-center">
+        <p className="text-ink heading text-sm">
+          Add a website or trusted text this site should answer from.
+        </p>
+      </div>
+    ) : (
+      <>
+        <div className="px-4 pb-3">
+          <PaneSearch
+            id="knowledge-source-search"
+            label="Search sources"
+            value={query}
+            onQuery={onQuery}
+            placeholder="Search sources"
+          />
+        </div>
+        <ScrollArea className="min-h-0 flex-1">
+          {filtered.length === 0 ? (
+            <div className="px-6 py-10 text-center">
+              <p className="text-ink heading text-sm">No sources match “{query.trim()}”</p>
+              <p className="text-mute mt-1 text-xs">Try fewer words or a page URL.</p>
+            </div>
+          ) : (
+            <SourceList
+              sources={filtered}
+              pagesBySource={pagesBySource}
+              selectedSourceId={selectedSourceId}
+              selectedPageId={selectedPageId}
+              isAdmin={isAdmin}
+              onSelect={onSelect}
+              onSync={onSync}
+              onToggle={onToggle}
+              onDelete={onDelete}
+              onSelectPage={onSelectPage}
+              onViewChanges={onViewChanges}
+            />
+          )}
+        </ScrollArea>
+      </>
+    )}
+  </>
+)
 
 const SourceList = ({
   sources,

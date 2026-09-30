@@ -24,6 +24,7 @@ class AssignedAgentOut(BaseModel):
 class ConversationListItemOut(BaseModel):
     id: UUID
     visitor_display: str
+    site_id: UUID
     site_name: str
     state: str
     preview: str
@@ -31,10 +32,17 @@ class ConversationListItemOut(BaseModel):
     assigned_agent: AssignedAgentOut | None
 
 
+class InboxSiteOut(BaseModel):
+    id: UUID
+    name: str
+    queued: int
+
+
 class ConversationListOut(BaseModel):
     items: list[ConversationListItemOut]
     next_cursor: str | None
     counts: dict[str, int]
+    sites: list[InboxSiteOut]
 
 
 class VisitorFactsOut(BaseModel):
@@ -149,14 +157,15 @@ async def list_conversations(
     _staff: CurrentUser,
     state: Annotated[str | None, Query()] = None,
     cursor: Annotated[str | None, Query()] = None,
+    site_id: Annotated[UUID | None, Query()] = None,
 ) -> ConversationListOut:
     service = ConversationQueries(session)
     try:
-        items, next_cursor, counts = await service.list_inbox(state, cursor)
+        items, next_cursor, counts, sites = await service.list_inbox(state, cursor, site_id)
     except CommandError as exc:
         raise _map_command_error(exc) from exc
     return ConversationListOut.model_validate(
-        {"items": items, "next_cursor": next_cursor, "counts": counts}
+        {"items": items, "next_cursor": next_cursor, "counts": counts, "sites": sites}
     )
 
 

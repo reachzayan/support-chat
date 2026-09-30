@@ -47,9 +47,19 @@ describe("inbox layout", () => {
     expect(screen.getByRole("navigation", { name: "Inbox filters" }).className).toMatch(
       /rounded-full/,
     )
+    expect(screen.getByRole("navigation", { name: "Inbox filters" }).className).toMatch(/\bw-fit\b/)
+    expect(screen.getByRole("navigation", { name: "Inbox filters" }).className).toMatch(
+      /flex-nowrap/,
+    )
+    expect(screen.getByRole("navigation", { name: "Inbox filters" }).className).not.toMatch(
+      /overflow-visible/,
+    )
     expect(
       screen.getByRole("heading", { name: "Conversations" }).closest("section")?.className,
-    ).toMatch(/lg:w-\[420px\]/)
+    ).toMatch(/overflow-hidden/)
+    expect(screen.getByRole("heading", { name: "Conversations" }).closest("section")).toHaveStyle({
+      width: "360px",
+    })
     const needsAttention = screen.getByRole("button", { name: "Needs Attention" })
     expect(needsAttention).toHaveTextContent(/^Needs Attention 2$/)
     expect(needsAttention.className).not.toMatch(/\btruncate\b/)

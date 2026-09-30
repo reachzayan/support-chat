@@ -134,7 +134,7 @@ async def refresh(
     try:
         issued = await AuthService(session, settings).refresh(raw)
     except AuthFailed:
-        clear_session_cookies(response)
+        clear_session_cookies(response, settings)
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated"
         ) from None
@@ -151,7 +151,7 @@ async def logout(
 ) -> dict[str, str]:
     require_csrf(request)
     await AuthService(session, settings).logout(request.cookies.get(REFRESH_COOKIE))
-    clear_session_cookies(response)
+    clear_session_cookies(response, settings)
     return {"status": "ok"}
 
 
@@ -164,6 +164,7 @@ async def me(current_user: CurrentUser) -> UserOut:
 async def change_password(
     payload: ChangePasswordRequest,
     request: Request,
+    response: Response,
     session: SessionDep,
     settings: Annotated[Settings, Depends(get_settings)],
     current_user: CurrentUser,
@@ -181,4 +182,5 @@ async def change_password(
             status_code=status.HTTP_401_UNAUTHORIZED, detail=LOGIN_FAILURE
         ) from None
     await RateLimiter(settings).release_login(current_user.email, _request_ip(request, settings))
+    clear_session_cookies(response, settings)
     return {"status": "ok"}

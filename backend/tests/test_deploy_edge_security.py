@@ -27,3 +27,15 @@ def test_websocket_locations_forward_the_public_host() -> None:
         block = _location_block(config, header)
         assert "proxy_set_header Upgrade $http_upgrade;" in block
         assert "proxy_set_header Host $host;" in block
+
+
+def test_nginx_rate_limits_login_and_widget_bootstrap() -> None:
+    config = NGINX_CONFIG.read_text(encoding="utf-8")
+    assert "limit_req_zone $binary_remote_addr zone=auth:10m rate=10r/m;" in config
+    assert "limit_req_zone $binary_remote_addr zone=bootstrap:10m rate=60r/m;" in config
+    auth_block = _location_block(config, "location ^~ /auth/ {")
+    assert "limit_req zone=auth burst=5 nodelay;" in auth_block
+    widget_start = config.rindex("location = /api/public/widget-bootstrap {")
+    widget_bootstrap = config[widget_start : config.index("}", widget_start)]
+    assert "limit_req zone=bootstrap burst=20 nodelay;" in widget_bootstrap
+    assert "proxy_pass http://127.0.0.1:8000;" in widget_bootstrap

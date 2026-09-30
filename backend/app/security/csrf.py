@@ -15,7 +15,13 @@ def new_csrf_token() -> str:
 def require_csrf(request: Request) -> None:
     cookie = request.cookies.get(CSRF_COOKIE)
     header = request.headers.get("x-csrf-token")
-    if cookie is None or header is None or not hmac.compare_digest(cookie, header):
+    if cookie is None or header is None:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="CSRF failed")
+    try:
+        matched = hmac.compare_digest(cookie, header)
+    except (TypeError, ValueError):
+        matched = False
+    if not matched:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="CSRF failed")
 
 

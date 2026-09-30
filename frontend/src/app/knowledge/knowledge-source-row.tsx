@@ -1,6 +1,6 @@
 import { cn } from "cn"
 import { ChevronDown, FileText, Globe2, RefreshCw } from "lucide-react"
-import { motion } from "motion/react"
+import { motion, useReducedMotion } from "motion/react"
 import { useCallback } from "react"
 
 import type { KbPageRecord, KbSourceRecord } from "@/components/admin/staff-api"
@@ -70,14 +70,19 @@ const SourceRowActions = ({
   )
 }
 
-const SelectedRail = ({ layoutId }: { layoutId: string }) => (
-  <motion.span
-    layoutId={layoutId}
-    transition={RAIL_SPRING}
-    aria-hidden="true"
-    className="bg-steel absolute top-2 bottom-2 left-0 w-0.5 rounded-full"
-  />
-)
+const RAIL_INSTANT = { duration: 0 } as const
+
+const SelectedRail = ({ layoutId }: { layoutId: string }) => {
+  const reducedMotion = useReducedMotion()
+  return (
+    <motion.span
+      layoutId={layoutId}
+      transition={reducedMotion ? RAIL_INSTANT : RAIL_SPRING}
+      aria-hidden="true"
+      className="bg-steel absolute top-2 bottom-2 left-0 w-0.5 rounded-full"
+    />
+  )
+}
 
 const SourcePages = ({
   pages,

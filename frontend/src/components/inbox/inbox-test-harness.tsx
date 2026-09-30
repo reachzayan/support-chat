@@ -3,7 +3,7 @@ import userEvent from "@testing-library/user-event"
 import { expect, vi } from "vitest"
 
 import { InboxConsole } from "@/components/inbox/inbox-console"
-import type { ConversationDetail } from "@/components/inbox/types"
+import type { ConversationDetail, InboxSite } from "@/components/inbox/types"
 import { setAccessToken } from "@/lib/auth-client"
 import { renderWithProviders } from "@/test/render"
 
@@ -59,6 +59,7 @@ export class FakeSocket {
 export const adaQueued = {
   id: CONVO_ID,
   visitor_display: "Ada Lopez",
+  site_id: EASY_SITE,
   site_name: "SampleSite",
   state: "queued",
   preview: "How fast are DOT results?",
@@ -108,6 +109,7 @@ export const adaDetail: ConversationDetail = {
 export const bgQueued = {
   id: OTHER_CONVO,
   visitor_display: "Other Visitor",
+  site_id: BG_SITE,
   site_name: "Sample Services",
   state: "queued",
   preview: "Need a package quote",
@@ -181,16 +183,42 @@ const cannedResponse = (url: string): StaffResponse | null => {
   return jsonResponse({ items: [] })
 }
 
+let listSites: InboxSite[] | null = null
+
+export const setListSites = (sites: InboxSite[] | null) => {
+  listSites = sites
+}
+
+const defaultListSites = (): InboxSite[] => [
+  {
+    id: EASY_SITE,
+    name: "SampleSite",
+    queued: listItems.filter((item) => item.site_id === EASY_SITE && item.state === "queued")
+      .length,
+  },
+  {
+    id: BG_SITE,
+    name: "Sample Services",
+    queued: listItems.filter((item) => item.site_id === BG_SITE && item.state === "queued").length,
+  },
+]
+
 const conversationListResponse = (url: string): StaffResponse => {
   const parsed = new URL(url, "http://localhost")
   const state = parsed.searchParams.get("state")
   const cursor = parsed.searchParams.get("cursor")
-  const items = listItems.filter((item) => (state ? item.state === state : true))
+  const siteId = parsed.searchParams.get("site_id")
+  const sites = listSites ?? defaultListSites()
+  if (siteId !== null && !sites.some((site) => site.id === siteId)) {
+    return jsonResponse({ detail: "Invalid request" }, 400)
+  }
+  const scoped = siteId ? listItems.filter((item) => item.site_id === siteId) : listItems
+  const items = scoped.filter((item) => (state ? item.state === state : true))
   const counts = {
-    human: listItems.filter((item) => item.state === "human").length,
-    bot: listItems.filter((item) => item.state === "bot").length,
-    queued: listItems.filter((item) => item.state === "queued").length,
-    closed: listItems.filter((item) => item.state === "closed").length,
+    human: scoped.filter((item) => item.state === "human").length,
+    bot: scoped.filter((item) => item.state === "bot").length,
+    queued: scoped.filter((item) => item.state === "queued").length,
+    closed: scoped.filter((item) => item.state === "closed").length,
   }
   if (cursor === "page-2") {
     return jsonResponse({
@@ -198,6 +226,7 @@ const conversationListResponse = (url: string): StaffResponse => {
         {
           id: "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
           visitor_display: "Third Visitor",
+          site_id: EASY_SITE,
           site_name: "SampleSite",
           state: "queued",
           preview: "County search",
@@ -207,9 +236,10 @@ const conversationListResponse = (url: string): StaffResponse => {
       ],
       next_cursor: null,
       counts,
+      sites,
     })
   }
-  return jsonResponse({ items, next_cursor: listCursor, counts })
+  return jsonResponse({ items, next_cursor: listCursor, counts, sites })
 }
 
 const conversationResponse = (url: string): StaffResponse | null => {
@@ -231,9 +261,7 @@ const conversationResponse = (url: string): StaffResponse | null => {
   return null
 }
 
-export const staffFetch = vi.fn<
-  (input: RequestInfo | URL, init?: RequestInit) => Promise<StaffResponse>
->(async (input, init) => {
+const inboxStaffFetch = async (input: RequestInfo | URL, init?: RequestInit) => {
   const url = String(input)
   const method = init?.method ?? "GET"
   return (
@@ -242,7 +270,10 @@ export const staffFetch = vi.fn<
     conversationResponse(url) ??
     jsonResponse({ detail: "missing" }, 404)
   )
-})
+}
+
+export const staffFetch =
+  vi.fn<(input: RequestInfo | URL, init?: RequestInit) => Promise<StaffResponse>>(inboxStaffFetch)
 
 export const emit = (socket: FakeSocket | undefined, payload: unknown) => {
   socket?.onmessage?.({ data: JSON.stringify(payload) } as MessageEvent)
@@ -252,7 +283,10 @@ export const resetInboxHarness = () => {
   FakeSocket.instances = []
   setAccessToken("jwt-alex")
   setListItems([adaQueued, bgQueued])
+  setListSites(null)
   setListCursor(null)
+  window.localStorage.removeItem("supportchat.inbox.list-width")
+  window.localStorage.removeItem("supportchat.inbox.site-id")
   setDetails({
     [CONVO_ID]: structuredClone(adaDetail),
     [OTHER_CONVO]: structuredClone(bgDetail),
@@ -261,6 +295,7 @@ export const resetInboxHarness = () => {
   vi.stubGlobal("WebSocket", FakeSocket)
   vi.stubGlobal("fetch", staffFetch)
   vi.stubGlobal("crypto", { ...crypto, randomUUID: () => CLIENT_ID })
+  staffFetch.mockImplementation(inboxStaffFetch)
   staffFetch.mockClear()
 }
 

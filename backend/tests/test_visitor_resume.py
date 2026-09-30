@@ -17,6 +17,7 @@ from tests.ws_helpers import (
     auth_visitor,
     bootstrap_payload,
     collect_until,
+    conversation_id_from_state,
     decode_widget_token,
     post_bootstrap,
     seed_demo_world,
@@ -50,11 +51,12 @@ def _activate(
                 "message": "",
             }
         )
-        collect_until(
+        started = collect_until(
             visitor,
             lambda frames: any(frame.get("type") == "prechat_accepted" for frame in frames),
         )
-    return body["resume_token"], claims["visitor_id"], claims["conversation_id"]
+        conversation_id = conversation_id_from_state(started)
+    return body["resume_token"], claims["visitor_id"], conversation_id
 
 
 def _request(client: TestClient, resume: str, action: str, **extra: object):
@@ -184,7 +186,7 @@ def test_reopen_after_reset_shows_saved_chats_instead_of_the_blank_form(
     assert reset.status_code == 200
     assert reset.json()["mode"] == "conversation"
     assert reset.json()["conversation"]["state"] == "prechat"
-    assert reset.json()["conversation"]["id"] != conversation_id
+    assert "id" not in reset.json()["conversation"]
 
     reopened = post_bootstrap(client, bootstrap_payload(resume_token=resume))
 
@@ -213,7 +215,7 @@ def test_resuming_an_old_chat_requires_confirmation_before_replacing_an_active_c
     fresh = _request(client, resume, "reset")
     assert fresh.status_code == 200
     fresh_body = fresh.json()
-    active_id = fresh_body["conversation"]["id"]
+    assert "id" not in fresh_body["conversation"]
 
     # Turn the new draft into a real active chat so replacing it is consequential.
     with client.websocket_connect("/ws/visitor", headers={"Origin": WIDGET_ORIGIN}) as visitor:
@@ -231,10 +233,11 @@ def test_resuming_an_old_chat_requires_confirmation_before_replacing_an_active_c
                 "message": "",
             }
         )
-        collect_until(
+        started = collect_until(
             visitor,
             lambda frames: any(frame.get("type") == "prechat_accepted" for frame in frames),
         )
+        active_id = conversation_id_from_state(started)
 
     conflict = _request(client, resume, "open", conversation_id=old_id)
     assert conflict.status_code == 409
