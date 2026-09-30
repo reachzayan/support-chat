@@ -94,3 +94,36 @@ def test_edge_sets_transport_and_capability_headers() -> None:
     assert "Strict-Transport-Security" in nginx
     assert "Permissions-Policy" in nginx
     assert "client_max_body_size 4k;" in nginx
+
+
+def test_production_backend_drops_capabilities_like_the_worker() -> None:
+    compose = _read("docker-compose.prod.yml")
+    backend_block = compose.split("backend:", 1)[1].split("\n  migrate:", 1)[0]
+    assert 'cap_drop: ["ALL"]' in backend_block
+    assert "no-new-privileges:true" in backend_block
+
+
+def test_frontend_has_a_loopback_healthcheck() -> None:
+    compose = _read("docker-compose.yml")
+    frontend_block = compose.split("frontend:", 1)[1]
+    assert "healthcheck:" in frontend_block
+    assert "127.0.0.1:3000/login" in frontend_block
+
+
+def test_local_compose_publishes_only_on_loopback() -> None:
+    compose = _read("docker-compose.yml")
+    assert '"127.0.0.1:${POSTGRES_PORT:-55432}:5432"' in compose
+    assert '"127.0.0.1:${REDIS_PORT:-56379}:6379"' in compose
+    assert '"127.0.0.1:${BACKEND_PORT:-8000}:8000"' in compose
+    assert '"127.0.0.1:${FRONTEND_PORT:-3000}:3000"' in compose
+
+
+def test_docker_up_starts_the_repo_root_stack() -> None:
+    script = _read("backend/scripts/docker_up.sh")
+    assert '$(dirname "$0")/../..' in script
+    assert not (ROOT / "backend" / "docker-compose.yml").exists()
+
+
+def test_production_env_example_trusts_only_the_compose_gateway() -> None:
+    example = _read("backend/.env.prod.example")
+    assert "TRUSTED_PROXY_CIDRS=172.18.0.1/32" in example
