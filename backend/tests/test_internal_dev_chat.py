@@ -139,6 +139,7 @@ def test_trace_endpoint_preserves_evidence_for_implicit_misspelled_follow_up(
     assert first.status_code == 200
     assert "/api/internal/dev/chat" not in client.get("/openapi.json").json()["paths"]
     assert "/api/internal/dev/trace" not in client.get("/openapi.json").json()["paths"]
+    assert "/api/internal/dev/canned-search" not in client.get("/openapi.json").json()["paths"]
     first_data = first.json()
     assert _reply(first_data)["body"] == SERVICE_REPLY
 

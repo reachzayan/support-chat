@@ -1258,6 +1258,7 @@ class ConversationService:
             if citations
             else None,
             source_title=chips[0]["source_title"] if chips else None,
+            display_locator=decision.display_locator,
             response_outcome=decision.outcome.value if decision.outcome is not None else None,
             response_reason_code=decision.reason_code,
         )
@@ -1299,6 +1300,8 @@ class ConversationService:
 
     @staticmethod
     def _system_reason_for(decision: ResponseDecision) -> str:
+        if decision.reason_code == "canned_reply":
+            return "canned"
         if decision.outcome is ResponseOutcome.CLARIFICATION:
             return "clarify"
         if decision.reason_code == "source_followup":
