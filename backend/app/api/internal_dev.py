@@ -8,12 +8,15 @@ from fastapi import APIRouter, HTTPException, Response
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app.db import SessionDep
+from app.repositories.site_repo import SiteRepository
 from app.security.deps import CurrentAdmin
+from app.services.canned_bot import inspect_canned_search
 from app.services.internal_dev_chat import (
     InternalChatError,
     InternalChatHarness,
     InternalChatRequest,
 )
+from app.services.kb_embedder import default_embedder
 from app.settings import get_settings
 
 router = APIRouter(prefix="/api/internal/dev")
@@ -127,3 +130,44 @@ async def trace_turn(
 ) -> dict[str, Any]:
     response.headers["Cache-Control"] = "no-store"
     return await _run(payload, session, True)
+
+
+class CannedSearchIn(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    site_key: str = Field(min_length=1, max_length=120)
+    message: str = Field(min_length=1, max_length=4000)
+
+    @field_validator("message")
+    @classmethod
+    def nonblank(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("Message must not be blank")
+        return value
+
+
+class CannedHitOut(BaseModel):
+    shortcut: str
+    lexical: bool
+    rrf: float
+    cosine: float | None
+
+
+class CannedSearchOut(BaseModel):
+    winner: str | None
+    best_kb_cosine: float | None
+    hits: list[CannedHitOut]
+
+
+@router.post("/canned-search", response_model=CannedSearchOut, include_in_schema=False)
+async def canned_search_turn(
+    payload: CannedSearchIn,
+    response: Response,
+    session: SessionDep,
+    _admin: CurrentAdmin,
+) -> dict[str, Any]:
+    response.headers["Cache-Control"] = "no-store"
+    site = await SiteRepository(session).get_by_key(payload.site_key)
+    if site is None or not site.enabled:
+        raise HTTPException(404, "not_found")
+    return await inspect_canned_search(session, default_embedder(), site.id, payload.message)

@@ -21,7 +21,8 @@ export default defineConfig({
       NEXT_PUBLIC_WIDGET_ORIGIN: "http://widget.localhost:3000",
       NEXT_PUBLIC_STAFF_APP_ORIGIN: "http://localhost:3000",
       NEXT_PUBLIC_DEMO_SITE_KEY: "demo",
-      NEXT_PUBLIC_DEMO_PUBLIC_KEY: "d".repeat(64),
+      NEXT_PUBLIC_DEMO_PUBLIC_KEY:
+        "969b9f156001b582403251fcc58e281102ae6c2549c7ec09db917b6a0f493b0a",
       NEXT_PUBLIC_API_ORIGIN: "http://127.0.0.1:8000",
     },
   },

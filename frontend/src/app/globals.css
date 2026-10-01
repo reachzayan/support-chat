@@ -64,10 +64,15 @@
   --radius-card: var(--surface-radius);
 }
 
+html {
+  overscroll-behavior: none;
+}
+
 body {
   background: var(--color-ice);
   color: var(--color-ink);
   font-family: var(--font-sans);
+  overscroll-behavior: none;
 }
 
 @utility heading {

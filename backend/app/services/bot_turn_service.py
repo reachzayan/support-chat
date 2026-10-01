@@ -19,9 +19,11 @@ from app.models.conversation import Conversation
 from app.models.kb_chunk import KbChunk
 from app.models.message import Message
 from app.models.site import Site
+from app.models.visitor import Visitor
 from app.repositories.kb_chunk_repo import live_chunks_query
 from app.repositories.message_repo import MessageRepository
 from app.services.bot_trace import record_trace
+from app.services.canned_bot import canned_reply_decision
 from app.services.full_context import prior_provider_messages
 from app.services.grounded_response import (
     Citation,
@@ -109,6 +111,9 @@ class BotTurnService:
                 for c in (previous.citations if previous else [])
             ]
             return PreparedBotReply(source_followup_decision(citations), stage_timings)
+        canned = await self._canned_reply(conversation, site, visitor_text)
+        if canned is not None:
+            return PreparedBotReply(canned, stage_timings)
         record_trace("history", prior_messages=prior_messages)
         # Retrieval answers the current message exactly as written. Conversation
         # continuity comes from live evidence cited by the previous bot answer,
@@ -145,6 +150,27 @@ class BotTurnService:
             stage_timings=stage_timings,
         )
         return PreparedBotReply(decision, stage_timings)
+
+    async def _canned_reply(
+        self,
+        conversation: Conversation,
+        site: Site,
+        visitor_text: str,
+    ) -> ResponseDecision | None:
+        visitor = await self._session.get(Visitor, conversation.visitor_id)
+        decision = await canned_reply_decision(
+            self._session, self._embedder, site.id, visitor_text, visitor
+        )
+        if decision is None:
+            record_trace("retrieval", canned_win=False)
+            return None
+        record_trace(
+            "retrieval",
+            canned_win=True,
+            canned_shortcut=decision.display_locator,
+            query=redact_for_model(visitor_text),
+        )
+        return decision
 
     async def _load_carried_evidence(
         self,

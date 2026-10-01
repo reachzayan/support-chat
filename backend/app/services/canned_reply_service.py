@@ -8,8 +8,20 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.canned_reply import CannedReply
 from app.models.site import Site
 from app.repositories.canned_reply_repo import CannedReplyRepository
+from app.repositories.site_repo import SiteRepository
+from app.services.canned_bot import embed_replies
+from app.services.canned_import import (
+    BODY_MAX,
+    CannedCsvError,
+    ExistingCanned,
+    ImportPlanRow,
+    parse_livechat_csv,
+    plan_import,
+)
 
 _SHORTCUT = re.compile(r"^[a-z0-9][a-z0-9_-]{0,39}$")
+_SUGGESTION_EVENTS = frozenset({"start_chat", "idle", "good_rate", "bad_rate", "transfer"})
+IMPORT_MAX_BYTES = 2_000_000
 
 
 @dataclass
@@ -27,9 +39,21 @@ def normalize_shortcut(value: str) -> str:
     return normalized
 
 
+def normalize_aliases(values: list[str] | None, primary: str) -> list[str]:
+    aliases: list[str] = []
+    seen = {primary}
+    for value in values or []:
+        shortcut = normalize_shortcut(value)
+        if shortcut in seen:
+            continue
+        seen.add(shortcut)
+        aliases.append(shortcut)
+    return aliases
+
+
 def normalize_body(value: str) -> str:
     normalized = value.replace("\r\n", "\n").replace("\r", "\n").strip()
-    if not 1 <= len(normalized) <= 4000:
+    if not 1 <= len(normalized) <= BODY_MAX:
         raise CannedReplyError("invalid_body")
     return normalized
 
@@ -38,6 +62,7 @@ class CannedReplyService:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
         self._replies = CannedReplyRepository(session)
+        self._sites = SiteRepository(session)
 
     async def list_effective(self, site_id: UUID) -> list[CannedReply]:
         await self._require_site(site_id)
@@ -64,18 +89,27 @@ class CannedReplyService:
         shortcut: str,
         body: str,
         enabled: bool = True,
+        aliases: list[str] | None = None,
+        bot_eligible: bool = True,
         is_admin: bool = False,
     ) -> CannedReply:
         normalized_shortcut = normalize_shortcut(shortcut)
+        normalized_aliases = normalize_aliases(aliases, normalized_shortcut)
         normalized_body = normalize_body(body)
         self._require_admin_for_global(site_id, is_admin)
         if site_id is not None:
             await self._require_site(site_id)
-        await self._raise_if_duplicate(site_id, normalized_shortcut)
+        await self._raise_if_tokens_taken(site_id, [normalized_shortcut, *normalized_aliases])
         try:
             reply = await self._replies.create(
-                site_id, normalized_shortcut, normalized_body, enabled
+                site_id,
+                normalized_shortcut,
+                normalized_body,
+                enabled,
+                aliases=normalized_aliases,
+                bot_eligible=bot_eligible,
             )
+            await embed_replies([reply])
             await self._session.commit()
         except IntegrityError as exc:
             await self._session.rollback()
@@ -83,7 +117,7 @@ class CannedReplyService:
         await self._session.refresh(reply)
         return reply
 
-    async def update(
+    async def update(  # noqa: C901
         self,
         reply_id: UUID,
         *,
@@ -92,6 +126,8 @@ class CannedReplyService:
         shortcut: str | None = None,
         body: str | None = None,
         enabled: bool | None = None,
+        aliases: list[str] | None = None,
+        bot_eligible: bool | None = None,
         is_admin: bool = False,
     ) -> CannedReply:
         if not fields:
@@ -108,16 +144,33 @@ class CannedReplyService:
             raise CannedReplyError("invalid_body")
         if "enabled" in fields and not isinstance(enabled, bool):
             raise CannedReplyError("invalid_body")
+        if "bot_eligible" in fields and not isinstance(bot_eligible, bool):
+            raise CannedReplyError("invalid_body")
+        if "aliases" in fields and not isinstance(aliases, list):
+            raise CannedReplyError("invalid_shortcut")
         target_shortcut = normalize_shortcut(shortcut) if "shortcut" in fields else reply.shortcut
+        target_aliases = (
+            normalize_aliases(aliases, target_shortcut)
+            if "aliases" in fields
+            else [alias for alias in reply.aliases if alias != target_shortcut]
+        )
         target_body = normalize_body(body) if "body" in fields else reply.body
         if target_site_id is not None:
             await self._require_site(target_site_id)
-        await self._raise_if_duplicate(target_site_id, target_shortcut, exclude_id=reply.id)
+        await self._raise_if_tokens_taken(
+            target_site_id,
+            [target_shortcut, *target_aliases],
+            exclude_id=reply.id,
+        )
         reply.site_id = target_site_id
         reply.shortcut = target_shortcut
+        reply.aliases = target_aliases
         reply.body = target_body
         if "enabled" in fields:
             reply.enabled = enabled
+        if "bot_eligible" in fields:
+            reply.bot_eligible = bot_eligible
+        await embed_replies([reply])
         try:
             await self._session.commit()
         except IntegrityError as exc:
@@ -134,6 +187,99 @@ class CannedReplyService:
         await self._replies.delete(reply)
         await self._session.commit()
 
+    async def preview_import(self, raw: bytes) -> list[ImportPlanRow]:
+        return await self._plan_from_csv(raw)
+
+    async def commit_import(
+        self,
+        raw: bytes,
+        *,
+        discard_ids: set[int] | None = None,
+        remap_groups: dict[int, UUID | None] | None = None,
+    ) -> dict[str, int]:
+        if remap_groups:
+            for site_id in remap_groups.values():
+                if site_id is not None:
+                    await self._require_site(site_id)
+        planned = await self._plan_from_csv(raw, discard_ids=discard_ids, remap_groups=remap_groups)
+        created = 0
+        updated = 0
+        skipped = 0
+        changed: list[CannedReply] = []
+        try:
+            for row in planned:
+                if row.action not in {"create", "update"}:
+                    skipped += 1
+                    continue
+                if row.action == "update" and row.existing_id is not None:
+                    reply = await self._replies.get_by_id(row.existing_id)
+                    if reply is None:
+                        skipped += 1
+                        continue
+                    reply.site_id = row.site_id
+                    reply.shortcut = row.shortcut
+                    reply.aliases = list(row.aliases)
+                    reply.body = row.body
+                    reply.suggestion_event = row.suggestion_event
+                    reply.bot_eligible = row.bot_eligible
+                    reply.external_id = row.livechat_id
+                    changed.append(reply)
+                    updated += 1
+                    continue
+                reply = await self._replies.create(
+                    row.site_id,
+                    row.shortcut,
+                    row.body,
+                    True,
+                    aliases=list(row.aliases),
+                    bot_eligible=row.bot_eligible,
+                    suggestion_event=row.suggestion_event,
+                    external_id=row.livechat_id,
+                )
+                changed.append(reply)
+                created += 1
+            await embed_replies(changed)
+            await self._session.commit()
+        except IntegrityError as exc:
+            await self._session.rollback()
+            raise CannedReplyError("conflict") from exc
+        return {"created": created, "updated": updated, "skipped": skipped}
+
+    async def _plan_from_csv(
+        self,
+        raw: bytes,
+        *,
+        discard_ids: set[int] | None = None,
+        remap_groups: dict[int, UUID | None] | None = None,
+    ) -> list[ImportPlanRow]:
+        if len(raw) > IMPORT_MAX_BYTES:
+            raise CannedReplyError("invalid_csv")
+        try:
+            parsed = parse_livechat_csv(raw)
+        except CannedCsvError as exc:
+            raise CannedReplyError("invalid_csv") from exc
+        sites = {site.key: site.id for site in await self._sites.list_all()}
+        existing = [
+            ExistingCanned(
+                id=row.id,
+                site_id=row.site_id,
+                shortcut=row.shortcut,
+                aliases=tuple(row.aliases or []),
+                external_id=row.external_id,
+                body=row.body,
+                bot_eligible=row.bot_eligible,
+                suggestion_event=row.suggestion_event,
+            )
+            for row in await self._replies.list_library()
+        ]
+        return plan_import(
+            parsed,
+            sites_by_key=sites,
+            existing=existing,
+            remap_groups=remap_groups,
+            discard_ids=discard_ids,
+        )
+
     def _require_admin_for_global(self, site_id: UUID | None, is_admin: bool) -> None:
         if site_id is None and not is_admin:
             raise CannedReplyError("forbidden")
@@ -142,11 +288,16 @@ class CannedReplyService:
         if await self._session.get(Site, site_id) is None:
             raise CannedReplyError("site_not_found")
 
-    async def _raise_if_duplicate(
-        self, site_id: UUID | None, shortcut: str, *, exclude_id: UUID | None = None
+    async def _raise_if_tokens_taken(
+        self,
+        site_id: UUID | None,
+        tokens: list[str],
+        *,
+        exclude_id: UUID | None = None,
     ) -> None:
-        existing = await self._replies.get_by_scope_shortcut(
-            site_id, shortcut, exclude_id=exclude_id
-        )
-        if existing is not None:
-            raise CannedReplyError("conflict")
+        for token in tokens:
+            existing = await self._replies.get_by_scope_shortcut(
+                site_id, token, exclude_id=exclude_id
+            )
+            if existing is not None:
+                raise CannedReplyError("conflict")

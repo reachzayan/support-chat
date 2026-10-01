@@ -16,6 +16,17 @@ export const staffWrite = async (
   })
 }
 
+export const staffUpload = async (path: string, file: File, fields?: Record<string, string>) => {
+  const body = new FormData()
+  body.append("file", file)
+  if (fields) {
+    for (const [key, value] of Object.entries(fields)) {
+      body.append(key, value)
+    }
+  }
+  return staffRequest(path, { method: "POST", body })
+}
+
 export type SiteRecord = {
   id: string
   key: string

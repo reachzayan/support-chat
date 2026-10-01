@@ -12,6 +12,7 @@ import { staffRead, staffWrite, type SiteRecord } from "@/components/admin/staff
 import { matchesSearchQuery } from "@/lib/search"
 
 import {
+  parseAliasesText,
   scopeLabel,
   type CannedReplyRecord,
   type FormState,
@@ -36,14 +37,6 @@ const initialStatus = (): StatusFilter => {
   return value === "enabled" || value === "disabled" ? value : "all"
 }
 
-const initialPage = () => {
-  if (typeof window === "undefined") {
-    return 1
-  }
-  const value = Number(new URLSearchParams(window.location.search).get("page"))
-  return Number.isSafeInteger(value) && value > 0 ? value : 1
-}
-
 const errorMessage = async (response: Response) => {
   try {
     const body = (await response.json()) as { detail?: string }
@@ -62,8 +55,10 @@ const blankForm = (scope: Scope): FormState => ({
   id: null,
   siteId: scope === "general" ? null : scope,
   shortcut: "",
+  aliasesText: "",
   body: "",
   enabled: true,
+  botEligible: true,
 })
 
 const formSnapshot = (form: FormState) => JSON.stringify(form)
@@ -80,7 +75,7 @@ export const useCannedResponsesState = () => {
       : (new URLSearchParams(window.location.search).get("q") ?? ""),
   )
   const [status, setStatus] = useState<StatusFilter>(initialStatus)
-  const [page, setPage] = useState(initialPage)
+  const [visibleCount, setVisibleCount] = useState(PAGE_SIZE)
   const [form, setForm] = useState<FormState | null>(null)
   const [initialForm, setInitialForm] = useState("")
   const [formError, setFormError] = useState("")
@@ -127,38 +122,35 @@ export const useCannedResponsesState = () => {
   useEffect(() => {
     const params = new URLSearchParams(window.location.search)
     const nextStatus = params.get("status")
-    const nextPage = Number(params.get("page"))
     // oxlint-disable-next-line react/set-state-in-effect -- URL query state is client-only because this screen is rendered inside the authenticated shell.
     setScope(params.get("scope") ?? "general")
     setQuery(params.get("q") ?? "")
     setStatus(nextStatus === "enabled" || nextStatus === "disabled" ? nextStatus : "all")
-    setPage(Number.isSafeInteger(nextPage) && nextPage > 0 ? nextPage : 1)
   }, [])
 
   const updateUrl = useCallback(
-    (next: Partial<{ scope: Scope; q: string; status: StatusFilter; page: number }>) => {
+    (next: Partial<{ scope: Scope; q: string; status: StatusFilter }>) => {
       const params = new URLSearchParams(window.location.search)
-      const merged = { scope, q: query, status, page, ...next }
+      const merged = { scope, q: query, status, ...next }
       if (merged.scope === "general") params.delete("scope")
       else params.set("scope", merged.scope)
       if (merged.q) params.set("q", merged.q)
       else params.delete("q")
       if (merged.status === "all") params.delete("status")
       else params.set("status", merged.status)
-      if (merged.page === 1) params.delete("page")
-      else params.set("page", String(merged.page))
+      params.delete("page")
       const suffix = params.toString()
       window.history.replaceState(null, "", `/admin/canned-responses${suffix ? `?${suffix}` : ""}`)
     },
-    [page, query, scope, status],
+    [query, scope, status],
   )
 
   const selectScope = useCallback(
     (next: string | null) => {
       const value = next || "general"
       setScope(value)
-      setPage(1)
-      updateUrl({ scope: value, page: 1 })
+      setVisibleCount(PAGE_SIZE)
+      updateUrl({ scope: value })
     },
     [updateUrl],
   )
@@ -166,8 +158,8 @@ export const useCannedResponsesState = () => {
   const updateQuery = useCallback(
     (value: string) => {
       setQuery(value)
-      setPage(1)
-      updateUrl({ q: value, page: 1 })
+      setVisibleCount(PAGE_SIZE)
+      updateUrl({ q: value })
     },
     [updateUrl],
   )
@@ -176,8 +168,8 @@ export const useCannedResponsesState = () => {
     (value: string | null) => {
       const next = value === "enabled" || value === "disabled" ? value : "all"
       setStatus(next)
-      setPage(1)
-      updateUrl({ status: next, page: 1 })
+      setVisibleCount(PAGE_SIZE)
+      updateUrl({ status: next })
     },
     [updateUrl],
   )
@@ -185,8 +177,8 @@ export const useCannedResponsesState = () => {
   const clearSearchFilters = useCallback(() => {
     setQuery("")
     setStatus("all")
-    setPage(1)
-    updateUrl({ q: "", status: "all", page: 1 })
+    setVisibleCount(PAGE_SIZE)
+    updateUrl({ q: "", status: "all" })
   }, [updateUrl])
 
   const scoped = useMemo(
@@ -198,15 +190,18 @@ export const useCannedResponsesState = () => {
   )
   const filtered = useMemo(() => {
     return scoped.filter((row) => {
-      const matchesQuery = matchesSearchQuery([row.shortcut, row.body], deferredQuery)
+      const matchesQuery = matchesSearchQuery(
+        [row.shortcut, ...(row.aliases ?? []), row.body],
+        deferredQuery,
+      )
       return matchesQuery && (status === "all" || (status === "enabled") === row.enabled)
     })
   }, [deferredQuery, scoped, status])
-  const visible = useMemo(
-    () => filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE),
-    [filtered, page],
-  )
-  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE))
+  const visible = useMemo(() => filtered.slice(0, visibleCount), [filtered, visibleCount])
+  const hasMore = visible.length < filtered.length
+  const loadMore = useCallback(() => {
+    setVisibleCount((count) => count + PAGE_SIZE)
+  }, [])
   const summary = useMemo(() => {
     if (scope === "general") {
       return `${scoped.length} responses · ${scoped.filter((row) => row.enabled).length} enabled`
@@ -230,8 +225,10 @@ export const useCannedResponsesState = () => {
       id: record.id,
       siteId: record.site_id,
       shortcut: record.shortcut,
+      aliasesText: (record.aliases ?? []).join(", "),
       body: record.body,
       enabled: record.enabled,
+      botEligible: record.bot_eligible,
     }
     setForm(next)
     setInitialForm(formSnapshot(next))
@@ -252,11 +249,14 @@ export const useCannedResponsesState = () => {
       if (!form || submitting) return
       setSubmitting(true)
       setFormError("")
+      const shortcut = form.shortcut.trim().replace(/^#/, "").toLowerCase()
       const payload = {
         site_id: form.siteId,
         shortcut: form.shortcut,
+        aliases: parseAliasesText(form.aliasesText, shortcut),
         body: form.body,
         enabled: form.enabled,
+        bot_eligible: form.botEligible,
       }
       const path = form.id ? `/api/canned-replies/${form.id}` : "/api/canned-replies"
       const method = form.id ? "PATCH" : "POST"
@@ -353,7 +353,6 @@ export const useCannedResponsesState = () => {
     scope,
     query,
     status,
-    page,
     form,
     formError,
     submitting,
@@ -367,13 +366,13 @@ export const useCannedResponsesState = () => {
     announcement,
     shortcutRef,
     load,
-    updateUrl,
     selectScope,
     updateQuery,
     updateStatus,
     clearSearchFilters,
     visible,
-    totalPages,
+    hasMore,
+    loadMore,
     summary,
     openCreate,
     openEdit,
@@ -381,7 +380,6 @@ export const useCannedResponsesState = () => {
     saveForm,
     toggle,
     deleteResponse,
-    setPage,
     setForm,
   }
 }

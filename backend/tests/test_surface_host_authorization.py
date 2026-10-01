@@ -99,7 +99,9 @@ def test_public_hosts_cannot_reach_internal_widget_csp_route(
     assert response.json() == {"detail": "Not found"}
 
 
-@pytest.mark.parametrize("path", ["/api/internal/dev/chat", "/api/internal/dev/trace"])
+@pytest.mark.parametrize(
+    "path", ["/api/internal/dev/chat", "/api/internal/dev/trace", "/api/internal/dev/canned-search"]
+)
 def test_temporary_chat_workbench_is_not_registered_in_production(
     production_client: TestClient,
     path: str,

@@ -73,6 +73,7 @@ class ResponseDecision:
     offer_handoff: bool = False
     provider_status: ProviderStatus = ProviderStatus.NOT_USED
     request_id: str | None = None
+    display_locator: str | None = None
 
 
 @dataclass(frozen=True)

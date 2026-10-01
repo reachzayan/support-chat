@@ -12,7 +12,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
-import { Separator } from "@/components/ui/separator"
 
 import { CandidateEvidenceList } from "./candidate-evidence-list"
 import { HandoffDialogMeta, HandoffMachineSummary } from "./handoff-dialog-sections"
@@ -106,7 +105,7 @@ export const HandoffCardDialog = ({
           <HandoffDialogMeta handoff={handoff} reasonClass={reasonClass} routeLabel={routeLabel} />
         </DialogHeader>
 
-        <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-5 py-4">
+        <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto overscroll-none px-5 py-4">
           <blockquote className="border-line bg-ice text-ink border-l-steel rounded-[8px] border-l-4 px-3 py-2 font-mono text-xs leading-5">
             {handoff.original_question}
           </blockquote>
@@ -135,9 +134,8 @@ export const HandoffCardDialog = ({
               <StageTimings handoff={handoff} />
             </CollapsibleContent>
           </Collapsible>
-
-          <Separator />
-
+        </div>
+        <div className="border-line bg-paper shrink-0 border-t px-5 py-4">
           {resolved && handoff.outcome ? (
             <HandoffResolvedBlock outcome={handoff.outcome} />
           ) : (

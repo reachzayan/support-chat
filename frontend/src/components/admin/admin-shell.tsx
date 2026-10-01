@@ -68,6 +68,8 @@ export const useAdminUser = () => {
   return user
 }
 
+export const useOptionalAdminUser = () => useContext(AdminUserContext)
+
 type AdminLink = {
   href: string
   label: string
@@ -424,9 +426,9 @@ export const AdminShell = ({ children }: { children: ReactNode }) => {
         }
       >
         <AdminSidebar displayName={user?.display_name ?? "Loading workspace"} />
-        <SidebarInset className="flex h-svh min-h-0 min-w-0 flex-col overflow-hidden bg-[#14161b] p-2">
+        <SidebarInset className="flex h-svh min-h-0 min-w-0 flex-col overflow-hidden overscroll-none bg-[#14161b] p-2">
           <AdminUserContext.Provider value={user}>
-            <div className="bg-ice flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-lg">
+            <div className="bg-ice flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden overscroll-none rounded-lg">
               {checkingSession ? <StaffPageSkeleton /> : frame}
             </div>
           </AdminUserContext.Provider>

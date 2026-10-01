@@ -75,6 +75,7 @@ export type CannedReply = {
   shortcut: string
   body: string
   scope: "general" | "website"
+  aliases?: string[]
 }
 
 export type InboxFilter = "human" | "bot" | "queued" | "closed"

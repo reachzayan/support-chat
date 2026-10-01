@@ -6,6 +6,10 @@ export type CannedReplyRecord = {
   shortcut: string
   body: string
   enabled: boolean
+  aliases: string[]
+  external_id: number | null
+  suggestion_event: string | null
+  bot_eligible: boolean
   created_at: string
   updated_at: string
 }
@@ -16,8 +20,24 @@ export type FormState = {
   id: string | null
   siteId: string | null
   shortcut: string
+  aliasesText: string
   body: string
   enabled: boolean
+  botEligible: boolean
+}
+
+export const BODY_MAX = 20000
+
+export const parseAliasesText = (value: string, primary: string) => {
+  const seen = new Set<string>()
+  const aliases: string[] = []
+  for (const part of value.split(/[\s,]+/)) {
+    const token = part.replace(/^#/, "").trim().toLowerCase()
+    if (!token || token === primary || seen.has(token)) continue
+    seen.add(token)
+    aliases.push(token)
+  }
+  return aliases
 }
 export const scopeLabel = (scope: Scope, sites: SiteRecord[]) =>
   scope === "general"

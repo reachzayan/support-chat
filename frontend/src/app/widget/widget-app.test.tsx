@@ -219,9 +219,7 @@ describe("returning visitor flow", () => {
 
     await user.click(screen.getByRole("button", { name: /Compliance question.*Past chat/i }))
     await user.click(screen.getByRole("button", { name: "Resume chat" }))
-    expect(
-      screen.getByRole("alertdialog", { name: "Resume this chat instead?" }),
-    ).toBeInTheDocument()
+    expect(screen.getByRole("dialog", { name: "Resume this chat instead?" })).toBeInTheDocument()
     await user.click(screen.getByRole("button", { name: "Resume chat" }))
     expect(postMessage).toHaveBeenCalledWith(
       {

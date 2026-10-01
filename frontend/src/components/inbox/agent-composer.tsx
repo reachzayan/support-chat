@@ -20,21 +20,46 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 
 import type { CannedReply } from "./types"
 
+export type CannedVariables = {
+  customerName?: string | null
+  customerEmail?: string | null
+  agentName?: string | null
+  agentEmail?: string | null
+}
+
 type AgentComposerProps = {
   disabled: boolean
   closed?: boolean
   canned: CannedReply[]
   inputId: string
+  variables?: CannedVariables
   onSend: (body: string) => boolean
 }
 
-export const expandCanned = (draft: string, canned: CannedReply[]) => {
+const EMPTY_VARIABLES: CannedVariables = {}
+
+export const fillCannedVariables = (body: string, variables: CannedVariables = EMPTY_VARIABLES) => {
+  return body
+    .replaceAll("%customer-name%", (variables.customerName ?? "").trim())
+    .replaceAll("%customer-email%", (variables.customerEmail ?? "").trim())
+    .replaceAll("%agent-name%", (variables.agentName ?? "").trim())
+    .replaceAll("%agent-email%", (variables.agentEmail ?? "").trim())
+}
+
+const matchesCannedToken = (item: CannedReply, token: string) =>
+  item.shortcut === token || (item.aliases ?? []).includes(token)
+
+export const expandCanned = (
+  draft: string,
+  canned: CannedReply[],
+  variables: CannedVariables = EMPTY_VARIABLES,
+) => {
   const trimmed = draft.trim()
   if (!trimmed.startsWith("#")) {
     return null
   }
-  const match = canned.find((item) => item.shortcut === trimmed.slice(1).toLowerCase())
-  return match?.body ?? null
+  const match = canned.find((item) => matchesCannedToken(item, trimmed.slice(1).toLowerCase()))
+  return match ? fillCannedVariables(match.body, variables) : null
 }
 
 const composerPlaceholder = (closed: boolean, disabled: boolean) => {
@@ -136,6 +161,11 @@ const ComposerField = ({
                     {item.scope}
                   </span>
                 </span>
+                {(item.aliases ?? []).length > 0 ? (
+                  <span className="text-mute font-mono text-[10px]">
+                    {(item.aliases ?? []).map((alias) => `#${alias}`).join(" ")}
+                  </span>
+                ) : null}
                 <span className="text-ink line-clamp-2 text-xs">{item.body}</span>
               </Button>
             ))}
@@ -181,6 +211,7 @@ export const AgentComposer = ({
   closed = false,
   canned,
   inputId,
+  variables = EMPTY_VARIABLES,
   onSend,
 }: AgentComposerProps) => {
   const [draft, setDraft] = useState("")
@@ -191,23 +222,35 @@ export const AgentComposer = ({
   const results = useMemo(() => {
     const query = draft.startsWith("#") ? draft.slice(1).toLowerCase() : ""
     return [...canned]
-      .filter(
-        (item) =>
-          !query || item.shortcut.includes(query) || item.body.toLowerCase().includes(query),
-      )
+      .filter((item) => {
+        if (!query) return true
+        const haystack = [item.shortcut, ...(item.aliases ?? []), item.body.toLowerCase()]
+        return haystack.some((value) => value.includes(query))
+      })
       .toSorted((left, right) => {
-        const leftRank = left.shortcut.startsWith(query) ? 0 : 1
-        const rightRank = right.shortcut.startsWith(query) ? 0 : 1
+        const leftRank =
+          left.shortcut.startsWith(query) ||
+          (left.aliases ?? []).some((alias) => alias.startsWith(query))
+            ? 0
+            : 1
+        const rightRank =
+          right.shortcut.startsWith(query) ||
+          (right.aliases ?? []).some((alias) => alias.startsWith(query))
+            ? 0
+            : 1
         return leftRank - rightRank || left.shortcut.localeCompare(right.shortcut)
       })
   }, [canned, draft])
 
-  const selectCanned = useCallback((item: CannedReply) => {
-    setDraft(item.body)
-    setPickerOpen(false)
-    setActiveIndex(0)
-    requestAnimationFrame(() => inputRef.current?.focus())
-  }, [])
+  const selectCanned = useCallback(
+    (item: CannedReply) => {
+      setDraft(fillCannedVariables(item.body, variables))
+      setPickerOpen(false)
+      setActiveIndex(0)
+      requestAnimationFrame(() => inputRef.current?.focus())
+    },
+    [variables],
+  )
 
   const handleChange = useCallback((event: ChangeEvent<HTMLInputElement>) => {
     const value = event.target.value
@@ -241,7 +284,7 @@ export const AgentComposer = ({
       if (event.key !== "Tab" && event.key !== "Enter") {
         return
       }
-      const expanded = expandCanned(draft, canned)
+      const expanded = expandCanned(draft, canned, variables)
       if (expanded !== null) {
         event.preventDefault()
         setDraft(expanded)
@@ -253,7 +296,7 @@ export const AgentComposer = ({
         selectCanned(results[activeIndex])
       }
     },
-    [activeIndex, canned, draft, pickerOpen, results, selectCanned],
+    [activeIndex, canned, draft, pickerOpen, results, selectCanned, variables],
   )
 
   const handleSubmit = useCallback(
@@ -262,12 +305,12 @@ export const AgentComposer = ({
       if (disabled) {
         return
       }
-      const expanded = expandCanned(draft, canned)
+      const expanded = expandCanned(draft, canned, variables)
       if (expanded !== null) {
         setDraft(expanded)
         return
       }
-      const body = draft.trim()
+      const body = fillCannedVariables(draft.trim(), variables)
       if (body === "") {
         return
       }
@@ -275,7 +318,7 @@ export const AgentComposer = ({
         setDraft("")
       }
     },
-    [canned, disabled, draft, onSend],
+    [canned, disabled, draft, onSend, variables],
   )
 
   return (

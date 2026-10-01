@@ -31,8 +31,8 @@ const readTheme = (value: string | undefined): Theme => {
 
 const htmlClassName = (theme: Theme) =>
   theme === "dark"
-    ? `${manrope.variable} h-full antialiased dark`
-    : `${manrope.variable} h-full antialiased`
+    ? `${manrope.variable} h-full overscroll-none antialiased dark`
+    : `${manrope.variable} h-full overscroll-none antialiased`
 
 const staffChrome = async () => {
   const jar = await cookies()
@@ -53,7 +53,7 @@ export default async function RootLayout({
   return (
     <html lang="en" className={htmlClassName(chrome.theme)} suppressHydrationWarning>
       <body
-        className={`flex h-full min-h-dvh flex-col font-sans${isWidget ? " bg-transparent" : ""}`}
+        className={`flex h-full min-h-dvh flex-col overscroll-none font-sans${isWidget ? " bg-transparent" : ""}`}
       >
         {isWidget ? (
           children

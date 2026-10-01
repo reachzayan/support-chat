@@ -1,4 +1,5 @@
 import { Pencil, Trash2 } from "lucide-react"
+import { useEffect, useRef, type ReactNode } from "react"
 
 /* oxlint-disable react-perf/jsx-no-new-function-as-prop -- Row controls close over response records. */
 import { RetryError } from "@/components/admin/retry-error"
@@ -27,7 +28,14 @@ export const ResponseRow = ({
   onDelete,
 }: ResponseItemProps) => (
   <tr className="border-line hover:bg-ice/60 border-t transition-[opacity,transform,background-color] duration-150">
-    <td className="text-steel px-5 py-3 font-mono text-sm font-bold">#{record.shortcut}</td>
+    <td className="text-steel px-5 py-3 font-mono text-sm font-bold">
+      <span>#{record.shortcut}</span>
+      {(record.aliases ?? []).length > 0 ? (
+        <span className="text-mute mt-1 block text-xs font-normal">
+          {(record.aliases ?? []).map((alias) => `#${alias}`).join(" ")}
+        </span>
+      ) : null}
+    </td>
     <td className="max-w-md px-5 py-3">
       <p className="text-ink line-clamp-2">{record.body}</p>
       {overrideNote(record, scope, records)}
@@ -80,6 +88,11 @@ export const ResponseCard = ({
     <div className="flex items-start justify-between gap-3">
       <div>
         <p className="text-steel font-mono text-sm font-bold">#{record.shortcut}</p>
+        {(record.aliases ?? []).length > 0 ? (
+          <p className="text-mute mt-1 font-mono text-xs">
+            {(record.aliases ?? []).map((alias) => `#${alias}`).join(" ")}
+          </p>
+        ) : null}
         <p className="text-ink mt-2 line-clamp-3 text-sm leading-6">{record.body}</p>
         {overrideNote(record, scope, records)}
       </div>
@@ -133,27 +146,57 @@ export const EmptyState = ({
   </section>
 )
 
-export const Pagination = ({
-  page,
-  total,
-  onChange,
+export const CannedScrollPane = ({
+  className,
+  hasMore,
+  loadedCount,
+  onLoadMore,
+  children,
 }: {
-  page: number
-  total: number
-  onChange: (page: number) => void
-}) => (
-  <div className="flex items-center justify-end gap-3">
-    <span className="text-mute text-xs">
-      Page {page} of {total}
-    </span>
-    <Button variant="outline" disabled={page === 1} onClick={() => onChange(page - 1)}>
-      Previous
-    </Button>
-    <Button variant="outline" disabled={page === total} onClick={() => onChange(page + 1)}>
-      Next
-    </Button>
-  </div>
-)
+  className: string
+  hasMore: boolean
+  loadedCount: number
+  onLoadMore: () => void
+  children: ReactNode
+}) => {
+  const scrollRef = useRef<HTMLDivElement>(null)
+  const triggerRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    const root = scrollRef.current
+    const trigger = triggerRef.current
+    if (!root || !trigger || !hasMore || typeof IntersectionObserver === "undefined") {
+      return
+    }
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (entry?.isIntersecting) {
+          onLoadMore()
+        }
+      },
+      { root, rootMargin: "0px 0px 240px" },
+    )
+    observer.observe(trigger)
+    return () => observer.disconnect()
+    // Re-attach after each batch so a sentinel still in view can reveal the next window.
+    // oxlint-disable-next-line react/exhaustive-effect-dependencies
+  }, [hasMore, loadedCount, onLoadMore])
+
+  return (
+    <div ref={scrollRef} className={className}>
+      {children}
+      {hasMore ? (
+        <div
+          ref={triggerRef}
+          aria-live="polite"
+          className="flex min-h-12 items-center justify-center px-4 py-3"
+        >
+          <span className="text-mute text-xs">Scroll for more responses</span>
+        </div>
+      ) : null}
+    </div>
+  )
+}
 
 export const CannedResponsesSkeleton = () => (
   <main className="flex flex-col gap-4 px-5 py-6 lg:px-8 lg:py-8">

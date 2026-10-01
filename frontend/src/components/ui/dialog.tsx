@@ -113,7 +113,7 @@ const DialogResizeSection = ({
       animate={{ height }}
       initial={false}
       transition={reducedMotion ? REDUCED_MOTION_TRANSITION : DIALOG_RESIZE_TRANSITION}
-      className="overflow-hidden"
+      className="min-h-0 overflow-x-hidden overflow-y-auto overscroll-none"
       {...props}
     >
       <div ref={measureRef} className={cn(className)}>
@@ -127,7 +127,7 @@ const DialogHeader = ({ className, ...props }: React.ComponentProps<"div">) => {
   return (
     <div
       data-slot="dialog-header"
-      className={cn("flex flex-col gap-1 border-b border-line px-5 py-4 pr-12", className)}
+      className={cn("flex shrink-0 flex-col gap-1 border-b border-line px-5 py-4 pr-12", className)}
       {...props}
     />
   )
@@ -138,7 +138,7 @@ const DialogFooter = ({ className, ...props }: React.ComponentProps<"div">) => {
     <div
       data-slot="dialog-footer"
       className={cn(
-        "border-line mt-auto flex flex-col items-center gap-2 border-t px-5 py-4",
+        "border-line bg-paper sticky bottom-0 z-10 mt-auto flex shrink-0 flex-col items-center gap-2 border-t px-5 py-4",
         className,
       )}
       {...props}
