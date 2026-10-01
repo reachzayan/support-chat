@@ -67,4 +67,16 @@ describe("inbox canned replies", () => {
     const frames = FakeSocket.instances[0]?.sent.filter((raw) => raw.includes('"type":"message"'))
     expect(frames).toHaveLength(0)
   })
+
+  test("picker lists each shortcut left-aligned with a body preview", async () => {
+    const user = await openQueuedAda()
+    await waitFor(() => expect(FakeSocket.instances.length).toBe(1))
+    emitAlexJoined(FakeSocket.instances[0])
+    await user.click(screen.getByRole("button", { name: "Open canned responses" }))
+    const option = await screen.findByRole("button", { name: "Insert #hours" })
+    expect(option).toHaveTextContent(HOURS_BODY)
+    expect(option.className.split(/\s+/)).toEqual(
+      expect.arrayContaining(["items-start", "text-left", "justify-start"]),
+    )
+  })
 })

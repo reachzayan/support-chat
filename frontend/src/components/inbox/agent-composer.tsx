@@ -6,6 +6,7 @@ import { ArrowUp, Hash } from "lucide-react"
 import Link from "next/link"
 import {
   useCallback,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -62,6 +63,8 @@ export const expandCanned = (
   return match ? fillCannedVariables(match.body, variables) : null
 }
 
+const COMPOSER_MAX_HEIGHT_PX = 168
+
 const composerPlaceholder = (closed: boolean, disabled: boolean) => {
   if (closed) {
     return "This chat is closed"
@@ -70,6 +73,14 @@ const composerPlaceholder = (closed: boolean, disabled: boolean) => {
     return "Join this chat to reply"
   }
   return "Write a message..."
+}
+
+const resizeComposerField = (field: HTMLTextAreaElement | null) => {
+  if (!field) {
+    return
+  }
+  field.style.height = "0px"
+  field.style.height = `${Math.min(field.scrollHeight, COMPOSER_MAX_HEIGHT_PX)}px`
 }
 
 // oxlint-disable-next-line eslint/max-lines-per-function, eslint/complexity -- Keyboard navigation and canned picker state stay with the textarea markup.
@@ -100,12 +111,12 @@ const ComposerField = ({
   onOpenPicker: () => void
   onPickerOpenChange: (open: boolean) => void
   onSelect: (item: CannedReply) => void
-  inputRef: RefObject<HTMLInputElement | null>
-  onChange: (event: ChangeEvent<HTMLInputElement>) => void
-  onKeyDown: (event: KeyboardEvent<HTMLInputElement>) => void
+  inputRef: RefObject<HTMLTextAreaElement | null>
+  onChange: (event: ChangeEvent<HTMLTextAreaElement>) => void
+  onKeyDown: (event: KeyboardEvent<HTMLTextAreaElement>) => void
 }) => (
   <div
-    className={`relative flex min-h-14 items-center gap-2 rounded-2xl border px-3 py-2 transition-[border-color,box-shadow,background-color,opacity] duration-150 ease-out ${
+    className={`relative flex min-h-14 items-end gap-2 rounded-2xl border px-3 py-2 transition-[border-color,box-shadow,background-color,opacity] duration-150 ease-out ${
       closed
         ? "border-line text-mute bg-transparent"
         : disabled
@@ -124,7 +135,7 @@ const ComposerField = ({
             aria-label="Open canned responses"
             disabled={disabled}
             onClick={onOpenPicker}
-            className={disabled ? "text-mute/70" : undefined}
+            className={disabled ? "text-mute/70 mb-0.5" : "mb-0.5"}
           />
         }
       >
@@ -147,17 +158,16 @@ const ComposerField = ({
         ) : (
           <div className="max-h-64 overflow-y-auto p-1">
             {canned.map((item, index) => (
-              <Button
+              <button
                 key={item.shortcut}
                 type="button"
-                variant="ghost"
                 onClick={() => onSelect(item)}
                 aria-label={`Insert #${item.shortcut}`}
-                className={`flex w-full flex-col gap-0.5 rounded-[8px] px-3 py-2 text-left transition-[background-color,transform] duration-150 ${index === activeIndex ? "bg-ice-2" : "hover:bg-ice"}`}
+                className={`flex w-full flex-col items-start justify-start gap-0.5 rounded-[8px] px-3 py-2 text-left transition-[background-color] duration-150 ${index === activeIndex ? "bg-ice-2" : "hover:bg-ice"}`}
               >
-                <span className="flex items-center gap-2">
+                <span className="flex min-w-0 items-center gap-2">
                   <span className="text-steel font-mono text-xs font-bold">#{item.shortcut}</span>
-                  <span className="text-mute bg-paper rounded px-1.5 py-0.5 text-[10px] font-bold uppercase">
+                  <span className="text-mute bg-paper shrink-0 rounded px-1.5 py-0.5 text-[10px] font-bold uppercase">
                     {item.scope}
                   </span>
                 </span>
@@ -166,24 +176,27 @@ const ComposerField = ({
                     {(item.aliases ?? []).map((alias) => `#${alias}`).join(" ")}
                   </span>
                 ) : null}
-                <span className="text-ink line-clamp-2 text-xs">{item.body}</span>
-              </Button>
+                <span className="text-mute line-clamp-1 w-full text-xs leading-snug whitespace-normal">
+                  {item.body}
+                </span>
+              </button>
             ))}
           </div>
         )}
       </PopoverContent>
     </Popover>
-    <input
+    <textarea
       ref={inputRef}
       id={inputId}
       name="message"
+      rows={1}
       autoComplete="off"
       value={draft}
       disabled={disabled}
       onChange={onChange}
       onKeyDown={onKeyDown}
       placeholder={composerPlaceholder(closed, disabled)}
-      className="text-ink placeholder:text-mute/80 disabled:text-mute/80 h-auto min-w-0 flex-1 rounded-none border-0 !bg-transparent px-1 text-base shadow-none outline-none focus-visible:border-0 focus-visible:ring-0 disabled:cursor-not-allowed dark:!bg-transparent"
+      className="text-ink placeholder:text-mute/80 disabled:text-mute/80 max-h-42 min-h-6 min-w-0 flex-1 resize-none overflow-y-auto rounded-none border-0 !bg-transparent px-1 py-2.5 text-base leading-6 shadow-none outline-none focus-visible:border-0 focus-visible:ring-0 disabled:cursor-not-allowed dark:!bg-transparent"
     />
     <Button
       variant="ghost"
@@ -191,7 +204,7 @@ const ComposerField = ({
       type="submit"
       aria-label="Send"
       disabled={!canSend}
-      className={`widget-send-button flex size-11 shrink-0 items-center justify-center rounded-full focus-visible:ring-2 focus-visible:outline-none ${
+      className={`widget-send-button mb-0.5 flex size-11 shrink-0 items-center justify-center rounded-full focus-visible:ring-2 focus-visible:outline-none ${
         closed
           ? "bg-line text-mute"
           : disabled
@@ -217,7 +230,7 @@ export const AgentComposer = ({
   const [draft, setDraft] = useState("")
   const [pickerOpen, setPickerOpen] = useState(false)
   const [activeIndex, setActiveIndex] = useState(0)
-  const inputRef = useRef<HTMLInputElement>(null)
+  const inputRef = useRef<HTMLTextAreaElement>(null)
   const canSend = !disabled && draft.trim() !== ""
   const results = useMemo(() => {
     const query = draft.startsWith("#") ? draft.slice(1).toLowerCase() : ""
@@ -242,6 +255,12 @@ export const AgentComposer = ({
       })
   }, [canned, draft])
 
+  useLayoutEffect(() => {
+    resizeComposerField(inputRef.current)
+    // Remeasure after the controlled draft paints; draft is the trigger, not a value read here.
+    // oxlint-disable-next-line react/exhaustive-effect-dependencies
+  }, [draft])
+
   const selectCanned = useCallback(
     (item: CannedReply) => {
       setDraft(fillCannedVariables(item.body, variables))
@@ -252,7 +271,7 @@ export const AgentComposer = ({
     [variables],
   )
 
-  const handleChange = useCallback((event: ChangeEvent<HTMLInputElement>) => {
+  const handleChange = useCallback((event: ChangeEvent<HTMLTextAreaElement>) => {
     const value = event.target.value
     setDraft(value)
     if (value.startsWith("#")) {
@@ -265,7 +284,7 @@ export const AgentComposer = ({
 
   // oxlint-disable-next-line eslint/complexity -- The compact keyboard contract maps directly to the picker actions.
   const handleKeyDown = useCallback(
-    (event: KeyboardEvent<HTMLInputElement>) => {
+    (event: KeyboardEvent<HTMLTextAreaElement>) => {
       if (event.key === "Escape" && pickerOpen) {
         event.preventDefault()
         setPickerOpen(false)
@@ -281,6 +300,9 @@ export const AgentComposer = ({
         setActiveIndex((current) => Math.max(current - 1, 0))
         return
       }
+      if (event.key === "Enter" && event.shiftKey) {
+        return
+      }
       if (event.key !== "Tab" && event.key !== "Enter") {
         return
       }
@@ -294,6 +316,11 @@ export const AgentComposer = ({
       if (pickerOpen && results[activeIndex]) {
         event.preventDefault()
         selectCanned(results[activeIndex])
+        return
+      }
+      if (event.key === "Enter") {
+        event.preventDefault()
+        event.currentTarget.form?.requestSubmit()
       }
     },
     [activeIndex, canned, draft, pickerOpen, results, selectCanned, variables],
