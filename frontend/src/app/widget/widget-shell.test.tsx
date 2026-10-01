@@ -45,7 +45,7 @@ describe("widget shell", () => {
 
     await user.click(screen.getByRole("button", { name: "More options" }))
     await user.click(screen.getByRole("menuitem", { name: "Reset current chat" }))
-    expect(screen.getByRole("alertdialog", { name: "Reset current chat?" })).toBeInTheDocument()
+    expect(screen.getByRole("dialog", { name: "Reset current chat?" })).toBeInTheDocument()
     expect(screen.getByText(/saved in your chat history/i)).toBeInTheDocument()
     await user.click(screen.getByRole("button", { name: "Cancel" }))
     expect(onResetCurrent).not.toHaveBeenCalled()
@@ -53,7 +53,7 @@ describe("widget shell", () => {
     await user.click(screen.getByRole("button", { name: "More options" }))
     await user.click(screen.getByRole("menuitem", { name: "Delete all chats" }))
     expect(
-      screen.getByRole("alertdialog", { name: "Delete all chats from this browser?" }),
+      screen.getByRole("dialog", { name: "Delete all chats from this browser?" }),
     ).toBeInTheDocument()
     expect(screen.getByText(/retained support records/i)).toBeInTheDocument()
     await user.click(screen.getByRole("button", { name: "Delete all chats" }))

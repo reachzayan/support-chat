@@ -50,7 +50,7 @@ export const SnapshotDiffSheet = ({
     <Sheet open={open} onOpenChange={handleOpenChange}>
       <SheetContent
         side="right"
-        className="bg-paper border-line w-full gap-0 overflow-y-auto p-0 data-[side=right]:sm:max-w-2xl"
+        className="bg-paper border-line w-full gap-0 overflow-hidden p-0 data-[side=right]:sm:max-w-2xl"
       >
         <SheetHeader className="border-line border-b px-5 py-4">
           <SheetTitle>Source progress</SheetTitle>
@@ -58,7 +58,7 @@ export const SnapshotDiffSheet = ({
             Processing history and evidence changes for this source.
           </SheetDescription>
         </SheetHeader>
-        <div className="flex flex-col gap-5 px-5 py-5">
+        <div className="flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto overscroll-none px-5 py-5">
           <CrawlActivity progress={progress} />
           <p aria-live="polite" className="text-mute text-xs">
             {status}
