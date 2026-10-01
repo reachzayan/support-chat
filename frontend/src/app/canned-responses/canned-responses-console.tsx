@@ -2,8 +2,10 @@
 
 /* oxlint-disable react-perf/jsx-no-jsx-as-prop, react-perf/jsx-no-new-function-as-prop -- StaffHeader actions and dialog callbacks use the current library state. */
 
-import { Plus, Search } from "lucide-react"
+import { Plus, Search, Upload } from "lucide-react"
+import { useState } from "react"
 
+import { useOptionalAdminUser } from "@/components/admin/admin-shell"
 import { StaffHeader } from "@/components/admin/staff-nav"
 import {
   AlertDialog,
@@ -17,20 +19,23 @@ import {
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 
+import { ImportDialog } from "./canned-import-dialog"
 import { DeleteDialog, ResponseForm } from "./canned-response-dialogs"
 import {
   CannedResponsesSkeleton,
+  CannedScrollPane,
   EmptyState,
-  Pagination,
   ResponseCard,
   ResponseRow,
 } from "./canned-response-list"
 import { CannedResponseSelect, scopeOptions, statusOptions } from "./canned-response-select"
 import { useCannedResponsesState } from "./use-canned-responses-state"
 
-// oxlint-disable-next-line eslint/max-lines-per-function -- Compose the library controls, list, and edit dialogs.
+// oxlint-disable-next-line eslint/max-lines-per-function, eslint/complexity -- Compose the library controls, list, and edit dialogs.
 export const CannedResponsesConsole = () => {
   const state = useCannedResponsesState()
+  const staff = useOptionalAdminUser()
+  const [importOpen, setImportOpen] = useState(false)
 
   if (state.loadError) {
     return (
@@ -59,7 +64,7 @@ export const CannedResponsesConsole = () => {
 
   if (state.records === null) {
     return (
-      <div className="view-transition-enter bg-ice min-h-0 min-w-0 flex-1 overflow-y-auto">
+      <div className="view-transition-enter bg-ice flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
         <StaffHeader
           title="Canned responses"
           description="Reuse approved specialist wording across chats."
@@ -72,21 +77,28 @@ export const CannedResponsesConsole = () => {
   const records = state.records
 
   return (
-    <div className="view-transition-enter bg-ice min-h-0 min-w-0 flex-1 overflow-y-auto">
+    <div className="view-transition-enter bg-ice flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
       <StaffHeader
         title="Canned responses"
         description="Reuse approved specialist wording across chats."
         action={
-          <Button variant="default" size="lg" className="font-bold" onClick={state.openCreate}>
-            <Plus data-icon="inline-start" aria-hidden="true" /> Add response
-          </Button>
+          <div className="flex items-center gap-2">
+            {staff?.is_admin ? (
+              <Button variant="outline" size="lg" onClick={() => setImportOpen(true)}>
+                <Upload data-icon="inline-start" aria-hidden="true" /> Import CSV
+              </Button>
+            ) : null}
+            <Button variant="default" size="lg" className="font-bold" onClick={state.openCreate}>
+              <Plus data-icon="inline-start" aria-hidden="true" /> Add response
+            </Button>
+          </div>
         }
       />
       <main
         id="main-content"
-        className="flex w-full min-w-0 flex-col gap-4 px-5 py-6 lg:px-8 lg:py-8"
+        className="flex min-h-0 min-w-0 flex-1 flex-col gap-4 overflow-hidden px-5 py-6 lg:px-8 lg:py-8"
       >
-        <section className="border-line bg-paper rounded-xl border p-4 sm:p-5">
+        <section className="border-line bg-paper shrink-0 rounded-xl border p-4 sm:p-5">
           <div className="grid gap-3 lg:grid-cols-[minmax(15rem,0.8fr)_minmax(18rem,1.2fr)_10rem]">
             <div className="text-ink flex flex-col gap-1.5 text-xs font-medium">
               <span>Scope</span>
@@ -158,10 +170,15 @@ export const CannedResponsesConsole = () => {
             <EmptyState scope={state.scope} sites={state.sites} onAdd={state.openCreate} />
           )
         ) : (
-          <section className="border-line bg-paper overflow-hidden rounded-xl border">
-            <div className="hidden overflow-x-auto md:block">
+          <section className="border-line bg-paper flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-xl border">
+            <CannedScrollPane
+              className="hidden min-h-0 flex-1 overflow-x-auto overflow-y-auto overscroll-none md:block"
+              hasMore={state.hasMore}
+              loadedCount={state.visible.length}
+              onLoadMore={state.loadMore}
+            >
               <table className="w-full min-w-[760px] border-collapse text-left text-sm">
-                <thead className="bg-ice-2 text-ink text-xs">
+                <thead className="bg-ice-2 text-ink sticky top-0 z-10 text-xs">
                   <tr>
                     <th className="px-5 py-3 font-semibold">Shortcut</th>
                     <th className="px-5 py-3 font-semibold">Message</th>
@@ -188,8 +205,13 @@ export const CannedResponsesConsole = () => {
                   ))}
                 </tbody>
               </table>
-            </div>
-            <div className="divide-line flex flex-col divide-y md:hidden">
+            </CannedScrollPane>
+            <CannedScrollPane
+              className="divide-line flex min-h-0 flex-1 flex-col divide-y overflow-y-auto overscroll-none md:hidden"
+              hasMore={state.hasMore}
+              loadedCount={state.visible.length}
+              onLoadMore={state.loadMore}
+            >
               {state.visible.map((record) => (
                 <ResponseCard
                   key={record.id}
@@ -203,19 +225,9 @@ export const CannedResponsesConsole = () => {
                   onDelete={state.setDeleteTarget}
                 />
               ))}
-            </div>
+            </CannedScrollPane>
           </section>
         )}
-        {state.totalPages > 1 ? (
-          <Pagination
-            page={state.page}
-            total={state.totalPages}
-            onChange={(next) => {
-              state.setPage(next)
-              state.updateUrl({ page: next })
-            }}
-          />
-        ) : null}
       </main>
       <p className="sr-only" aria-live="polite">
         {state.announcement}
@@ -258,6 +270,14 @@ export const CannedResponsesConsole = () => {
         deleting={state.deleting}
         onCancel={() => state.setDeleteTarget(null)}
         onConfirm={() => void state.deleteResponse()}
+      />
+      <ImportDialog
+        open={importOpen}
+        onClose={() => setImportOpen(false)}
+        sites={state.sites}
+        onImported={async () => {
+          await state.load()
+        }}
       />
     </div>
   )

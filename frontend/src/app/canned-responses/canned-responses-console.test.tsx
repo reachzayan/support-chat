@@ -1,4 +1,4 @@
-import { screen, waitFor, within } from "@testing-library/react"
+import { act, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { beforeEach, describe, expect, test, vi } from "vitest"
 
@@ -22,6 +22,10 @@ const records = [
     shortcut: "hours",
     body: "Most negative results are reported within 24–48 hours.",
     enabled: true,
+    aliases: [],
+    external_id: null,
+    suggestion_event: null,
+    bot_eligible: true,
     created_at: "2026-09-16T12:00:00Z",
     updated_at: "2026-09-16T12:00:00Z",
   },
@@ -31,6 +35,10 @@ const records = [
     shortcut: "privacy",
     body: "SampleSite privacy requests are answered by our specialists.",
     enabled: false,
+    aliases: [],
+    external_id: null,
+    suggestion_event: null,
+    bot_eligible: true,
     created_at: "2026-09-16T12:00:00Z",
     updated_at: "2026-09-16T12:00:00Z",
   },
@@ -101,9 +109,127 @@ describe("canned responses console scope", () => {
   })
 })
 
+describe("canned responses console scrolling", () => {
+  beforeEach(() => {
+    stubCannedResponsesFetch()
+  })
+
+  test("keeps the header and filters still and scrolls only the responses table", async () => {
+    renderWithProviders(<CannedResponsesConsole />)
+    const table = await screen.findByRole("table")
+    const heading = screen.getByRole("heading", { name: "Canned responses" })
+    const scope = screen.getByLabelText("Scope")
+    const shell = heading.closest(".view-transition-enter")
+    const tableScroll = table.closest("[class*='overflow-y-auto']")
+
+    expect(shell?.className).toMatch(/\boverflow-hidden\b/)
+    expect(shell?.className).not.toMatch(/\boverflow-y-auto\b/)
+    expect(tableScroll).not.toBeNull()
+    expect(tableScroll?.className).toMatch(/\boverscroll-none\b/)
+    expect(tableScroll?.contains(heading)).toBe(false)
+    expect(tableScroll?.contains(scope)).toBe(false)
+    expect(tableScroll?.contains(table)).toBe(true)
+  })
+})
+
+describe("canned responses console lazy loading", () => {
+  const observerCallbacks: IntersectionObserverCallback[] = []
+  const library = Array.from({ length: 51 }, (_, index) => {
+    const n = index + 1
+    return {
+      id: `11111111-1111-4111-8111-${String(n).padStart(12, "0")}`,
+      site_id: null,
+      shortcut: `r${String(n).padStart(2, "0")}`,
+      body: `Approved wording ${n}.`,
+      enabled: true,
+      aliases: [] as string[],
+      external_id: null,
+      suggestion_event: null,
+      bot_eligible: true,
+      created_at: "2026-09-16T12:00:00Z",
+      updated_at: "2026-09-16T12:00:00Z",
+    }
+  })
+
+  beforeEach(() => {
+    observerCallbacks.length = 0
+    window.history.replaceState(null, "", "/admin/canned-responses")
+    setAccessToken("staff-token")
+    vi.stubGlobal(
+      "IntersectionObserver",
+      class {
+        constructor(callback: IntersectionObserverCallback) {
+          observerCallbacks.push(callback)
+        }
+        observe() {}
+        unobserve() {}
+        disconnect() {}
+        takeRecords() {
+          return []
+        }
+        root = null
+        rootMargin = ""
+        thresholds: number[] = []
+      },
+    )
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input)
+        if (url === "/api/canned-replies/library") {
+          return response({ items: library })
+        }
+        if (url === "/api/sites") {
+          return response({ items: [{ id: EASY_SITE, name: "SampleSite" }] })
+        }
+        return response({ detail: "missing" }, 404)
+      }),
+    )
+  })
+
+  test("shows the first 50 responses, then the 51st after the list is scrolled", async () => {
+    renderWithProviders(<CannedResponsesConsole />)
+    const table = await screen.findByRole("table")
+
+    expect(screen.queryByText(/Page \d+ of \d+/)).not.toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "Previous" })).not.toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "Next" })).not.toBeInTheDocument()
+    expect(new URL(window.location.href).searchParams.get("page")).toBeNull()
+    expect(within(table).getByText("#r01")).toBeInTheDocument()
+    expect(within(table).getByText("#r50")).toBeInTheDocument()
+    expect(within(table).queryByText("#r51")).not.toBeInTheDocument()
+
+    act(() => {
+      for (const callback of observerCallbacks) {
+        callback(
+          [{ isIntersecting: true } as IntersectionObserverEntry],
+          {} as IntersectionObserver,
+        )
+      }
+    })
+
+    expect(await within(table).findByText("#r51")).toBeInTheDocument()
+    expect(screen.queryByText(/Page \d+ of \d+/)).not.toBeInTheDocument()
+  })
+})
+
 describe("canned responses console editor", () => {
   beforeEach(() => {
     stubCannedResponsesFetch()
+  })
+
+  test("keeps Save response still while the message field can scroll", async () => {
+    renderWithProviders(<CannedResponsesConsole />)
+    await screen.findAllByText("#hours")
+    await userEvent.setup().click(screen.getByRole("button", { name: "Add response" }))
+
+    const dialog = await screen.findByRole("dialog")
+    const save = within(dialog).getByRole("button", { name: "Save response" })
+    const message = within(dialog).getByRole("textbox", { name: /^Message/ })
+    const scroll = message.closest("[class*='overflow-y-auto']")
+
+    expect(scroll).not.toBeNull()
+    expect(scroll?.contains(save)).toBe(false)
   })
 
   test("caps the shortcut field at 40 characters, matching the backend limit", async () => {

@@ -25,7 +25,12 @@ import { Spinner } from "@/components/ui/spinner"
 import { Switch } from "@/components/ui/switch"
 import { Textarea } from "@/components/ui/textarea"
 
-import { scopeLabel, type CannedReplyRecord, type FormState } from "./canned-response-model"
+import {
+  scopeLabel,
+  type CannedReplyRecord,
+  type FormState,
+  BODY_MAX,
+} from "./canned-response-model"
 import { CannedResponseSelect, scopeOptions } from "./canned-response-select"
 
 const keyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
@@ -68,8 +73,8 @@ export const ResponseForm = ({
           </DialogDescription>
         </DialogHeader>
         {form ? (
-          <form onSubmit={onSubmit} className="flex min-h-0 flex-1 flex-col overflow-y-auto">
-            <div className="flex flex-col gap-4 px-5 py-5">
+          <form onSubmit={onSubmit} className="flex min-h-0 flex-1 flex-col overflow-hidden">
+            <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto overscroll-none px-5 py-5">
               <label
                 htmlFor="canned-response-scope"
                 className="text-ink flex flex-col gap-1.5 text-sm font-medium"
@@ -100,16 +105,29 @@ export const ResponseForm = ({
                 <span className="text-mute text-xs">{form.shortcut.length}/40 characters</span>
               </label>
               <label className="text-ink flex flex-col gap-1.5 text-sm font-medium">
+                Additional shortcuts
+                <input
+                  value={form.aliasesText}
+                  onChange={(event) => onChange({ ...form, aliasesText: event.target.value })}
+                  placeholder="optional, comma-separated"
+                  aria-label="Additional shortcuts"
+                  className="border-line bg-ice text-ink focus-visible:ring-steel h-10 rounded-[8px] border px-3 font-mono text-sm outline-none focus-visible:ring-2"
+                />
+                <span className="text-mute text-xs">
+                  Same as LiveChat extra tags. Type #any of them in the inbox to insert this reply.
+                </span>
+              </label>
+              <label className="text-ink flex flex-col gap-1.5 text-sm font-medium">
                 Message
                 <Textarea
                   value={form.body}
-                  maxLength={4000}
+                  maxLength={BODY_MAX}
                   onKeyDown={keyDown}
                   onChange={(event) => onChange({ ...form, body: event.target.value })}
                   aria-invalid={formError.includes("Message") || undefined}
                 />
                 <span className="text-mute text-xs">
-                  {form.body.length}/4,000 characters · Ctrl/⌘+Enter to save
+                  {form.body.length}/{BODY_MAX.toLocaleString()} characters · Ctrl/⌘+Enter to save
                 </span>
               </label>
               <label
@@ -127,6 +145,23 @@ export const ResponseForm = ({
                   checked={form.enabled}
                   onCheckedChange={(enabled) => onChange({ ...form, enabled })}
                   aria-label="Enabled"
+                />
+              </label>
+              <label
+                htmlFor="canned-response-bot"
+                className="border-line bg-ice text-ink flex items-center justify-between gap-3 rounded-[8px] border px-3 py-2.5 text-sm font-medium"
+              >
+                <span>
+                  <span className="block">Available to the bot</span>
+                  <span className="text-mute block text-xs font-normal">
+                    Leave off for greetings, idle nags, and discount codes.
+                  </span>
+                </span>
+                <Switch
+                  id="canned-response-bot"
+                  checked={form.botEligible}
+                  onCheckedChange={(botEligible) => onChange({ ...form, botEligible })}
+                  aria-label="Available to the bot"
                 />
               </label>
               <FieldError>{formError || undefined}</FieldError>
