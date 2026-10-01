@@ -33,6 +33,11 @@ GROUP_NAMES = {
     5: "Instant Check",
     6: "SampleSite",
 }
+GROUP_WEBSITES = {
+    4: "sample-services.example.com",
+    5: "365instantcheck.com",
+    6: "sample-site.example.com",
+}
 
 CONVERSATIONAL_SLUGS = frozenset(
     {
@@ -78,6 +83,7 @@ class ImportPlanRow:
     livechat_id: int | None
     group: int | None
     group_name: str | None
+    livechat_website: str | None
     site_id: UUID | None
     existing_id: UUID | None
     shortcut: str
@@ -87,6 +93,12 @@ class ImportPlanRow:
     bot_eligible: bool
     disable_reason: str | None
     excerpt: str
+
+
+def livechat_website_for(group: int | None) -> str | None:
+    if group is None:
+        return None
+    return GROUP_WEBSITES.get(group)
 
 
 def slugify_tag(raw: str) -> str | None:
@@ -148,6 +160,7 @@ def plan_import(
     existing: list[ExistingCanned],
     remap_groups: dict[int, UUID | None] | None = None,
     discard_ids: set[int] | None = None,
+    sites_by_name: dict[str, UUID] | None = None,
 ) -> list[ImportPlanRow]:
     by_external = {row.external_id: row for row in existing if row.external_id is not None}
     by_token: dict[tuple[UUID | None, str], ExistingCanned] = {}
@@ -159,10 +172,12 @@ def plan_import(
             by_token.setdefault((row.site_id, alias), row)
     remaps = remap_groups or {}
     discarded = discard_ids or set()
+    named = sites_by_name or {}
     return [
         _plan_row(
             raw,
             sites_by_key=sites_by_key,
+            sites_by_name=named,
             by_external=by_external,
             by_token=by_token,
             taken=taken,
@@ -177,6 +192,7 @@ def _plan_row(
     raw: dict[str, str],
     *,
     sites_by_key: dict[str, UUID],
+    sites_by_name: dict[str, UUID],
     by_external: dict[int, ExistingCanned],
     by_token: dict[tuple[UUID | None, str], ExistingCanned],
     taken: dict[UUID | None, set[str]],
@@ -198,17 +214,7 @@ def _plan_row(
     excerpt = _excerpt(body)
     if livechat_id in discard_ids:
         return _skip(livechat_id, group, group_name, "Discarded.", body=body, excerpt=excerpt)
-    site_id, unmapped_reason = _resolve_site(group, sites_by_key, remap_groups)
-    if unmapped_reason == "missing_site":
-        key = GROUP_SITE_KEYS[group]
-        return _skip(
-            livechat_id,
-            group,
-            group_name,
-            f"No SupportChat website with key {key}.",
-            body=body,
-            excerpt=excerpt,
-        )
+    site_id, unmapped_reason = _resolve_site(group, sites_by_key, sites_by_name, remap_groups)
     if not slugs:
         slugs = [f"lc-{livechat_id}"[:40]]
     if unmapped_reason == "unmapped":
@@ -286,6 +292,7 @@ def _parse_body_and_tags(
 def _resolve_site(
     group: int,
     sites_by_key: dict[str, UUID],
+    sites_by_name: dict[str, UUID],
     remap_groups: dict[int, UUID | None],
 ) -> tuple[UUID | None, str | None]:
     if group in remap_groups:
@@ -293,12 +300,14 @@ def _resolve_site(
     if group == 0:
         return None, None
     key = GROUP_SITE_KEYS.get(group)
-    if key is None:
-        return None, "unmapped"
-    site_id = sites_by_key.get(key)
-    if site_id is None:
-        return None, "missing_site"
-    return site_id, None
+    if key is not None and key in sites_by_key:
+        return sites_by_key[key], None
+    named = GROUP_NAMES.get(group)
+    if named is not None:
+        site_id = sites_by_name.get(named.casefold())
+        if site_id is not None:
+            return site_id, None
+    return None, "unmapped"
 
 
 def _unmapped_row(
@@ -310,17 +319,13 @@ def _unmapped_row(
     body: str,
     excerpt: str,
 ) -> ImportPlanRow:
-    named = (
-        f"The LiveChat group {group} is {group_name}, which is not a SupportChat site."
-        if group_name
-        else f"The LiveChat group {group} is not a SupportChat site."
-    )
     return ImportPlanRow(
         action="unmapped",
-        reason=named,
+        reason=None,
         livechat_id=livechat_id,
         group=group,
         group_name=group_name,
+        livechat_website=livechat_website_for(group),
         site_id=None,
         existing_id=None,
         shortcut=slugs[0],
@@ -395,6 +400,7 @@ def _mapped_row(
         livechat_id=livechat_id,
         group=group,
         group_name=group_name,
+        livechat_website=livechat_website_for(group),
         site_id=site_id,
         existing_id=None if existing_row is None else existing_row.id,
         shortcut=shortcut,
@@ -462,6 +468,7 @@ def _skip(
         livechat_id=livechat_id,
         group=group,
         group_name=group_name,
+        livechat_website=livechat_website_for(group),
         site_id=None,
         existing_id=None,
         shortcut="",

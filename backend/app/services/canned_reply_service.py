@@ -202,6 +202,8 @@ class CannedReplyService:
                 if site_id is not None:
                     await self._require_site(site_id)
         planned = await self._plan_from_csv(raw, discard_ids=discard_ids, remap_groups=remap_groups)
+        if any(row.action == "unmapped" for row in planned):
+            raise CannedReplyError("unmapped_group")
         created = 0
         updated = 0
         skipped = 0
@@ -258,7 +260,9 @@ class CannedReplyService:
             parsed = parse_livechat_csv(raw)
         except CannedCsvError as exc:
             raise CannedReplyError("invalid_csv") from exc
-        sites = {site.key: site.id for site in await self._sites.list_all()}
+        sites = await self._sites.list_all()
+        sites_by_key = {site.key: site.id for site in sites}
+        sites_by_name = {site.name.casefold(): site.id for site in sites}
         existing = [
             ExistingCanned(
                 id=row.id,
@@ -274,7 +278,8 @@ class CannedReplyService:
         ]
         return plan_import(
             parsed,
-            sites_by_key=sites,
+            sites_by_key=sites_by_key,
+            sites_by_name=sites_by_name,
             existing=existing,
             remap_groups=remap_groups,
             discard_ids=discard_ids,

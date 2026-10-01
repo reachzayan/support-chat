@@ -73,6 +73,8 @@ class CannedImportRowOut(BaseModel):
     livechat_id: int | None
     group: int | None
     group_name: str | None
+    livechat_website: str | None
+    site_id: UUID | None
     shortcut: str
     aliases: list[str]
     bot_eligible: bool
@@ -119,6 +121,11 @@ def _http_error(exc: CannedReplyError) -> HTTPException:
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail="Shortcut must be 1-40 lowercase letters, numbers, underscores, or hyphens.",
         )
+    if exc.code == "unmapped_group":
+        return HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="Choose a website for each LiveChat group, or discard those responses.",
+        )
     if exc.code == "invalid_csv":
         return HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
@@ -141,6 +148,8 @@ def _preview_row(row: ImportPlanRow) -> CannedImportRowOut:
         livechat_id=row.livechat_id,
         group=row.group,
         group_name=row.group_name,
+        livechat_website=row.livechat_website,
+        site_id=row.site_id,
         shortcut=row.shortcut,
         aliases=list(row.aliases),
         bot_eligible=row.bot_eligible,

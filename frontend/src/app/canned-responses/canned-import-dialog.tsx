@@ -1,6 +1,13 @@
-/* oxlint-disable react-perf/jsx-no-new-function-as-prop, react-perf/jsx-no-jsx-as-prop, react-perf/jsx-no-new-array-as-prop, react/no-array-index-key -- Dialog callbacks and Base UI render props use live import state. */
+/* oxlint-disable react-perf/jsx-no-new-function-as-prop, react-perf/jsx-no-jsx-as-prop, react-perf/jsx-no-new-array-as-prop, react-perf/jsx-no-new-object-as-prop, react/no-array-index-key -- Dialog callbacks, live pixel size, and Base UI render props use import state. */
 
-import { useState, type ChangeEvent, type ReactNode } from "react"
+import {
+  useEffect,
+  useState,
+  type ChangeEvent,
+  type KeyboardEvent,
+  type PointerEvent,
+  type ReactNode,
+} from "react"
 
 import { staffUpload } from "@/components/admin/staff-api"
 import { Button } from "@/components/ui/button"
@@ -10,12 +17,115 @@ import {
   DialogDescription,
   DialogFooter,
   DialogHeader,
-  DialogResizeSection,
   DialogTitle,
 } from "@/components/ui/dialog"
 import { Spinner } from "@/components/ui/spinner"
 
 import { CannedResponseSelect, scopeOptions } from "./canned-response-select"
+
+const IMPORT_DIALOG_DEFAULT = { width: 768, height: 720 }
+const IMPORT_DIALOG_MIN = { width: 520, height: 440 }
+const IMPORT_DIALOG_PAD = 32
+const IMPORT_DIALOG_ASPECT = IMPORT_DIALOG_DEFAULT.width / IMPORT_DIALOG_DEFAULT.height
+
+const clampDialogSize = (width: number) => {
+  const maxWidth = Math.max(IMPORT_DIALOG_MIN.width, window.innerWidth - IMPORT_DIALOG_PAD)
+  const maxHeight = Math.max(IMPORT_DIALOG_MIN.height, window.innerHeight - IMPORT_DIALOG_PAD)
+  let nextWidth = width
+  let nextHeight = nextWidth / IMPORT_DIALOG_ASPECT
+
+  if (nextWidth > maxWidth) {
+    nextWidth = maxWidth
+    nextHeight = nextWidth / IMPORT_DIALOG_ASPECT
+  }
+  if (nextHeight > maxHeight) {
+    nextHeight = maxHeight
+    nextWidth = nextHeight * IMPORT_DIALOG_ASPECT
+  }
+  if (nextWidth < IMPORT_DIALOG_MIN.width) {
+    nextWidth = IMPORT_DIALOG_MIN.width
+    nextHeight = nextWidth / IMPORT_DIALOG_ASPECT
+  }
+  if (nextHeight < IMPORT_DIALOG_MIN.height) {
+    nextHeight = IMPORT_DIALOG_MIN.height
+    nextWidth = nextHeight * IMPORT_DIALOG_ASPECT
+  }
+  if (nextWidth > maxWidth) {
+    nextWidth = maxWidth
+    nextHeight = nextWidth / IMPORT_DIALOG_ASPECT
+  }
+  if (nextHeight > maxHeight) {
+    nextHeight = maxHeight
+    nextWidth = nextHeight * IMPORT_DIALOG_ASPECT
+  }
+
+  return {
+    width: Math.round(nextWidth),
+    height: Math.round(nextHeight),
+  }
+}
+
+const useImportDialogSize = () => {
+  const [size, setSize] = useState(IMPORT_DIALOG_DEFAULT)
+  useEffect(() => {
+    const handleResize = () => setSize((current) => clampDialogSize(current.width))
+    handleResize()
+    window.addEventListener("resize", handleResize)
+    return () => window.removeEventListener("resize", handleResize)
+  }, [])
+  const handlePointerDown = (event: PointerEvent<HTMLButtonElement>) => {
+    if (event.button !== 0) return
+    event.preventDefault()
+    const handle = event.currentTarget
+    const pointerId = event.pointerId
+    if (typeof handle.setPointerCapture === "function") {
+      handle.setPointerCapture(pointerId)
+    }
+    const startX = event.clientX
+    const startY = event.clientY
+    const startWidth = size.width
+    const startHeight = size.height
+    const onMove = (move: globalThis.PointerEvent) => {
+      const scale =
+        ((startWidth + (move.clientX - startX)) / startWidth +
+          (startHeight + (move.clientY - startY)) / startHeight) /
+        2
+      setSize(clampDialogSize(startWidth * scale))
+    }
+    const release = () => {
+      window.removeEventListener("pointermove", onMove)
+      window.removeEventListener("pointerup", release)
+      window.removeEventListener("pointercancel", release)
+      if (
+        typeof handle.hasPointerCapture === "function" &&
+        handle.hasPointerCapture(pointerId) &&
+        typeof handle.releasePointerCapture === "function"
+      ) {
+        handle.releasePointerCapture(pointerId)
+      }
+    }
+    window.addEventListener("pointermove", onMove)
+    window.addEventListener("pointerup", release)
+    window.addEventListener("pointercancel", release)
+  }
+  const handleKeyDown = (event: KeyboardEvent<HTMLButtonElement>) => {
+    const step = event.shiftKey ? 40 : 16
+    if (event.key === "ArrowRight" || event.key === "ArrowDown") {
+      event.preventDefault()
+      setSize((current) => clampDialogSize(current.width + step))
+    }
+    if (event.key === "ArrowLeft" || event.key === "ArrowUp") {
+      event.preventDefault()
+      setSize((current) => clampDialogSize(current.width - step))
+    }
+  }
+  return {
+    size,
+    resetSize: () => setSize(clampDialogSize(IMPORT_DIALOG_DEFAULT.width)),
+    handlePointerDown,
+    handleKeyDown,
+  }
+}
 
 type PreviewRow = {
   action: string
@@ -23,6 +133,8 @@ type PreviewRow = {
   livechat_id: number | null
   group: number | null
   group_name: string | null
+  livechat_website: string | null
+  site_id: string | null
   shortcut: string
   excerpt: string
   bot_eligible: boolean
@@ -39,6 +151,13 @@ type PreviewPayload = {
 type SiteOption = { id: string; name: string }
 type GroupTarget = string | "discard"
 
+const LIVECHAT_GROUPS: Record<number, { name: string; website: string | null }> = {
+  0: { name: "General", website: null },
+  4: { name: "Sample Services", website: "sample-services.example.com" },
+  5: { name: "Instant Check", website: "365instantcheck.com" },
+  6: { name: "SampleSite", website: "sample-site.example.com" },
+}
+
 const errorMessage = async (response: Response) => {
   try {
     const body = (await response.json()) as { detail?: string }
@@ -50,15 +169,45 @@ const errorMessage = async (response: Response) => {
 
 const rowKey = (row: PreviewRow, index: number) => `${row.livechat_id ?? "row"}-${index}`
 
-const groupedUnmapped = (rows: PreviewRow[]) => {
+const isUnmappedSiteSkip = (row: PreviewRow) =>
+  row.action === "skip" &&
+  row.group != null &&
+  /not a SupportChat (site|website)/i.test(row.reason || "")
+
+const isMappableRow = (row: PreviewRow) =>
+  row.group != null && (row.action !== "skip" || isUnmappedSiteSkip(row))
+
+const isHardSkip = (row: PreviewRow) => row.action === "skip" && !isUnmappedSiteSkip(row)
+
+const livechatGroupName = (group: number, rows: PreviewRow[]) =>
+  rows[0]?.group_name || LIVECHAT_GROUPS[group]?.name || `group ${group}`
+
+const livechatGroupWebsite = (group: number, rows: PreviewRow[]) =>
+  rows[0]?.livechat_website || LIVECHAT_GROUPS[group]?.website || null
+
+const groupedImportGroups = (rows: PreviewRow[]) => {
   const groups = new Map<number, PreviewRow[]>()
   for (const row of rows) {
-    if (row.action !== "unmapped" || row.group == null) continue
+    if (!isMappableRow(row) || row.group == null) continue
     const current = groups.get(row.group) ?? []
     current.push(row)
     groups.set(row.group, current)
   }
-  return [...groups.entries()]
+  return [...groups.entries()].toSorted((left, right) => left[0] - right[0])
+}
+
+const suggestedTarget = (group: number, rows: PreviewRow[]): GroupTarget | null => {
+  if (group === 0) return "general"
+  return rows.find((row) => row.site_id)?.site_id ?? null
+}
+
+const initialGroupTargets = (rows: PreviewRow[]) => {
+  const targets: Record<number, GroupTarget> = {}
+  for (const [group, groupRows] of groupedImportGroups(rows)) {
+    const suggested = suggestedTarget(group, groupRows)
+    if (suggested) targets[group] = suggested
+  }
+  return targets
 }
 
 const updateIds = (rows: PreviewRow[]) =>
@@ -78,9 +227,8 @@ const discardIdsFor = (
       discardIds.push(row.livechat_id)
       continue
     }
-    if (row.action !== "unmapped" || row.group == null) continue
-    const target = groupTargets[row.group]
-    if (target === "discard" || target == null) discardIds.push(row.livechat_id)
+    if (row.group == null) continue
+    if (groupTargets[row.group] === "discard") discardIds.push(row.livechat_id)
   }
   return discardIds
 }
@@ -103,17 +251,17 @@ const buildDecisions = (
   remap_groups: remapGroupsFor(groupTargets),
 })
 
-const pendingUnmappedLabel = (
-  groups: [number, PreviewRow[]][],
-  groupTargets: Record<number, GroupTarget>,
-) => {
-  const pending = groups.find(([group]) => groupTargets[group] == null)
-  if (!pending) return ""
-  const name = pending[1][0]?.group_name
+const unmappedGroupLabel = (group: number, rows: PreviewRow[]) => {
+  const name = rows[0]?.group_name
   return name
     ? `Choose a website for ${name}, or discard those responses.`
-    : `Choose a website for LiveChat group ${pending[0]}, or discard those responses.`
+    : `Choose a website for LiveChat group ${group}, or discard those responses.`
 }
+
+const hasPendingUnmapped = (
+  groups: [number, PreviewRow[]][],
+  groupTargets: Record<number, GroupTarget>,
+) => groups.some(([group]) => groupTargets[group] == null)
 
 // oxlint-disable-next-line eslint/max-lines-per-function -- Preview, remap, and commit stay in one hook so the file is not re-selected between steps.
 const useImportDialog = ({
@@ -170,7 +318,7 @@ const useImportDialog = ({
         const payload = (await response.json()) as PreviewPayload
         setPreview(payload)
         setSelected(new Set(updateIds(payload.rows)))
-        setGroupTargets({})
+        setGroupTargets(initialGroupTargets(payload.rows))
       } catch {
         setError("The file could not be read. Try again.")
       } finally {
@@ -179,11 +327,7 @@ const useImportDialog = ({
     },
     handleImport: async () => {
       if (!file || !preview || busy) return
-      const pending = pendingUnmappedLabel(groupedUnmapped(preview.rows), groupTargets)
-      if (pending) {
-        setError(pending)
-        return
-      }
+      if (hasPendingUnmapped(groupedImportGroups(preview.rows), groupTargets)) return
       setBusy(true)
       setError("")
       try {
@@ -204,8 +348,108 @@ const useImportDialog = ({
         setBusy(false)
       }
     },
+    canImport:
+      !!preview && !busy && !hasPendingUnmapped(groupedImportGroups(preview.rows), groupTargets),
   }
 }
+
+const ImportFilePicker = ({
+  file,
+  compact,
+  onFile,
+}: {
+  file: File | null
+  compact: boolean
+  onFile: (event: ChangeEvent<HTMLInputElement>) => void
+}) => (
+  <label
+    className={`text-ink flex cursor-pointer flex-col items-center justify-center gap-2 px-4 text-center text-sm font-medium ${
+      compact ? "py-4" : "min-h-0 flex-1 py-10"
+    }`}
+  >
+    <span>CSV file</span>
+    <input
+      type="file"
+      accept=".csv,text/csv"
+      onChange={onFile}
+      aria-label="LiveChat canned responses CSV"
+      className="peer sr-only"
+    />
+    <span className="border-line bg-paper text-navy peer-focus-visible:ring-steel rounded-[8px] border px-4 py-1.5 text-xs font-bold peer-focus-visible:ring-2">
+      {file ? "Choose a different file" : "Choose file"}
+    </span>
+    <span className="text-mute max-w-full truncate text-xs font-normal">
+      {file ? file.name : "No file chosen"}
+    </span>
+  </label>
+)
+
+const ImportDialogActions = ({
+  previewReady,
+  canImport,
+  busy,
+  hasFile,
+  onClose,
+  onPreview,
+  onImport,
+}: {
+  previewReady: boolean
+  canImport: boolean
+  busy: boolean
+  hasFile: boolean
+  onClose: () => void
+  onPreview: () => void
+  onImport: () => void
+}) => (
+  <DialogFooter className="relative flex-row items-center justify-end gap-2 pe-11">
+    <Button type="button" variant="outline" onClick={onClose}>
+      Cancel
+    </Button>
+    {previewReady ? (
+      <Button variant="default" disabled={!canImport} onClick={onImport}>
+        {busy ? <Spinner data-icon="inline-start" /> : null}
+        {busy ? "Importing…" : "Import responses"}
+      </Button>
+    ) : (
+      <Button variant="default" disabled={!hasFile || busy} onClick={onPreview}>
+        {busy ? <Spinner data-icon="inline-start" /> : null}
+        {busy ? "Reading…" : "Preview"}
+      </Button>
+    )}
+  </DialogFooter>
+)
+
+const ImportResizeHandle = ({
+  onPointerDown,
+  onKeyDown,
+  onReset,
+}: {
+  onPointerDown: (event: PointerEvent<HTMLButtonElement>) => void
+  onKeyDown: (event: KeyboardEvent<HTMLButtonElement>) => void
+  onReset: () => void
+}) => (
+  <button
+    type="button"
+    aria-label="Resize dialog"
+    title="Drag to resize. Aspect ratio stays locked. Arrow keys adjust. Double-click resets."
+    onPointerDown={onPointerDown}
+    onKeyDown={onKeyDown}
+    onDoubleClick={onReset}
+    className="text-mute hover:text-ink focus-visible:text-steel absolute right-1.5 bottom-1.5 z-30 grid size-6 cursor-se-resize touch-none place-items-center rounded-none bg-transparent transition-colors duration-150 outline-none"
+  >
+    <svg
+      aria-hidden="true"
+      viewBox="0 0 16 16"
+      className="size-4 stroke-current"
+      fill="none"
+      strokeWidth="1.5"
+      strokeLinecap="round"
+    >
+      <path d="M14 4 L4 14" />
+      <path d="M14 9 L9 14" />
+    </svg>
+  </button>
+)
 
 export const ImportDialog = ({
   open,
@@ -219,6 +463,7 @@ export const ImportDialog = ({
   sites: SiteOption[]
 }) => {
   const dialog = useImportDialog({ onClose, onImported })
+  const resize = useImportDialogSize()
   return (
     <Dialog
       open={open}
@@ -226,25 +471,23 @@ export const ImportDialog = ({
         if (!next) dialog.handleClose()
       }}
     >
-      <DialogContent className="max-h-[min(92vh,56rem)] max-w-3xl">
+      <DialogContent
+        className="h-auto max-h-none w-auto max-w-none"
+        style={{ width: resize.size.width, height: resize.size.height }}
+      >
         <DialogHeader>
           <DialogTitle>Import LiveChat canned responses</DialogTitle>
           <DialogDescription>
-            Choose a LiveChat canned responses CSV. Preview the rows, then import them into this
-            library.
+            Choose a LiveChat canned responses CSV. Preview the rows, map each LiveChat website to
+            one we host, then import them into this library.
           </DialogDescription>
         </DialogHeader>
-        <DialogResizeSection className="flex min-h-0 flex-col gap-3 px-5 py-3">
-          <label className="text-ink flex flex-col gap-1.5 text-sm font-medium">
-            CSV file
-            <input
-              type="file"
-              accept=".csv,text/csv"
-              onChange={dialog.handleFile}
-              aria-label="LiveChat canned responses CSV"
-              className="text-ink file:border-line file:bg-ice file:text-navy text-sm file:mr-3 file:rounded-[8px] file:border file:px-3 file:py-1.5 file:text-xs file:font-bold"
-            />
-          </label>
+        <div className="flex min-h-0 flex-1 scrollbar-gutter-stable flex-col gap-3 overflow-y-auto px-5 py-3 pr-4">
+          <ImportFilePicker
+            file={dialog.file}
+            compact={!!dialog.preview}
+            onFile={dialog.handleFile}
+          />
           {dialog.preview ? (
             <PreviewBody
               preview={dialog.preview}
@@ -258,31 +501,21 @@ export const ImportDialog = ({
             />
           ) : null}
           {dialog.error ? <p className="text-ember text-sm">{dialog.error}</p> : null}
-        </DialogResizeSection>
-        <DialogFooter className="flex-row items-center justify-end gap-2">
-          <Button type="button" variant="outline" onClick={dialog.handleClose}>
-            Cancel
-          </Button>
-          {dialog.preview ? (
-            <Button
-              variant="default"
-              disabled={dialog.busy}
-              onClick={() => void dialog.handleImport()}
-            >
-              {dialog.busy ? <Spinner data-icon="inline-start" /> : null}
-              {dialog.busy ? "Importing…" : "Import responses"}
-            </Button>
-          ) : (
-            <Button
-              variant="default"
-              disabled={!dialog.file || dialog.busy}
-              onClick={() => void dialog.handlePreview()}
-            >
-              {dialog.busy ? <Spinner data-icon="inline-start" /> : null}
-              {dialog.busy ? "Reading…" : "Preview"}
-            </Button>
-          )}
-        </DialogFooter>
+        </div>
+        <ImportDialogActions
+          previewReady={!!dialog.preview}
+          canImport={dialog.canImport}
+          busy={dialog.busy}
+          hasFile={!!dialog.file}
+          onClose={dialog.handleClose}
+          onPreview={() => void dialog.handlePreview()}
+          onImport={() => void dialog.handleImport()}
+        />
+        <ImportResizeHandle
+          onPointerDown={resize.handlePointerDown}
+          onKeyDown={resize.handleKeyDown}
+          onReset={resize.resetSize}
+        />
       </DialogContent>
     </Dialog>
   )
@@ -304,16 +537,14 @@ const PreviewBody = ({
   onSelected: (next: Set<number>) => void
   onGroupTarget: (group: number, target: GroupTarget) => void
 }) => {
-  const creates = preview.rows.filter((row) => row.action === "create" && row.bot_eligible)
-  const disabled = preview.rows.filter((row) => row.action === "create" && !row.bot_eligible)
   const updates = preview.rows.filter((row) => row.action === "update")
   const unchanged = preview.rows.filter((row) => row.action === "unchanged")
-  const skipped = preview.rows.filter((row) => row.action === "skip")
-  const unmapped = groupedUnmapped(preview.rows)
+  const skipped = preview.rows.filter(isHardSkip)
+  const groups = groupedImportGroups(preview.rows)
   const ids = updateIds(preview.rows)
   return (
-    <div className="flex max-h-[min(32rem,58vh)] min-h-0 flex-col gap-3 overflow-y-auto pr-1">
-      {unmapped.map(([group, rows]) => (
+    <div className="flex min-h-0 flex-1 flex-col gap-3">
+      {groups.map(([group, rows]) => (
         <UnmappedGroup
           key={group}
           group={group}
@@ -325,30 +556,6 @@ const PreviewBody = ({
       ))}
       {updates.length > 0 ? (
         <DuplicateList rows={updates} selected={selected} allIds={ids} onSelected={onSelected} />
-      ) : null}
-      {disabled.length > 0 ? (
-        <PreviewSection title="Not available to the bot">
-          {disabled.map((row, index) => (
-            <PreviewItem
-              key={rowKey(row, index)}
-              title={row.shortcut ? `#${row.shortcut}` : "Canned response"}
-              detail={row.disable_reason || "Staff only."}
-              excerpt={row.excerpt}
-            />
-          ))}
-        </PreviewSection>
-      ) : null}
-      {creates.length > 0 ? (
-        <PreviewSection title={`${creates.length} new responses`}>
-          {creates.map((row, index) => (
-            <PreviewItem
-              key={rowKey(row, index)}
-              title={row.shortcut ? `#${row.shortcut}` : "Canned response"}
-              detail={row.group_name || "Ready to import."}
-              excerpt={row.excerpt}
-            />
-          ))}
-        </PreviewSection>
       ) : null}
       {unchanged.length > 0 ? (
         <p className="text-mute text-xs">{unchanged.length} already in the library, no changes.</p>
@@ -369,11 +576,69 @@ const PreviewBody = ({
   )
 }
 
-const unmappedHeading = (group: number, rows: PreviewRow[]) => {
-  if (rows[0]?.reason) return rows[0].reason
-  const name = rows[0]?.group_name
-  if (name) return `The LiveChat group ${group} is ${name}, which is not a SupportChat site.`
-  return `The LiveChat group ${group} is not a SupportChat site.`
+const groupHeading = (group: number, rows: PreviewRow[]) => {
+  const name = livechatGroupName(group, rows)
+  return `LiveChat group ${group} · ${name}`
+}
+
+const AgentDisabledPill = () => (
+  <span className="bg-ice-2 text-mute inline-flex shrink-0 rounded-[8px] px-1.5 py-0.5 text-[10px] font-semibold tracking-wide uppercase">
+    Agent Disabled
+  </span>
+)
+
+const GroupMapCopy = ({ rows }: { rows: PreviewRow[] }) => (
+  <ul className="divide-line border-line bg-paper mt-3 max-h-72 divide-y overflow-y-auto rounded-[8px] border">
+    {rows.map((row, index) => (
+      <li key={rowKey(row, index)} className="px-3 py-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <p className="text-ink text-sm font-medium">
+            {row.shortcut ? `#${row.shortcut}` : "Canned response"}
+          </p>
+          {row.bot_eligible ? null : <AgentDisabledPill />}
+        </div>
+        {row.excerpt ? <p className="text-mute mt-0.5 text-xs">{row.excerpt}</p> : null}
+      </li>
+    ))}
+  </ul>
+)
+
+const GroupMapTarget = ({
+  group,
+  name,
+  selectValue,
+  onTarget,
+  sites,
+}: {
+  group: number
+  name: string
+  selectValue: string | null
+  onTarget: (target: GroupTarget) => void
+  sites: SiteOption[]
+}) => {
+  const selectId = `import-group-${group}-site`
+  return (
+    <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-end">
+      <label
+        htmlFor={selectId}
+        className="text-ink flex min-w-0 flex-1 flex-col gap-1.5 text-xs font-medium"
+      >
+        Add {name} responses to
+        <CannedResponseSelect
+          id={selectId}
+          value={selectValue}
+          onValueChange={(value) => {
+            if (value) onTarget(value)
+          }}
+          items={scopeOptions(sites)}
+          label={`Add ${name} responses to`}
+        />
+      </label>
+      <Button type="button" variant="outline" onClick={() => onTarget("discard")}>
+        Discard {name} responses
+      </Button>
+    </div>
+  )
 }
 
 const UnmappedGroup = ({
@@ -389,47 +654,31 @@ const UnmappedGroup = ({
   target: GroupTarget | null
   onTarget: (target: GroupTarget) => void
 }) => {
-  const name = rows[0]?.group_name
-  const selectId = `import-group-${group}-site`
+  const name = livechatGroupName(group, rows)
+  const website = livechatGroupWebsite(group, rows)
   const discarded = target === "discard"
   const selectValue = discarded || target == null ? null : target
   return (
     <section className="border-line bg-ice rounded-[8px] border p-3">
-      <p className="text-navy text-sm font-semibold">{unmappedHeading(group, rows)}</p>
+      <p className="text-navy text-sm font-semibold">{groupHeading(group, rows)}</p>
+      {website ? <p className="text-mute mt-0.5 font-mono text-xs">{website}</p> : null}
       <p className="text-mute mt-1 text-xs">Add these to a website we host, or discard them.</p>
-      <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-end">
-        <label
-          htmlFor={selectId}
-          className="text-ink flex min-w-0 flex-1 flex-col gap-1.5 text-xs font-medium"
-        >
-          Add {name || `group ${group}`} responses to
-          <CannedResponseSelect
-            id={selectId}
-            value={selectValue}
-            onValueChange={(value) => {
-              if (value) onTarget(value)
-            }}
-            items={scopeOptions(sites)}
-            label={`Add ${name || `group ${group}`} responses to`}
-          />
-        </label>
-        <Button type="button" variant="outline" onClick={() => onTarget("discard")}>
-          Discard {name || `group ${group}`} responses
-        </Button>
-      </div>
+      <GroupMapTarget
+        group={group}
+        name={name}
+        selectValue={selectValue}
+        onTarget={onTarget}
+        sites={sites}
+      />
+      {target == null ? (
+        <p className="text-ember mt-2 text-xs" role="alert">
+          {unmappedGroupLabel(group, rows)}
+        </p>
+      ) : null}
       {discarded ? (
         <p className="text-mute mt-2 text-xs">These responses will not be imported.</p>
       ) : null}
-      <ul className="divide-line border-line bg-paper mt-3 max-h-40 divide-y overflow-y-auto rounded-[8px] border">
-        {rows.map((row, index) => (
-          <li key={rowKey(row, index)} className="px-3 py-2">
-            <p className="text-ink text-sm font-medium">
-              {row.shortcut ? `#${row.shortcut}` : "Canned response"}
-            </p>
-            <p className="text-mute mt-0.5 text-xs">{row.excerpt}</p>
-          </li>
-        ))}
-      </ul>
+      <GroupMapCopy rows={rows} />
     </section>
   )
 }
