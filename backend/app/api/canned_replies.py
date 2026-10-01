@@ -2,12 +2,13 @@ from datetime import datetime
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, HTTPException, Query, status
-from pydantic import BaseModel, ConfigDict
+from fastapi import APIRouter, File, Form, HTTPException, Query, UploadFile, status
+from pydantic import BaseModel, ConfigDict, Field
 
 from app.db import SessionDep
 from app.models.canned_reply import CannedReply
-from app.security.deps import CurrentUser
+from app.security.deps import CurrentAdmin, CurrentUser
+from app.services.canned_import import BODY_MAX, ImportPlanRow
 from app.services.canned_reply_service import CannedReplyError, CannedReplyService
 
 router = APIRouter()
@@ -20,6 +21,8 @@ class CannedReplyCreateIn(BaseModel):
     shortcut: str
     body: str
     enabled: bool = True
+    aliases: list[str] = Field(default_factory=list)
+    bot_eligible: bool = True
 
 
 class CannedReplyPatchIn(BaseModel):
@@ -29,6 +32,8 @@ class CannedReplyPatchIn(BaseModel):
     shortcut: str | None = None
     body: str | None = None
     enabled: bool | None = None
+    aliases: list[str] | None = None
+    bot_eligible: bool | None = None
 
 
 class CannedReplyOut(BaseModel):
@@ -39,6 +44,10 @@ class CannedReplyOut(BaseModel):
     shortcut: str
     body: str
     enabled: bool
+    aliases: list[str]
+    external_id: int | None
+    suggestion_event: str | None
+    bot_eligible: bool
     created_at: datetime
     updated_at: datetime
 
@@ -51,10 +60,43 @@ class EffectiveCannedReplyOut(BaseModel):
     shortcut: str
     body: str
     scope: str
+    aliases: list[str]
 
 
 class CannedReplyListOut(BaseModel):
     items: list[EffectiveCannedReplyOut]
+
+
+class CannedImportRowOut(BaseModel):
+    action: str
+    reason: str | None
+    livechat_id: int | None
+    group: int | None
+    group_name: str | None
+    shortcut: str
+    aliases: list[str]
+    bot_eligible: bool
+    disable_reason: str | None
+    suggestion_event: str | None
+    excerpt: str
+
+
+class ImportDecisionsIn(BaseModel):
+    discard_ids: list[int] = Field(default_factory=list)
+    remap_groups: dict[str, UUID | None] = Field(default_factory=dict)
+
+
+class CannedImportPreviewOut(BaseModel):
+    created: int
+    updated: int
+    skipped: int
+    rows: list[CannedImportRowOut]
+
+
+class CannedImportCommitOut(BaseModel):
+    created: int
+    updated: int
+    skipped: int
 
 
 def _http_error(exc: CannedReplyError) -> HTTPException:
@@ -77,14 +119,42 @@ def _http_error(exc: CannedReplyError) -> HTTPException:
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail="Shortcut must be 1-40 lowercase letters, numbers, underscores, or hyphens.",
         )
+    if exc.code == "invalid_csv":
+        return HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="Upload a LiveChat canned-response CSV with id, text, tags, and group columns.",
+        )
     return HTTPException(
         status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-        detail="Message must contain between 1 and 4,000 characters.",
+        detail=f"Message must contain between 1 and {BODY_MAX:,} characters.",
     )
 
 
 def _out(reply: CannedReply) -> CannedReplyOut:
     return CannedReplyOut.model_validate(reply)
+
+
+def _preview_row(row: ImportPlanRow) -> CannedImportRowOut:
+    return CannedImportRowOut(
+        action=row.action,
+        reason=row.reason,
+        livechat_id=row.livechat_id,
+        group=row.group,
+        group_name=row.group_name,
+        shortcut=row.shortcut,
+        aliases=list(row.aliases),
+        bot_eligible=row.bot_eligible,
+        disable_reason=row.disable_reason,
+        suggestion_event=row.suggestion_event,
+        excerpt=row.excerpt,
+    )
+
+
+async def _read_csv(file: UploadFile) -> bytes:
+    raw = await file.read()
+    if not raw:
+        raise CannedReplyError("invalid_csv")
+    return raw
 
 
 @router.get("/api/canned-replies", response_model=CannedReplyListOut)
@@ -103,6 +173,7 @@ async def list_canned_replies(
                 shortcut=row.shortcut,
                 body=row.body,
                 scope="general" if row.site_id is None else "website",
+                aliases=list(row.aliases or []),
             )
             for row in rows
         ]
@@ -115,6 +186,58 @@ async def list_canned_reply_library(
 ) -> CannedReplyLibraryOut:
     rows = await CannedReplyService(session).list_library()
     return CannedReplyLibraryOut(items=[_out(row) for row in rows])
+
+
+@router.post("/api/canned-replies/import/preview", response_model=CannedImportPreviewOut)
+async def preview_canned_import(
+    session: SessionDep,
+    _admin: CurrentAdmin,
+    file: Annotated[UploadFile, File()],
+) -> CannedImportPreviewOut:
+    try:
+        rows = await CannedReplyService(session).preview_import(await _read_csv(file))
+    except CannedReplyError as exc:
+        raise _http_error(exc) from exc
+    return CannedImportPreviewOut(
+        created=sum(row.action == "create" for row in rows),
+        updated=sum(row.action == "update" for row in rows),
+        skipped=sum(row.action == "skip" for row in rows),
+        rows=[_preview_row(row) for row in rows],
+    )
+
+
+def _parse_decisions(raw: str | None) -> tuple[set[int], dict[int, UUID | None]]:
+    if not raw:
+        return set(), {}
+    try:
+        parsed = ImportDecisionsIn.model_validate_json(raw)
+    except ValueError as exc:
+        raise CannedReplyError("invalid_csv") from exc
+    remaps: dict[int, UUID | None] = {}
+    for key, site_id in parsed.remap_groups.items():
+        if not key.isdigit():
+            raise CannedReplyError("invalid_csv")
+        remaps[int(key)] = site_id
+    return set(parsed.discard_ids), remaps
+
+
+@router.post("/api/canned-replies/import", response_model=CannedImportCommitOut)
+async def commit_canned_import(
+    session: SessionDep,
+    _admin: CurrentAdmin,
+    file: Annotated[UploadFile, File()],
+    decisions: Annotated[str | None, Form()] = None,
+) -> CannedImportCommitOut:
+    try:
+        discard_ids, remap_groups = _parse_decisions(decisions)
+        counts = await CannedReplyService(session).commit_import(
+            await _read_csv(file),
+            discard_ids=discard_ids,
+            remap_groups=remap_groups,
+        )
+    except CannedReplyError as exc:
+        raise _http_error(exc) from exc
+    return CannedImportCommitOut(**counts)
 
 
 @router.post(

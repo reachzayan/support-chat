@@ -90,7 +90,12 @@ def test_non_admin_staff_manages_website_responses_and_cannot_create_global(
     )
     assert easy.status_code == 200
     assert easy.json()["items"] == [
-        {"shortcut": "privacy", "body": "Please review our privacy notice.", "scope": "general"}
+        {
+            "shortcut": "privacy",
+            "body": "Please review our privacy notice.",
+            "scope": "general",
+            "aliases": [],
+        }
     ]
     assert background.status_code == 200
     assert background.json()["items"] == [
@@ -98,8 +103,14 @@ def test_non_admin_staff_manages_website_responses_and_cannot_create_global(
             "shortcut": "hours",
             "body": "Most negative results are reported within 24-48 hours.",
             "scope": "general",
+            "aliases": [],
         },
-        {"shortcut": "privacy", "body": "Please review our privacy notice.", "scope": "general"},
+        {
+            "shortcut": "privacy",
+            "body": "Please review our privacy notice.",
+            "scope": "general",
+            "aliases": [],
+        },
     ]
 
     library = client.get("/api/canned-replies/library", headers=_auth(staff))
