@@ -24,5 +24,5 @@ export const readDemoWidgetConfig = () => {
 const scriptJson = (value: string) => JSON.stringify(value).replaceAll("<", "\\u003c")
 
 export const embedConfigMarkup = (siteKey: string, publicKey: string) => ({
-  __html: `window.__supportchat = { siteKey: ${scriptJson(siteKey)}, publicKey: ${scriptJson(publicKey)} }`,
+  __html: `window.__supportchat = { siteKey: ${scriptJson(siteKey)}, publicKey: ${scriptJson(publicKey)} };`,
 })
