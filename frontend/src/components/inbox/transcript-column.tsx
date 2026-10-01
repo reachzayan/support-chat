@@ -2,6 +2,7 @@
 
 import { ArrowLeftRight, CheckCircle2, LogOut, UserPlus } from "lucide-react"
 import { motion } from "motion/react"
+import { useMemo } from "react"
 
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
@@ -30,6 +31,9 @@ type TranscriptColumnProps = {
   canned: CannedReply[]
   inputId: string
   conversationId: string
+  visitorEmail: string | null
+  staffName: string
+  staffEmail: string
   escalationReason: string | null
   isAdmin: boolean
   onJoin: () => void
@@ -208,6 +212,15 @@ export const TranscriptColumn = (props: TranscriptColumnProps) => {
     lines,
     onSend,
   } = props
+  const cannedVariables = useMemo(
+    () => ({
+      customerName: visitorName === "Unknown visitor" ? "" : visitorName,
+      customerEmail: props.visitorEmail,
+      agentName: props.staffName,
+      agentEmail: props.staffEmail,
+    }),
+    [props.staffEmail, props.staffName, props.visitorEmail, visitorName],
+  )
 
   return (
     <section className="bg-paper flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
@@ -250,6 +263,7 @@ export const TranscriptColumn = (props: TranscriptColumnProps) => {
         closed={closed}
         canned={canned}
         inputId={inputId}
+        variables={cannedVariables}
         onSend={onSend}
       />
     </section>

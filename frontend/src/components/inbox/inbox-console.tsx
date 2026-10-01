@@ -14,7 +14,7 @@ type InboxConsoleProps = {
 
 export const InboxConsole = ({ user }: InboxConsoleProps) => {
   const inbox = useInboxLive(user.id)
-  return <InboxShell userId={user.id} isAdmin={user.is_admin} inbox={inbox} />
+  return <InboxShell user={user} inbox={inbox} />
 }
 
 type LiveSlice = ReturnType<typeof useInboxLive>["live"]
@@ -45,12 +45,13 @@ const otherAgentName = (live: LiveSlice, mine: boolean) => {
 }
 
 type InboxShellProps = {
-  userId: string
-  isAdmin: boolean
+  user: StaffUser
   inbox: ReturnType<typeof useInboxLive>
 }
 
-const InboxShell = ({ userId, isAdmin, inbox }: InboxShellProps) => {
+const InboxShell = ({ user, inbox }: InboxShellProps) => {
+  const userId = user.id
+  const isAdmin = user.is_admin
   const mine = isAssignedTo(inbox.live, userId)
   const detail = inbox.live.detail
   return (
@@ -91,6 +92,9 @@ const InboxShell = ({ userId, isAdmin, inbox }: InboxShellProps) => {
               canned={inbox.canned}
               inputId={`inbox-message-${userId}`}
               conversationId={detail.id}
+              visitorEmail={detail.visitor.email}
+              staffName={user.display_name}
+              staffEmail={user.email}
               escalationReason={detail.escalation_reason ?? null}
               isAdmin={isAdmin}
               onJoin={inbox.handleJoin}
