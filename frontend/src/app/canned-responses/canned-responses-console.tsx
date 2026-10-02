@@ -28,7 +28,12 @@ import {
   ResponseCard,
   ResponseRow,
 } from "./canned-response-list"
-import { CannedResponseSelect, scopeOptions, statusOptions } from "./canned-response-select"
+import {
+  botOptions,
+  CannedResponseSelect,
+  scopeOptions,
+  statusOptions,
+} from "./canned-response-select"
 import { useCannedResponsesState } from "./use-canned-responses-state"
 
 // oxlint-disable-next-line eslint/max-lines-per-function, eslint/complexity -- Compose the library controls, list, and edit dialogs.
@@ -99,7 +104,7 @@ export const CannedResponsesConsole = () => {
         className="flex min-h-0 min-w-0 flex-1 flex-col gap-4 overflow-hidden px-5 py-6 lg:px-8 lg:py-8"
       >
         <section className="border-line bg-paper shrink-0 rounded-xl border p-4 sm:p-5">
-          <div className="grid gap-3 lg:grid-cols-[minmax(15rem,0.8fr)_minmax(18rem,1.2fr)_10rem]">
+          <div className="grid gap-3 lg:grid-cols-[minmax(15rem,0.8fr)_minmax(18rem,1.2fr)_10rem_11rem]">
             <div className="text-ink flex flex-col gap-1.5 text-xs font-medium">
               <span>Scope</span>
               <CannedResponseSelect
@@ -134,6 +139,15 @@ export const CannedResponsesConsole = () => {
                 label="Status"
               />
             </div>
+            <div className="text-ink flex flex-col gap-1.5 text-xs font-medium">
+              <span>Assistant</span>
+              <CannedResponseSelect
+                value={state.bot}
+                onValueChange={state.updateBot}
+                items={botOptions}
+                label="Assistant"
+              />
+            </div>
           </div>
           <p className="text-mute mt-4 text-xs" aria-live="polite">
             {state.summary}
@@ -147,7 +161,7 @@ export const CannedResponsesConsole = () => {
         </section>
 
         {state.visible.length === 0 ? (
-          state.query.trim() || state.status !== "all" ? (
+          state.query.trim() || state.status !== "all" || state.bot !== "all" ? (
             <section className="border-line bg-paper rounded-xl border p-8 text-center">
               <p className="text-navy heading text-base">
                 {state.query.trim()
@@ -183,6 +197,7 @@ export const CannedResponsesConsole = () => {
                     <th className="px-5 py-3 font-semibold">Shortcut</th>
                     <th className="px-5 py-3 font-semibold">Message</th>
                     <th className="px-5 py-3 font-semibold">Status</th>
+                    <th className="px-5 py-3 font-semibold">Assistant</th>
                     <th className="px-5 py-3 font-semibold">Updated</th>
                     <th className="px-5 py-3 font-semibold">
                       <span className="sr-only">Actions</span>
@@ -234,6 +249,7 @@ export const CannedResponsesConsole = () => {
       </p>
       <ResponseForm
         form={state.form}
+        records={records}
         sites={state.sites}
         formError={state.formError}
         submitting={state.submitting}

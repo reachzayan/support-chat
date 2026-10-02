@@ -74,6 +74,8 @@ class ResponseDecision:
     provider_status: ProviderStatus = ProviderStatus.NOT_USED
     request_id: str | None = None
     display_locator: str | None = None
+    # When set, a specialist is asked to take the chat right after this reply is stored.
+    handoff_reason: str | None = None
 
 
 @dataclass(frozen=True)

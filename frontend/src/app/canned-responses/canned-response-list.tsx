@@ -10,9 +10,12 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { Switch } from "@/components/ui/switch"
 
 import {
+  botState,
+  followsLabel,
   formatDate,
   scopeLabel,
   statusClass,
+  type BotState,
   type CannedReplyRecord,
   type Scope,
 } from "./canned-response-model"
@@ -39,10 +42,14 @@ export const ResponseRow = ({
     <td className="max-w-md px-5 py-3">
       <p className="text-ink line-clamp-2">{record.body}</p>
       {overrideNote(record, scope, records)}
+      <RowMeta record={record} records={records} />
     </td>
     <td className="px-5 py-3">
       <ResponseToggle record={record} pending={pending} onToggle={onToggle} />
       {error ? <RetryError text={error} onRetry={() => void onToggle(record)} /> : null}
+    </td>
+    <td className="px-5 py-3">
+      <BotPill record={record} />
     </td>
     <td className="text-mute px-5 py-3 text-xs">{formatDate(record.updated_at)}</td>
     <td className="px-5 py-3">
@@ -95,6 +102,10 @@ export const ResponseCard = ({
         ) : null}
         <p className="text-ink mt-2 line-clamp-3 text-sm leading-6">{record.body}</p>
         {overrideNote(record, scope, records)}
+        <RowMeta record={record} records={records} />
+        <div className="mt-2">
+          <BotPill record={record} />
+        </div>
       </div>
       <ResponseToggle record={record} pending={pending} onToggle={onToggle} stacked />
     </div>
@@ -112,6 +123,47 @@ export const ResponseCard = ({
     {error ? <RetryError text={error} onRetry={() => void onToggle(record)} /> : null}
   </article>
 )
+
+const BOT_PILL: Record<BotState, { label: string; className: string }> = {
+  available: {
+    label: "Assistant",
+    className: "bg-[#E8F5EE] text-[#247A4D] dark:bg-[#163627] dark:text-[#8DDEAE]",
+  },
+  staff: {
+    label: "Staff only",
+    className: "bg-ice-2 text-mute dark:bg-white/10 dark:text-white/60",
+  },
+  blocked: { label: "Blocked", className: "bg-[#FCEBDD] text-ember dark:bg-[#3A2415]" },
+}
+
+export const BotPill = ({ record }: { record: CannedReplyRecord }) => {
+  const state = botState(record)
+  return (
+    <div>
+      <Badge className={BOT_PILL[state].className}>{BOT_PILL[state].label}</Badge>
+      {state === "blocked" ? (
+        <span className="text-mute mt-1 block max-w-52 text-xs">{record.bot_block_reason}</span>
+      ) : null}
+    </div>
+  )
+}
+
+const RowMeta = ({
+  record,
+  records,
+}: {
+  record: CannedReplyRecord
+  records: CannedReplyRecord[]
+}) => {
+  const follows = followsLabel(record, records)
+  if (!follows && !record.hands_off) return null
+  return (
+    <p className="text-mute mt-1 flex flex-wrap gap-x-3 text-xs">
+      {follows ? <span>{follows}</span> : null}
+      {record.hands_off ? <span>Connects a specialist</span> : null}
+    </p>
+  )
+}
 
 const overrideNote = (record: CannedReplyRecord, scope: Scope, records: CannedReplyRecord[]) =>
   scope !== "general" &&

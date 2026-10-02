@@ -8,7 +8,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from app.db import SessionDep
 from app.models.canned_reply import CannedReply
 from app.security.deps import CurrentAdmin, CurrentUser
-from app.services.canned_import import BODY_MAX, ImportPlanRow
+from app.services.canned_import import BODY_MAX, ImportPlanRow, bot_block_reason
 from app.services.canned_reply_service import CannedReplyError, CannedReplyService
 
 router = APIRouter()
@@ -23,6 +23,8 @@ class CannedReplyCreateIn(BaseModel):
     enabled: bool = True
     aliases: list[str] = Field(default_factory=list)
     bot_eligible: bool = True
+    follows_id: UUID | None = None
+    hands_off: bool = False
 
 
 class CannedReplyPatchIn(BaseModel):
@@ -34,6 +36,8 @@ class CannedReplyPatchIn(BaseModel):
     enabled: bool | None = None
     aliases: list[str] | None = None
     bot_eligible: bool | None = None
+    follows_id: UUID | None = None
+    hands_off: bool | None = None
 
 
 class CannedReplyOut(BaseModel):
@@ -48,6 +52,10 @@ class CannedReplyOut(BaseModel):
     external_id: int | None
     suggestion_event: str | None
     bot_eligible: bool
+    follows_id: UUID | None
+    hands_off: bool
+    # Set when the row is switched on but the bot still cannot use its wording.
+    bot_block_reason: str | None = None
     created_at: datetime
     updated_at: datetime
 
@@ -121,6 +129,11 @@ def _http_error(exc: CannedReplyError) -> HTTPException:
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail="Shortcut must be 1-40 lowercase letters, numbers, underscores, or hyphens.",
         )
+    if exc.code == "invalid_follows":
+        return HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="Choose a different response from General or this website to follow.",
+        )
     if exc.code == "unmapped_group":
         return HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
@@ -138,7 +151,9 @@ def _http_error(exc: CannedReplyError) -> HTTPException:
 
 
 def _out(reply: CannedReply) -> CannedReplyOut:
-    return CannedReplyOut.model_validate(reply)
+    out = CannedReplyOut.model_validate(reply)
+    out.bot_block_reason = bot_block_reason(reply.body)
+    return out
 
 
 def _preview_row(row: ImportPlanRow) -> CannedImportRowOut:

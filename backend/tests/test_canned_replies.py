@@ -191,3 +191,96 @@ def test_canned_response_management_requires_authenticated_staff(client: TestCli
     denied = client.get("/api/canned-replies/library")
     assert denied.status_code == 401
     assert denied.json()["detail"] == "Not authenticated"
+
+
+def _create(client: TestClient, token: str, **fields) -> dict:
+    response = client.post("/api/canned-replies", headers=_auth(token), json=fields)
+    return {"status": response.status_code, "body": response.json()}
+
+
+def test_a_follow_up_can_only_follow_wording_in_its_own_scope(client: TestClient) -> None:
+    """Catches one website's script being chained to another website's question."""
+    easy_id = insert_site("samplesite", "SampleSite", EASY_PUBLIC_KEY, [HOST_ORIGIN])
+    background_id = insert_site(
+        "backgroundchecks", "Sample Services", BG_PUBLIC_KEY, [HOST_ORIGIN]
+    )
+    insert_staff(ALEX_EMAIL, ALEX_NAME, ALEX_PASSWORD)
+    staff = login_staff(client)
+    question = _create(client, staff, site_id=str(easy_id), shortcut="der_what_is", body="DER?")
+    assert question["status"] == 201
+
+    same_site = _create(
+        client,
+        staff,
+        site_id=str(easy_id),
+        shortcut="der_yes",
+        body="Great.",
+        follows_id=question["body"]["id"],
+    )
+    other_site = _create(
+        client,
+        staff,
+        site_id=str(background_id),
+        shortcut="der_yes",
+        body="Great.",
+        follows_id=question["body"]["id"],
+    )
+    itself = client.patch(
+        f"/api/canned-replies/{question['body']['id']}",
+        headers=_auth(staff),
+        json={"follows_id": question["body"]["id"]},
+    )
+
+    assert same_site["status"] == 201
+    assert same_site["body"]["follows_id"] == question["body"]["id"]
+    assert other_site["status"] == 422
+    assert itself.status_code == 422
+
+
+def test_hands_off_is_saved_and_can_be_switched_off(client: TestClient) -> None:
+    """Catches the 'connect a specialist after sending' flag not surviving a save."""
+    easy_id = insert_site("samplesite", "SampleSite", EASY_PUBLIC_KEY, [HOST_ORIGIN])
+    insert_staff(ALEX_EMAIL, ALEX_NAME, ALEX_PASSWORD)
+    staff = login_staff(client)
+    created = _create(
+        client,
+        staff,
+        site_id=str(easy_id),
+        shortcut="interpretation",
+        body="We will route it.",
+        hands_off=True,
+    )
+    patched = client.patch(
+        f"/api/canned-replies/{created['body']['id']}",
+        headers=_auth(staff),
+        json={"hands_off": False},
+    )
+
+    assert created["body"]["hands_off"] is True
+    assert patched.json()["hands_off"] is False
+
+
+def test_library_says_why_the_bot_cannot_use_a_switched_on_row(client: TestClient) -> None:
+    """Catches 'Available to the bot' being on for a row the bot silently ignores."""
+    easy_id = insert_site("samplesite", "SampleSite", EASY_PUBLIC_KEY, [HOST_ORIGIN])
+    insert_staff(ALEX_EMAIL, ALEX_NAME, ALEX_PASSWORD)
+    staff = login_staff(client)
+    fill_in = _create(
+        client,
+        staff,
+        site_id=str(easy_id),
+        shortcut="dot_agency",
+        body="Under {DOTAgency} we will point you to the program.",
+        bot_eligible=True,
+    )
+    plain = _create(
+        client, staff, site_id=str(easy_id), shortcut="hours", body="Within 24-48 hours."
+    )
+    library = client.get("/api/canned-replies/library", headers=_auth(staff)).json()["items"]
+
+    assert fill_in["body"]["bot_block_reason"] == "Has fill-in fields — not available to the bot."
+    assert plain["body"]["bot_block_reason"] is None
+    assert {row["shortcut"]: row["bot_block_reason"] for row in library} == {
+        "dot_agency": "Has fill-in fields — not available to the bot.",
+        "hours": None,
+    }

@@ -20,6 +20,13 @@ export const statusOptions: SelectOption[] = [
   { value: "disabled", label: "Disabled" },
 ]
 
+export const botOptions: SelectOption[] = [
+  { value: "all", label: "All" },
+  { value: "available", label: "Assistant can use" },
+  { value: "staff", label: "Staff only" },
+  { value: "blocked", label: "Blocked" },
+]
+
 export const CannedResponseSelect = ({
   value,
   onValueChange,

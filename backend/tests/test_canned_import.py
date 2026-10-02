@@ -28,6 +28,32 @@ BG_CHECKS_BODY = "Background check packages start at $19.95."
 HOURS_BODY = "Most negative results are reported within 24-48 hours."
 UPDATED_HOURS = "SampleSite results are usually ready in one business day."
 DISCOUNT_BODY = "Use code 10BGC at checkout for 10 percent off sample services."
+DOT_AGENCY_BODY = "Since you are DOT-regulated under {DOTAgency}, we will point you to the program."
+DISPUTE_LOGGED_BODY = (
+    "Your dispute was received on [DATE/TIME] and has been logged under reference number [NUMBER]."
+)
+NAMED_BODY = "Hi %customer-name%, most negative results are reported within 24-48 hours."
+DRIVER_ID_BODY = (
+    "For driver identifiers, we use: State initials + CDL license number (example: TX1234567)."
+)
+ROSTER_BODY = (
+    "Roster updates are handled by our support team. Please email support@sample-site.example.com with: "
+    "Driver identifier: CDL state initials + license number (example: TX1234567)"
+)
+INTERPRETATION_BODY = (
+    "This question requires review by our Compliance Team. I will document the issue and route it "
+    "for a written response."
+)
+PROTECTED_BODY = (
+    "This matter must be handled through a protected Compliance process. I will document the "
+    "contact and route it immediately."
+)
+DISPUTE_ID_BODY = (
+    "I can document the dispute through this chat. Please identify the specific item you believe "
+    "is inaccurate or incomplete."
+)
+VERIFIED_BODY = "Thank you. Your identity has been verified."
+GREETING_BODY = "Thank you for contacting Sample Services. How may I assist you today?"
 
 
 def _csv_row(
@@ -78,6 +104,92 @@ def test_instant_check_rows_are_unmapped_with_the_message_visible() -> None:
     assert row.body == INSTANT_CHECK_BODY
     assert row.shortcut == "instant-check"
     assert row.reason is None
+
+
+def test_rows_with_agent_fill_in_fields_are_not_bot_eligible() -> None:
+    """Catches '{DOTAgency}' and '[DATE/TIME]' scripts being enabled for the bot on import."""
+    planned = plan_import(
+        [
+            _csv_row(49, DOT_AGENCY_BODY, 6, '["dot_yes_agency_known"]'),
+            _csv_row(100, DISPUTE_LOGGED_BODY, 4, '["dispute-logged"]'),
+            _csv_row(77, NAMED_BODY, 6, '["turnaround_results"]'),
+        ],
+        sites_by_key=SITES,
+        existing=[],
+    )
+    by_id = {row.livechat_id: row for row in planned}
+    assert by_id[49].bot_eligible is False
+    assert by_id[49].disable_reason == "Has fill-in fields — not available to the bot."
+    assert by_id[100].bot_eligible is False
+    assert by_id[77].bot_eligible is True
+    assert by_id[77].disable_reason is None
+
+
+def test_scripts_that_claim_an_agent_action_are_not_bot_eligible() -> None:
+    """Catches the bot telling a visitor 'Your identity has been verified'."""
+    planned = plan_import(
+        [
+            _csv_row(106, VERIFIED_BODY, 4, '["verified"]'),
+            _csv_row(97, GREETING_BODY, 4, '["greeting"]'),
+        ],
+        sites_by_key=SITES,
+        existing=[],
+    )
+    assert [row.bot_eligible for row in planned] == [False, False]
+
+
+def test_a_script_that_coaches_visitors_to_share_a_license_number_is_not_bot_eligible() -> None:
+    """Catches the bot inviting CDL numbers into chat, which the prompts must refuse."""
+    planned = plan_import(
+        [
+            _csv_row(94, DRIVER_ID_BODY, 6, '["driver_identifier_format"]'),
+            _csv_row(95, ROSTER_BODY, 6, '["roster_update"]'),
+        ],
+        sites_by_key=SITES,
+        existing=[],
+    )
+    by_id = {row.livechat_id: row for row in planned}
+    assert by_id[94].bot_eligible is False
+    assert (
+        by_id[94].disable_reason == "Asks visitors for a license number — not available to the bot."
+    )
+    # Emailing a roster change is not a chat request, so the roster answer stays available.
+    assert by_id[95].bot_eligible is True
+
+
+def test_instant_check_rows_are_never_bot_eligible_even_when_placed_on_samplesite() -> None:
+    """Catches an Instant Check search nag being served as an SampleSite answer."""
+    planned = plan_import(
+        [_csv_row(501, INSTANT_CHECK_BODY, 5, '["instant-check"]')],
+        sites_by_key=SITES,
+        existing=[],
+        remap_groups={5: EASY},
+    )
+    row = planned[0]
+    assert row.action == "create"
+    assert row.site_id == EASY
+    assert row.bot_eligible is False
+    assert row.disable_reason == "Instant Check content — not available to the bot."
+
+
+def test_scripts_that_promise_a_written_follow_up_hand_off_to_a_specialist() -> None:
+    """Catches 'I will document this and route it' being sent with nobody to route it."""
+    planned = plan_import(
+        [
+            _csv_row(102, INTERPRETATION_BODY, 4, '["interpretation"]'),
+            _csv_row(103, PROTECTED_BODY, 4, '["protected"]'),
+            _csv_row(99, DISPUTE_ID_BODY, 4, '["dispute-id"]'),
+            _csv_row(77, NAMED_BODY, 6, '["turnaround_results"]'),
+        ],
+        sites_by_key=SITES,
+        existing=[],
+    )
+    assert {row.livechat_id: row.hands_off for row in planned} == {
+        102: True,
+        103: True,
+        99: True,
+        77: False,
+    }
 
 
 def test_unmapped_group_can_be_assigned_to_an_existing_website() -> None:

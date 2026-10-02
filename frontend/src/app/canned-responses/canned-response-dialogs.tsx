@@ -26,6 +26,8 @@ import { Switch } from "@/components/ui/switch"
 import { Textarea } from "@/components/ui/textarea"
 
 import {
+  followOptions,
+  NO_PARENT,
   scopeLabel,
   type CannedReplyRecord,
   type FormState,
@@ -41,6 +43,7 @@ const keyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
 // oxlint-disable-next-line eslint/max-lines-per-function, eslint/complexity -- Form fields, scope picker, and submit validation stay together for one reviewable edit flow.
 export const ResponseForm = ({
   form,
+  records,
   sites,
   formError,
   submitting,
@@ -50,6 +53,7 @@ export const ResponseForm = ({
   shortcutRef,
 }: {
   form: FormState | null
+  records: CannedReplyRecord[]
   sites: SiteRecord[]
   formError: string
   submitting: boolean
@@ -58,6 +62,7 @@ export const ResponseForm = ({
   onRequestClose: () => void
   shortcutRef: RefObject<HTMLInputElement | null>
 }) => {
+  const blockedReason = records.find((row) => row.id === form?.id)?.bot_block_reason ?? null
   return (
     <Dialog
       open={form !== null}
@@ -130,6 +135,21 @@ export const ResponseForm = ({
                   {form.body.length}/{BODY_MAX.toLocaleString()} characters · Ctrl/⌘+Enter to save
                 </span>
               </label>
+              <div className="text-ink flex flex-col gap-1.5 text-sm font-medium">
+                <span>Only after</span>
+                <CannedResponseSelect
+                  value={form.followsId ?? NO_PARENT}
+                  onValueChange={(value) =>
+                    onChange({ ...form, followsId: !value || value === NO_PARENT ? null : value })
+                  }
+                  items={followOptions(records, form.siteId, form.id)}
+                  label="Only after"
+                />
+                <span className="text-mute text-xs font-normal">
+                  For answers like #der_yes. The assistant sends this only as the reply to the
+                  script chosen here; without one, a bare yes or no never selects it.
+                </span>
+              </div>
               <label
                 htmlFor="canned-response-enabled"
                 className="border-line bg-ice text-ink flex items-center justify-between gap-3 rounded-[8px] border px-3 py-2.5 text-sm font-medium"
@@ -162,6 +182,28 @@ export const ResponseForm = ({
                   checked={form.botEligible}
                   onCheckedChange={(botEligible) => onChange({ ...form, botEligible })}
                   aria-label="Available to the bot"
+                />
+              </label>
+              {form.botEligible && blockedReason ? (
+                <p className="text-ember -mt-2 text-xs" role="note">
+                  The assistant will not use this wording yet. {blockedReason}
+                </p>
+              ) : null}
+              <label
+                htmlFor="canned-response-handoff"
+                className="border-line bg-ice text-ink flex items-center justify-between gap-3 rounded-[8px] border px-3 py-2.5 text-sm font-medium"
+              >
+                <span>
+                  <span className="block">Connect a specialist after sending</span>
+                  <span className="text-mute block text-xs font-normal">
+                    For scripts that promise to document or route something.
+                  </span>
+                </span>
+                <Switch
+                  id="canned-response-handoff"
+                  checked={form.handsOff}
+                  onCheckedChange={(handsOff) => onChange({ ...form, handsOff })}
+                  aria-label="Connect a specialist after sending"
                 />
               </label>
               <FieldError>{formError || undefined}</FieldError>

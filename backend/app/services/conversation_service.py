@@ -1218,7 +1218,14 @@ class ConversationService:
         conversation.active_generation_id = None
         started = time.perf_counter_ns()
         inserted = await self._persist_grounded_reply(conversation, decision)
-        await self._session.commit()
+        if decision.handoff_reason:
+            # The script just sent promised a person would follow up; make that true.
+            await self._open_handoff(
+                conversation,
+                reason=decision.handoff_reason,
+                original_question=await self._latest_visitor_body(conversation.id),
+            )
+        await self._commit_and_schedule()
         record_trace("decision", decision=decision, persisted=True)
         timings["commit"] = (time.perf_counter_ns() - started) // 1_000_000
         snapshot_id = None
