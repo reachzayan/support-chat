@@ -138,6 +138,19 @@ describe("visitor block API routing", () => {
   })
 })
 
+describe("status API routing", () => {
+  test("widget origin cannot reach the status board", async () => {
+    const listed = await proxy(
+      requestFor("http://widget.localhost:3000/api/status", "widget.localhost:3000"),
+    )
+    expect(listed.status).toBe(404)
+  })
+
+  test("staff origin keeps the status board", async () => {
+    const listed = await proxy(requestFor("http://localhost:3000/api/status", "localhost:3000"))
+    expect(listed.status).toBe(200)
+  })
+})
 
 describe("widget document CSP", () => {
   afterEach(() => {

@@ -26,6 +26,7 @@ const API_REWRITES = [
   "/api/handoffs/:path*",
   "/api/logs",
   "/api/logs/:path*",
+  "/api/status",
   "/api/knowledge-gaps",
   "/api/knowledge-gaps/:path*",
   "/api/visitor-blocks",

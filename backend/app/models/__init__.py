@@ -17,6 +17,7 @@ from app.models.message import Message
 from app.models.message_citation import MessageCitation
 from app.models.refresh_token import RefreshToken
 from app.models.site import Site
+from app.models.status_sample import StatusSample
 from app.models.user import User
 from app.models.visitor import Visitor
 from app.models.visitor_block import VisitorBlock
@@ -42,6 +43,7 @@ __all__ = [
     "MessageCitation",
     "RefreshToken",
     "Site",
+    "StatusSample",
     "User",
     "Visitor",
     "VisitorBlock",

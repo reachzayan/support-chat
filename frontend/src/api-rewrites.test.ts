@@ -21,6 +21,14 @@ describe("API rewrites", () => {
     expect(logs?.destination).toBe("http://127.0.0.1:8000/api/logs/:path*")
   })
 
+  test("proxies the staff status board to the backend", async () => {
+    const rules = await nextConfig.rewrites!()
+    const list = Array.isArray(rules)
+      ? rules
+      : [...(rules.beforeFiles ?? []), ...(rules.afterFiles ?? []), ...(rules.fallback ?? [])]
+    const status = list.find((rule) => rule.source === "/api/status")
+    expect(status?.destination).toBe("http://127.0.0.1:8000/api/status")
+  })
 
   test("proxies suggested-FAQ routes to the backend", async () => {
     const rules = await nextConfig.rewrites!()

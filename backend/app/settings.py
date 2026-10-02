@@ -89,6 +89,7 @@ class Settings(BaseSettings):
     app_env: AppEnvironment = AppEnvironment.LOCAL
     internal_eval_enabled: bool = False
     enable_background_workers: bool = True
+    status_api_probe_url: str = "http://127.0.0.1:8000/health"
     chat_retention_days: int = 30
     rate_bootstrap: int = 60
     rate_bootstrap_window: int = 600

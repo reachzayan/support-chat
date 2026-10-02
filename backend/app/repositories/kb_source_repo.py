@@ -19,6 +19,10 @@ class KbSourceRepository:
         )
         return list(result.scalars().all())
 
+    async def list_enabled(self) -> list[KbSource]:
+        result = await self._session.execute(select(KbSource).where(KbSource.enabled.is_(True)))
+        return list(result.scalars().all())
+
     async def get_by_id(self, source_id: UUID) -> KbSource | None:
         return await self._session.get(KbSource, source_id)
 

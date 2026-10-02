@@ -4,6 +4,7 @@
 
 import { cn } from "cn"
 import {
+  Activity,
   Ban,
   BookOpen,
   ChevronDown,
@@ -85,6 +86,7 @@ const workspaceLinks: AdminLink[] = [
   { href: "/admin/suggested-faqs", label: "Suggested FAQs", icon: Lightbulb },
   { href: "/admin/blocked", label: "Blocked", icon: Ban },
   { href: "/admin/sites", label: "Sites", icon: Globe2 },
+  { href: "/admin/status", label: "Status", icon: Activity },
   { href: "/admin/logs", label: "Logs", icon: ScrollText },
 ]
 

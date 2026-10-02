@@ -69,6 +69,7 @@ services:
     environment: !override
       APP_ENV: production
       ENABLE_BACKGROUND_WORKERS: "true"
+      STATUS_API_PROBE_URL: http://backend:8000/health
     volumes:
       - ${REDIS_TLS_DIR:-./deploy/redis-tls}/ca.crt:/run/secrets/redis-ca.crt:ro
     cap_drop: ["ALL"]
