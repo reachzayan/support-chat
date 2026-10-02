@@ -91,6 +91,8 @@ class CannedReplyService:
         enabled: bool = True,
         aliases: list[str] | None = None,
         bot_eligible: bool = True,
+        follows_id: UUID | None = None,
+        hands_off: bool = False,
         is_admin: bool = False,
     ) -> CannedReply:
         normalized_shortcut = normalize_shortcut(shortcut)
@@ -100,6 +102,7 @@ class CannedReplyService:
         if site_id is not None:
             await self._require_site(site_id)
         await self._raise_if_tokens_taken(site_id, [normalized_shortcut, *normalized_aliases])
+        await self._require_parent_in_scope(follows_id, site_id)
         try:
             reply = await self._replies.create(
                 site_id,
@@ -108,6 +111,8 @@ class CannedReplyService:
                 enabled,
                 aliases=normalized_aliases,
                 bot_eligible=bot_eligible,
+                follows_id=follows_id,
+                hands_off=hands_off,
             )
             await embed_replies([reply])
             await self._session.commit()
@@ -128,6 +133,8 @@ class CannedReplyService:
         enabled: bool | None = None,
         aliases: list[str] | None = None,
         bot_eligible: bool | None = None,
+        follows_id: UUID | None = None,
+        hands_off: bool | None = None,
         is_admin: bool = False,
     ) -> CannedReply:
         if not fields:
@@ -148,6 +155,9 @@ class CannedReplyService:
             raise CannedReplyError("invalid_body")
         if "aliases" in fields and not isinstance(aliases, list):
             raise CannedReplyError("invalid_shortcut")
+        if "hands_off" in fields and not isinstance(hands_off, bool):
+            raise CannedReplyError("invalid_body")
+        target_follows = follows_id if "follows_id" in fields else reply.follows_id
         target_shortcut = normalize_shortcut(shortcut) if "shortcut" in fields else reply.shortcut
         target_aliases = (
             normalize_aliases(aliases, target_shortcut)
@@ -162,14 +172,18 @@ class CannedReplyService:
             [target_shortcut, *target_aliases],
             exclude_id=reply.id,
         )
+        await self._require_parent_in_scope(target_follows, target_site_id, own_id=reply.id)
         reply.site_id = target_site_id
         reply.shortcut = target_shortcut
         reply.aliases = target_aliases
         reply.body = target_body
+        reply.follows_id = target_follows
         if "enabled" in fields:
             reply.enabled = enabled
         if "bot_eligible" in fields:
             reply.bot_eligible = bot_eligible
+        if "hands_off" in fields:
+            reply.hands_off = hands_off
         await embed_replies([reply])
         try:
             await self._session.commit()
@@ -224,6 +238,7 @@ class CannedReplyService:
                     reply.body = row.body
                     reply.suggestion_event = row.suggestion_event
                     reply.bot_eligible = row.bot_eligible
+                    reply.hands_off = row.hands_off
                     reply.external_id = row.livechat_id
                     changed.append(reply)
                     updated += 1
@@ -237,6 +252,7 @@ class CannedReplyService:
                     bot_eligible=row.bot_eligible,
                     suggestion_event=row.suggestion_event,
                     external_id=row.livechat_id,
+                    hands_off=row.hands_off,
                 )
                 changed.append(reply)
                 created += 1
@@ -273,6 +289,7 @@ class CannedReplyService:
                 body=row.body,
                 bot_eligible=row.bot_eligible,
                 suggestion_event=row.suggestion_event,
+                hands_off=row.hands_off,
             )
             for row in await self._replies.list_library()
         ]
@@ -292,6 +309,20 @@ class CannedReplyService:
     async def _require_site(self, site_id: UUID) -> None:
         if await self._session.get(Site, site_id) is None:
             raise CannedReplyError("site_not_found")
+
+    async def _require_parent_in_scope(
+        self, follows_id: UUID | None, site_id: UUID | None, *, own_id: UUID | None = None
+    ) -> None:
+        """A script can follow General wording or wording on its own website, never another's."""
+        if follows_id is None:
+            return
+        parent = await self._replies.get_by_id(follows_id)
+        if (
+            parent is None
+            or parent.id == own_id
+            or (parent.site_id is not None and parent.site_id != site_id)
+        ):
+            raise CannedReplyError("invalid_follows")
 
     async def _raise_if_tokens_taken(
         self,

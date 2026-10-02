@@ -8,11 +8,15 @@ from app.db import session_maker
 from app.repositories.conversation_repo import ConversationRepository
 from app.repositories.handoff_repo import HandoffRepository
 from app.services import handoff_summary
+from app.services.canned_bot import refresh_stale_embeddings
 from app.services.conversation_service import ConversationService
+from app.services.kb_embedder import default_embedder
+from app.services.knowledge_gap_service import KnowledgeGapService
 from app.settings import get_settings
 
 log = structlog.get_logger("durable_work")
 _task: asyncio.Task | None = None
+CANNED_EMBED_BATCH = 20
 
 
 async def _claim_bot() -> tuple | None:
@@ -72,6 +76,16 @@ async def _run_summary(row) -> None:
         log.info("handoff_summary_job_failed", error_class=type(exc).__name__)
 
 
+async def _assign_gap_hit() -> bool:
+    async with session_maker()() as session:
+        return await KnowledgeGapService(session).assign_next(default_embedder())
+
+
+async def _refresh_canned_embeddings() -> bool:
+    async with session_maker()() as session:
+        return await refresh_stale_embeddings(session, default_embedder(), CANNED_EMBED_BATCH) > 0
+
+
 async def durable_work_loop() -> None:
     while True:
         try:
@@ -82,6 +96,10 @@ async def durable_work_loop() -> None:
             summary = await _claim_summary()
             if summary is not None:
                 await _run_summary(summary)
+                continue
+            if await _assign_gap_hit():
+                continue
+            if await _refresh_canned_embeddings():
                 continue
         except asyncio.CancelledError:
             raise

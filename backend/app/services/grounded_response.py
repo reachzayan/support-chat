@@ -238,12 +238,8 @@ class GroundedResponseEngine:
         self._complete = complete
         self._repair = repair
 
-    async def respond(  # noqa: C901
-        self,
-        turn: TurnContext,
-        stage_timings: dict[str, int] | None = None,
-    ) -> ResponseDecision:
-        timings = stage_timings if stage_timings is not None else {}
+    def boundary_decision(self, turn: TurnContext) -> ResponseDecision | None:
+        """Hard-control cases decided before any answer, canned or generated, is considered."""
         question = (turn.visitor_text or "").strip()
         if turn.sensitive:
             return _safe_sensitive_handoff()
@@ -262,6 +258,17 @@ class GroundedResponseEngine:
             return ResponseDecision(
                 ResponseOutcome.BOUNDARY, "off_topic", clarify_scope_line(turn.site_name)
             )
+        return None
+
+    async def respond(  # noqa: C901
+        self,
+        turn: TurnContext,
+        stage_timings: dict[str, int] | None = None,
+    ) -> ResponseDecision:
+        timings = stage_timings if stage_timings is not None else {}
+        boundary = self.boundary_decision(turn)
+        if boundary is not None:
+            return boundary
         evidence = _eligible(turn.evidence)
         if not evidence:
             return _safe_no_evidence(_same_kind_miss_count(turn, "no_evidence"), turn.site_name)

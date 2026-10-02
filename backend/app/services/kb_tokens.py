@@ -82,6 +82,13 @@ ALIASES = {
     "clinics": "clinic",
     "location": "location",
     "locations": "location",
+    "cost": "pricing",
+    "costs": "pricing",
+    "price": "pricing",
+    "prices": "pricing",
+    "interpret": "interpretation",
+    "interpreting": "interpretation",
+    "interpreted": "interpretation",
 }
 OVERVIEW_HINTS = (
     "what you guys do",
@@ -116,6 +123,7 @@ WEAK_OVERLAP = frozenset(
         "screening",
         "result",
         "compliance",
+        "report",
     }
 )
 TOKEN_RE = re.compile(r"[a-z0-9]+")
@@ -125,15 +133,21 @@ def normalize_query(value: str) -> str:
     return " ".join(value.casefold().split())
 
 
-def tokenize(value: str) -> list[str]:
-    text = (
+def _rewrite_phrases(value: str) -> str:
+    return (
         normalize_query(value)
         .replace("how long", "turnaround")
+        .replace("how much", "pricing")
+        .replace("pending charges", "interpretation")
+        .replace("pending charge", "interpretation")
         .replace("set up", "setup")
         .replace("sign up", "setup")
     )
+
+
+def tokenize(value: str) -> list[str]:
     tokens: list[str] = []
-    for raw in TOKEN_RE.findall(text):
+    for raw in TOKEN_RE.findall(_rewrite_phrases(value)):
         if raw in STOP_WORDS or len(raw) < 2:
             continue
         tokens.append(ALIASES.get(raw, raw))
@@ -141,15 +155,9 @@ def tokenize(value: str) -> list[str]:
 
 
 def search_tokens(value: str) -> list[str]:
-    text = (
-        normalize_query(value)
-        .replace("how long", "turnaround")
-        .replace("set up", "setup")
-        .replace("sign up", "setup")
-    )
     tokens: list[str] = []
     seen: set[str] = set()
-    for raw in TOKEN_RE.findall(text):
+    for raw in TOKEN_RE.findall(_rewrite_phrases(value)):
         if raw in STOP_WORDS or len(raw) < 2:
             continue
         for token in (raw, ALIASES.get(raw, raw)):

@@ -12,8 +12,10 @@ import { staffRead, staffWrite, type SiteRecord } from "@/components/admin/staff
 import { matchesSearchQuery } from "@/lib/search"
 
 import {
+  botState,
   parseAliasesText,
   scopeLabel,
+  type BotFilter,
   type CannedReplyRecord,
   type FormState,
   type Scope,
@@ -51,6 +53,14 @@ const saveError = (response: Response, form: FormState, sites: SiteRecord[]) =>
     ? `#${form.shortcut.trim().replace(/^#/, "").toLowerCase()} already exists in ${scopeLabel(form.siteId ?? "general", sites)}.`
     : errorMessage(response)
 
+const initialBot = (): BotFilter => {
+  if (typeof window === "undefined") {
+    return "all"
+  }
+  const value = new URLSearchParams(window.location.search).get("assistant")
+  return value === "available" || value === "staff" || value === "blocked" ? value : "all"
+}
+
 const blankForm = (scope: Scope): FormState => ({
   id: null,
   siteId: scope === "general" ? null : scope,
@@ -59,7 +69,16 @@ const blankForm = (scope: Scope): FormState => ({
   body: "",
   enabled: true,
   botEligible: true,
+  followsId: null,
+  handsOff: false,
 })
+
+const savedAnnouncement = (updated: boolean, saved: CannedReplyRecord) => {
+  const message = updated ? "Canned response updated." : "Canned response created."
+  return saved.bot_eligible && saved.bot_block_reason
+    ? `${message} The assistant will not use it. ${saved.bot_block_reason}`
+    : message
+}
 
 const formSnapshot = (form: FormState) => JSON.stringify(form)
 // oxlint-disable-next-line eslint/max-lines-per-function -- The route owns one cohesive library view and its local mutation state.
@@ -75,6 +94,7 @@ export const useCannedResponsesState = () => {
       : (new URLSearchParams(window.location.search).get("q") ?? ""),
   )
   const [status, setStatus] = useState<StatusFilter>(initialStatus)
+  const [bot, setBot] = useState<BotFilter>(initialBot)
   const [visibleCount, setVisibleCount] = useState(PAGE_SIZE)
   const [form, setForm] = useState<FormState | null>(null)
   const [initialForm, setInitialForm] = useState("")
@@ -126,23 +146,26 @@ export const useCannedResponsesState = () => {
     setScope(params.get("scope") ?? "general")
     setQuery(params.get("q") ?? "")
     setStatus(nextStatus === "enabled" || nextStatus === "disabled" ? nextStatus : "all")
+    setBot(initialBot())
   }, [])
 
   const updateUrl = useCallback(
-    (next: Partial<{ scope: Scope; q: string; status: StatusFilter }>) => {
+    (next: Partial<{ scope: Scope; q: string; status: StatusFilter; assistant: BotFilter }>) => {
       const params = new URLSearchParams(window.location.search)
-      const merged = { scope, q: query, status, ...next }
+      const merged = { scope, q: query, status, assistant: bot, ...next }
       if (merged.scope === "general") params.delete("scope")
       else params.set("scope", merged.scope)
       if (merged.q) params.set("q", merged.q)
       else params.delete("q")
       if (merged.status === "all") params.delete("status")
       else params.set("status", merged.status)
+      if (merged.assistant === "all") params.delete("assistant")
+      else params.set("assistant", merged.assistant)
       params.delete("page")
       const suffix = params.toString()
       window.history.replaceState(null, "", `/admin/canned-responses${suffix ? `?${suffix}` : ""}`)
     },
-    [query, scope, status],
+    [bot, query, scope, status],
   )
 
   const selectScope = useCallback(
@@ -174,11 +197,22 @@ export const useCannedResponsesState = () => {
     [updateUrl],
   )
 
+  const updateBot = useCallback(
+    (value: string | null) => {
+      const next = value === "available" || value === "staff" || value === "blocked" ? value : "all"
+      setBot(next)
+      setVisibleCount(PAGE_SIZE)
+      updateUrl({ assistant: next })
+    },
+    [updateUrl],
+  )
+
   const clearSearchFilters = useCallback(() => {
     setQuery("")
     setStatus("all")
+    setBot("all")
     setVisibleCount(PAGE_SIZE)
-    updateUrl({ q: "", status: "all" })
+    updateUrl({ q: "", status: "all", assistant: "all" })
   }, [updateUrl])
 
   const scoped = useMemo(
@@ -194,9 +228,10 @@ export const useCannedResponsesState = () => {
         [row.shortcut, ...(row.aliases ?? []), row.body],
         deferredQuery,
       )
-      return matchesQuery && (status === "all" || (status === "enabled") === row.enabled)
+      const matchesStatus = status === "all" || (status === "enabled") === row.enabled
+      return matchesQuery && matchesStatus && (bot === "all" || botState(row) === bot)
     })
-  }, [deferredQuery, scoped, status])
+  }, [bot, deferredQuery, scoped, status])
   const visible = useMemo(() => filtered.slice(0, visibleCount), [filtered, visibleCount])
   const hasMore = visible.length < filtered.length
   const loadMore = useCallback(() => {
@@ -229,6 +264,8 @@ export const useCannedResponsesState = () => {
       body: record.body,
       enabled: record.enabled,
       botEligible: record.bot_eligible,
+      followsId: record.follows_id,
+      handsOff: record.hands_off,
     }
     setForm(next)
     setInitialForm(formSnapshot(next))
@@ -257,6 +294,8 @@ export const useCannedResponsesState = () => {
         body: form.body,
         enabled: form.enabled,
         bot_eligible: form.botEligible,
+        follows_id: form.followsId,
+        hands_off: form.handsOff,
       }
       const path = form.id ? `/api/canned-replies/${form.id}` : "/api/canned-replies"
       const method = form.id ? "PATCH" : "POST"
@@ -276,7 +315,7 @@ export const useCannedResponsesState = () => {
             : [...current, saved]
         })
         setForm(null)
-        setAnnouncement(form.id ? "Canned response updated." : "Canned response created.")
+        setAnnouncement(savedAnnouncement(Boolean(form.id), saved))
       } catch {
         setFormError("The response could not be saved. Try again.")
       } finally {
@@ -353,6 +392,7 @@ export const useCannedResponsesState = () => {
     scope,
     query,
     status,
+    bot,
     form,
     formError,
     submitting,
@@ -369,6 +409,7 @@ export const useCannedResponsesState = () => {
     selectScope,
     updateQuery,
     updateStatus,
+    updateBot,
     clearSearchFilters,
     visible,
     hasMore,

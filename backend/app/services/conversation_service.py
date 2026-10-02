@@ -78,6 +78,7 @@ from app.services.grounded_response import (
     _safe_technical_failure,
 )
 from app.services.handoff_service import EscalationReason, HandoffService, HandoffTrigger
+from app.services.knowledge_gap_service import KnowledgeGapService
 from app.services.pii_redactor import redact_for_log
 from app.services.rate_limit import RateLimiter, RateLimitExceeded, RateLimitUnavailable
 from app.services.refusal_library import fallback_refusal_body, lookup_refusal
@@ -1218,7 +1219,14 @@ class ConversationService:
         conversation.active_generation_id = None
         started = time.perf_counter_ns()
         inserted = await self._persist_grounded_reply(conversation, decision)
-        await self._session.commit()
+        if decision.handoff_reason:
+            # The script just sent promised a person would follow up; make that true.
+            await self._open_handoff(
+                conversation,
+                reason=decision.handoff_reason,
+                original_question=await self._latest_visitor_body(conversation.id),
+            )
+        await self._commit_and_schedule()
         record_trace("decision", decision=decision, persisted=True)
         timings["commit"] = (time.perf_counter_ns() - started) // 1_000_000
         snapshot_id = None
@@ -1262,6 +1270,7 @@ class ConversationService:
             response_outcome=decision.outcome.value if decision.outcome is not None else None,
             response_reason_code=decision.reason_code,
         )
+        await KnowledgeGapService(self._session).record_miss(conversation, inserted, decision)
         for citation in citations:
             self._session.add(
                 MessageCitation(

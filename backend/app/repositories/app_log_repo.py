@@ -1,7 +1,7 @@
 from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.app_log import AppLog
@@ -38,3 +38,11 @@ class AppLogRepository:
         stmt = stmt.order_by(AppLog.created_at.desc()).limit(min(max(limit, 1), 2000))
         result = await self._session.execute(stmt)
         return list(result.scalars().all())
+
+    async def count_level_since(self, *, level: str, since: datetime) -> int:
+        result = await self._session.execute(
+            select(func.count())
+            .select_from(AppLog)
+            .where(AppLog.level == level, AppLog.created_at >= since)
+        )
+        return int(result.scalar_one())

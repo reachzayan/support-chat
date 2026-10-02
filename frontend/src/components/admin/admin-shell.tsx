@@ -4,11 +4,13 @@
 
 import { cn } from "cn"
 import {
+  Activity,
   Ban,
   BookOpen,
   ChevronDown,
   Globe2,
   Inbox,
+  Lightbulb,
   MessageSquareText,
   ScrollText,
   Table2,
@@ -81,8 +83,10 @@ const workspaceLinks: AdminLink[] = [
   { href: "/admin/data", label: "Data", icon: Table2 },
   { href: "/admin/knowledge", label: "Knowledge base", icon: BookOpen },
   { href: "/admin/canned-responses", label: "Canned responses", icon: MessageSquareText },
+  { href: "/admin/suggested-faqs", label: "Suggested FAQs", icon: Lightbulb },
   { href: "/admin/blocked", label: "Blocked", icon: Ban },
   { href: "/admin/sites", label: "Sites", icon: Globe2 },
+  { href: "/admin/status", label: "Status", icon: Activity },
   { href: "/admin/logs", label: "Logs", icon: ScrollText },
 ]
 
@@ -186,10 +190,12 @@ const AdminSidebarLinks = ({
 
 const AdminSidebarAccount = ({
   displayName,
+  isAdmin,
   pathname,
   collapsed,
 }: {
   displayName: string
+  isAdmin: boolean
   pathname: string
   collapsed: boolean
 }) => {
@@ -236,7 +242,9 @@ const AdminSidebarAccount = ({
         <AvatarMark initials={initials} />
         <span className="grid min-w-0 flex-1 text-left text-xs">
           <span className="heading truncate text-sm text-white">{displayName}</span>
-          <span className="truncate text-[10px] text-white/50">Accepting chats</span>
+          <span className="truncate text-[10px] text-white/50">
+            {isAdmin ? "Admin" : "Specialist"}
+          </span>
         </span>
         <ChevronDown aria-hidden="true" className="ml-auto size-4 shrink-0 text-white/40" />
       </SidebarMenuButton>
@@ -279,10 +287,12 @@ const AdminSidebarBrand = ({ collapsed }: { collapsed: boolean }) => (
 const AdminSidebarFooter = ({
   collapsed,
   displayName,
+  isAdmin,
   pathname,
 }: {
   collapsed: boolean
   displayName: string
+  isAdmin: boolean
   pathname: string
 }) => (
   <SidebarFooter className={cn("gap-2 p-3", collapsed && "items-center px-0 py-2")}>
@@ -303,12 +313,17 @@ const AdminSidebarFooter = ({
       )}
     />
     <SidebarMenu className={cn("w-full", collapsed && "w-auto items-center")}>
-      <AdminSidebarAccount displayName={displayName} pathname={pathname} collapsed={collapsed} />
+      <AdminSidebarAccount
+        displayName={displayName}
+        isAdmin={isAdmin}
+        pathname={pathname}
+        collapsed={collapsed}
+      />
     </SidebarMenu>
   </SidebarFooter>
 )
 
-const AdminSidebar = ({ displayName }: { displayName: string }) => {
+const AdminSidebar = ({ displayName, isAdmin }: { displayName: string; isAdmin: boolean }) => {
   const pathname = usePathname()
   const { state } = useSidebar()
   const collapsed = state === "collapsed"
@@ -328,7 +343,12 @@ const AdminSidebar = ({ displayName }: { displayName: string }) => {
           </SidebarGroupContent>
         </SidebarGroup>
       </SidebarContent>
-      <AdminSidebarFooter collapsed={collapsed} displayName={displayName} pathname={pathname} />
+      <AdminSidebarFooter
+        collapsed={collapsed}
+        displayName={displayName}
+        isAdmin={isAdmin}
+        pathname={pathname}
+      />
     </Sidebar>
   )
 }
@@ -425,7 +445,10 @@ export const AdminShell = ({ children }: { children: ReactNode }) => {
           } as CSSProperties
         }
       >
-        <AdminSidebar displayName={user?.display_name ?? "Loading workspace"} />
+        <AdminSidebar
+          displayName={user?.display_name ?? "Loading workspace"}
+          isAdmin={user?.is_admin ?? false}
+        />
         <SidebarInset className="flex h-svh min-h-0 min-w-0 flex-col overflow-hidden overscroll-none bg-[#14161b] p-2">
           <AdminUserContext.Provider value={user}>
             <div className="bg-ice flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden overscroll-none rounded-lg">

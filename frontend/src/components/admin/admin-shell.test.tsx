@@ -1,4 +1,4 @@
-import { screen, waitFor } from "@testing-library/react"
+import { screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest"
 
@@ -56,6 +56,7 @@ describe("admin shell", () => {
 
     await waitFor(() => expect(screen.getByText("Inbox view")).toBeInTheDocument())
     expect(screen.getByRole("link", { name: "Inbox" })).toHaveAttribute("href", "/admin/inbox")
+    expect(screen.getByRole("link", { name: "Status" })).toHaveAttribute("href", "/admin/status")
     expect(screen.getByRole("link", { name: "Knowledge base" })).toHaveAttribute(
       "href",
       "/admin/knowledge",
@@ -63,6 +64,8 @@ describe("admin shell", () => {
     expect(screen.getByRole("link", { name: "Sites" })).toHaveAttribute("href", "/admin/sites")
     expect(screen.getByRole("link", { name: "Blocked" })).toHaveAttribute("href", "/admin/blocked")
     expect(screen.getByRole("link", { name: "Logs" })).toHaveAttribute("href", "/admin/logs")
+    expect(screen.queryByText("Accepting chats")).not.toBeInTheDocument()
+    expect(screen.getByText("Admin")).toBeInTheDocument()
     const accountLink = screen.getByRole("link", { name: "Alex Morgan account" })
     expect(accountLink).toHaveAttribute("href", "/admin/settings")
     expect(accountLink.closest('[data-slot="sidebar-footer"]')).not.toBeNull()
@@ -95,6 +98,21 @@ describe("admin shell", () => {
     const signOut = screen.getByRole("button", { name: "Sign out" })
     expect(signOut).not.toHaveTextContent("Sign out")
     expect(signOut.querySelector("svg")).not.toBeNull()
+  })
+
+  test("places Status immediately above Logs in the workspace nav", async () => {
+    renderWithProviders(
+      <AdminShell>
+        <div id="main-content">Inbox view</div>
+      </AdminShell>,
+    )
+
+    await waitFor(() => expect(screen.getByText("Inbox view")).toBeInTheDocument())
+    const labels = within(screen.getByTestId("admin-sidebar"))
+      .getAllByRole("link")
+      .map((link) => link.textContent)
+    expect(labels.indexOf("Status")).toBe(labels.indexOf("Logs") - 1)
+    expect(labels.indexOf("Sites")).toBeLessThan(labels.indexOf("Status"))
   })
 
   test("restores a collapsed sidebar from the preferences cookie", async () => {

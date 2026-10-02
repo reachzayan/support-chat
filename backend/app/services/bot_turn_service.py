@@ -111,7 +111,13 @@ class BotTurnService:
                 for c in (previous.citations if previous else [])
             ]
             return PreparedBotReply(source_followup_decision(citations), stage_timings)
-        canned = await self._canned_reply(conversation, site, visitor_text)
+        # A canned match is still an answer: the same hard-control checks come first.
+        boundary = GroundedResponseEngine().boundary_decision(
+            TurnContext(visitor_text=visitor_text, evidence=[], site_name=site.name)
+        )
+        if boundary is not None:
+            return PreparedBotReply(boundary, stage_timings)
+        canned = await self._canned_reply(conversation, site, visitor_text, window)
         if canned is not None:
             return PreparedBotReply(canned, stage_timings)
         record_trace("history", prior_messages=prior_messages)
@@ -156,10 +162,17 @@ class BotTurnService:
         conversation: Conversation,
         site: Site,
         visitor_text: str,
+        window: list[Message],
     ) -> ResponseDecision | None:
         visitor = await self._session.get(Visitor, conversation.visitor_id)
+        previous = next((row for row in reversed(window) if row.role == "bot"), None)
         decision = await canned_reply_decision(
-            self._session, self._embedder, site.id, visitor_text, visitor
+            self._session,
+            self._embedder,
+            site.id,
+            visitor_text,
+            visitor,
+            previous_locator=previous.display_locator if previous is not None else None,
         )
         if decision is None:
             record_trace("retrieval", canned_win=False)

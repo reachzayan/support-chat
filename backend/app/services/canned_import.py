@@ -51,6 +51,7 @@ CONVERSATIONAL_SLUGS = frozenset(
         "product",
         "ticket",
         "welcome",
+        "greeting",
         "inactivity",
         "stepped-away",
         "thought-experience",
@@ -60,6 +61,20 @@ CONVERSATIONAL_SLUGS = frozenset(
     }
 )
 DISCOUNT_SLUGS = frozenset({"20", "10bgc"})
+# Scripts an agent sends after doing something (verifying an ID, logging a dispute).
+# The bot cannot do that thing, so it must not claim it.
+AGENT_ACTION_SLUGS = frozenset({"verified", "unable-verify", "dispute-logged"})
+# Coaches visitors to type a CDL number into chat. Chat prompts must refuse licence numbers.
+# Row-level on purpose: "dispute-id" says "do not send your SSN" and "roster_update" asks for
+# the number by email, so a pattern over the body would block the wrong rows.
+LICENSE_NUMBER_SLUGS = frozenset({"driver_identifier_format"})
+# Scripts that promise "I will document this and route it". Sending one opens a handoff so the
+# promise is kept by a person.
+HANDS_OFF_SLUGS = frozenset({"interpretation", "protected", "dispute-id"})
+INSTANT_CHECK_GROUP = 5
+# Agent fill-ins such as {DOTAgency} or [DATE/TIME]. The four official %variables% are not these.
+_UNFILLED_FIELD = re.compile(r"\{[^{}\s][^{}]*\}|\[[A-Z][A-Z0-9 /#_-]*\]")
+FILL_IN_REASON = "Has fill-in fields — not available to the bot."
 
 REQUIRED_COLUMNS = ("id", "text", "tags", "group")
 
@@ -74,6 +89,7 @@ class ExistingCanned:
     body: str
     bot_eligible: bool
     suggestion_event: str | None
+    hands_off: bool = False
 
 
 @dataclass(frozen=True)
@@ -93,6 +109,7 @@ class ImportPlanRow:
     bot_eligible: bool
     disable_reason: str | None
     excerpt: str
+    hands_off: bool = False
 
 
 def livechat_website_for(group: int | None) -> str | None:
@@ -123,20 +140,41 @@ def unique_shortcut(base: str, taken: set[str]) -> str | None:
     return None
 
 
-def bot_eligible_for(suggestion_event: str | None, slugs: list[str]) -> bool:
-    if suggestion_event is not None:
-        return False
-    return not any(slug in CONVERSATIONAL_SLUGS for slug in slugs)
+def has_unfilled_fields(body: str) -> bool:
+    return _UNFILLED_FIELD.search(body) is not None
 
 
-def disable_reason_for(suggestion_event: str | None, slugs: list[str]) -> str | None:
+def bot_block_reason(body: str) -> str | None:
+    """Why the bot cannot use this wording even when the row is switched on."""
+    return FILL_IN_REASON if has_unfilled_fields(body) else None
+
+
+def hands_off_for(slugs: list[str]) -> bool:
+    return any(slug in HANDS_OFF_SLUGS for slug in slugs)
+
+
+def bot_eligible_for(
+    suggestion_event: str | None, slugs: list[str], body: str, group: int | None = None
+) -> bool:
+    return disable_reason_for(suggestion_event, slugs, body, group) is None
+
+
+def disable_reason_for(
+    suggestion_event: str | None, slugs: list[str], body: str, group: int | None = None
+) -> str | None:
     if suggestion_event is not None:
         return "Greeting or idle prompt — not available to the bot."
     if any(slug in DISCOUNT_SLUGS for slug in slugs):
         return "Discount code — not available to the bot."
     if any(slug in CONVERSATIONAL_SLUGS for slug in slugs):
         return "Conversational prompt — not available to the bot."
-    return None
+    if any(slug in AGENT_ACTION_SLUGS for slug in slugs):
+        return "Confirms an agent action — not available to the bot."
+    if any(slug in LICENSE_NUMBER_SLUGS for slug in slugs):
+        return "Asks visitors for a license number — not available to the bot."
+    if group == INSTANT_CHECK_GROUP:
+        return "Instant Check content — not available to the bot."
+    return bot_block_reason(body)
 
 
 def parse_livechat_csv(raw: bytes) -> list[dict[str, str]]:
@@ -332,9 +370,10 @@ def _unmapped_row(
         aliases=tuple(slugs[1:]),
         body=body,
         suggestion_event=suggestion_event,
-        bot_eligible=bot_eligible_for(suggestion_event, slugs),
-        disable_reason=disable_reason_for(suggestion_event, slugs),
+        bot_eligible=bot_eligible_for(suggestion_event, slugs, body, group),
+        disable_reason=disable_reason_for(suggestion_event, slugs, body, group),
         excerpt=excerpt,
+        hands_off=hands_off_for(slugs),
     )
 
 
@@ -380,7 +419,8 @@ def _mapped_row(
     reserved.update((shortcut, *aliases))
     scope_taken.clear()
     scope_taken.update(reserved)
-    eligible = bot_eligible_for(suggestion_event, slugs)
+    eligible = bot_eligible_for(suggestion_event, slugs, body, group)
+    hands_off = hands_off_for(slugs)
     if existing_row is None:
         action = "create"
     else:
@@ -393,6 +433,7 @@ def _mapped_row(
             body,
             eligible,
             suggestion_event,
+            hands_off,
         )
     return ImportPlanRow(
         action=action,
@@ -408,8 +449,9 @@ def _mapped_row(
         body=body,
         suggestion_event=suggestion_event,
         bot_eligible=eligible,
-        disable_reason=disable_reason_for(suggestion_event, slugs),
+        disable_reason=disable_reason_for(suggestion_event, slugs, body, group),
         excerpt=excerpt,
+        hands_off=hands_off,
     )
 
 
@@ -440,6 +482,7 @@ def _existing_action(
     body: str,
     bot_eligible: bool,
     suggestion_event: str | None,
+    hands_off: bool,
 ) -> str:
     same = (
         existing.external_id == livechat_id
@@ -449,6 +492,7 @@ def _existing_action(
         and existing.body == body
         and existing.bot_eligible == bot_eligible
         and existing.suggestion_event == suggestion_event
+        and existing.hands_off == hands_off
     )
     return "unchanged" if same else "update"
 

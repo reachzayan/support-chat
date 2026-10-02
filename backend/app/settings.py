@@ -89,6 +89,7 @@ class Settings(BaseSettings):
     app_env: AppEnvironment = AppEnvironment.LOCAL
     internal_eval_enabled: bool = False
     enable_background_workers: bool = True
+    status_api_probe_url: str = "http://127.0.0.1:8000/health"
     chat_retention_days: int = 30
     rate_bootstrap: int = 60
     rate_bootstrap_window: int = 600
@@ -140,6 +141,11 @@ class Settings(BaseSettings):
     bot_generation_recovery_grace_seconds: int = 2
     background_job_poll_seconds: float = 1.0
     handoff_summary_max_attempts: int = 3
+    knowledge_gap_min_conversations: int = 5
+    knowledge_gap_window_days: int = 14
+    knowledge_gap_spike_conversations: int = 3
+    knowledge_gap_spike_hours: int = 24
+    knowledge_gap_similarity: float = 0.82
     ip_geolocation_provider_url: str | None = None
     ip_geolocation_retry_hours: int = 24
 
@@ -232,6 +238,10 @@ class Settings(BaseSettings):
         "bot_generation_lease_seconds",
         "bot_generation_recovery_grace_seconds",
         "handoff_summary_max_attempts",
+        "knowledge_gap_min_conversations",
+        "knowledge_gap_window_days",
+        "knowledge_gap_spike_conversations",
+        "knowledge_gap_spike_hours",
         "ip_geolocation_retry_hours",
     )
     @classmethod
@@ -249,6 +259,7 @@ class Settings(BaseSettings):
         "fast_path_min_score",
         "fast_path_margin_ratio",
         "background_job_poll_seconds",
+        "knowledge_gap_similarity",
     )
     @classmethod
     def positive_float(cls, value: float) -> float:

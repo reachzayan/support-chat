@@ -43,8 +43,11 @@ describe("settings console", () => {
     expect(screen.getByRole("heading", { name: "Settings" })).toBeInTheDocument()
     expect(screen.queryByText("Workspace preferences")).not.toBeInTheDocument()
     expect(screen.queryByRole("switch", { name: "Desktop notifications" })).not.toBeInTheDocument()
-    expect(screen.getByDisplayValue("Alex Morgan")).toBeInTheDocument()
-    expect(screen.getByDisplayValue("alex@example.local")).toBeInTheDocument()
+    expect(screen.queryByText("SampleSite operations")).not.toBeInTheDocument()
+    expect(screen.queryByText("supportchat / samplesite")).not.toBeInTheDocument()
+    expect(screen.getByText("Alex Morgan")).toBeInTheDocument()
+    expect(screen.getByText("alex@example.local")).toBeInTheDocument()
+    expect(screen.queryByDisplayValue("Alex Morgan")).not.toBeInTheDocument()
     expect(document.querySelector(".view-transition-enter")).toBeInTheDocument()
   })
 

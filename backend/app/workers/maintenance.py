@@ -3,6 +3,8 @@ from datetime import UTC, datetime, timedelta
 
 import structlog
 
+from app.db import session_maker
+from app.repositories.status_sample_repo import SAMPLE_RETENTION_DAYS, StatusSampleRepository
 from scripts.purge_expired_chats import purge_expired
 from scripts.purge_expired_logs import purge_expired_logs
 from scripts.purge_expired_refresh_tokens import purge_expired_refresh_tokens
@@ -20,6 +22,11 @@ async def run_maintenance_once() -> None:
         _last_chat_purge_at = now
     await purge_expired_logs(now=now)
     await purge_expired_refresh_tokens(now=now)
+    async with session_maker()() as session:
+        await StatusSampleRepository(session).delete_older_than(
+            now - timedelta(days=SAMPLE_RETENTION_DAYS)
+        )
+        await session.commit()
 
 
 async def maintenance_loop() -> None:

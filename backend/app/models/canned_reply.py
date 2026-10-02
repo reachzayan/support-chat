@@ -80,6 +80,14 @@ class CannedReply(Base):
     bot_eligible: Mapped[bool] = mapped_column(
         Boolean, server_default=text("true"), nullable=False, default=True
     )
+    # Only after: the bot sends this as a reply to the visitor's answer to that script.
+    follows_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("canned_replies.id", ondelete="SET NULL"), nullable=True
+    )
+    # After the bot sends this, a specialist is asked to take the chat.
+    hands_off: Mapped[bool] = mapped_column(
+        Boolean, server_default=text("false"), nullable=False, default=False
+    )
     embedder_id: Mapped[str | None] = mapped_column(String, nullable=True)
     embedding: Mapped[list[float] | None] = mapped_column(Vector(1536), nullable=True)
     search_document: Mapped[str | None] = mapped_column(

@@ -21,6 +21,26 @@ describe("API rewrites", () => {
     expect(logs?.destination).toBe("http://127.0.0.1:8000/api/logs/:path*")
   })
 
+  test("proxies the staff status board to the backend", async () => {
+    const rules = await nextConfig.rewrites!()
+    const list = Array.isArray(rules)
+      ? rules
+      : [...(rules.beforeFiles ?? []), ...(rules.afterFiles ?? []), ...(rules.fallback ?? [])]
+    const status = list.find((rule) => rule.source === "/api/status")
+    expect(status?.destination).toBe("http://127.0.0.1:8000/api/status")
+  })
+
+  test("proxies suggested-FAQ routes to the backend", async () => {
+    const rules = await nextConfig.rewrites!()
+    const list = Array.isArray(rules)
+      ? rules
+      : [...(rules.beforeFiles ?? []), ...(rules.afterFiles ?? []), ...(rules.fallback ?? [])]
+    const exact = list.find((rule) => rule.source === "/api/knowledge-gaps")
+    const nested = list.find((rule) => rule.source === "/api/knowledge-gaps/:path*")
+    expect(exact?.destination).toBe("http://127.0.0.1:8000/api/knowledge-gaps")
+    expect(nested?.destination).toBe("http://127.0.0.1:8000/api/knowledge-gaps/:path*")
+  })
+
   test("proxies visitor block routes to the backend", async () => {
     const rules = await nextConfig.rewrites!()
     const list = Array.isArray(rules)

@@ -57,6 +57,12 @@ class ConnectionManager:
         self._agents.clear()
         self._send_locks.clear()
 
+    def live_visitor_count(self) -> int:
+        return len(self._visitors)
+
+    def live_specialist_count(self) -> int:
+        return len({connection.user.id for connection in self._agents.values()})
+
     def register_visitor(self, connection: VisitorConnection) -> None:
         self._visitors[id(connection.websocket)] = connection
         self._send_locks[id(connection.websocket)] = asyncio.Lock()
