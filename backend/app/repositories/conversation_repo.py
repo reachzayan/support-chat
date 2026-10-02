@@ -213,6 +213,14 @@ class ConversationRepository:
             counts[str(state)] = int(total)
         return counts
 
+    async def count_closed_since(self, since: datetime) -> int:
+        result = await self._session.execute(
+            select(func.count())
+            .select_from(Conversation)
+            .where(Conversation.state == "closed", Conversation.closed_at >= since)
+        )
+        return int(result.scalar_one())
+
     async def list_inbox_sites(self) -> list[tuple[Site, int]]:
         queued = func.coalesce(
             func.sum(case((Conversation.state == "queued", 1), else_=0)),

@@ -12,6 +12,7 @@ from app.api.conversations import router as conversations_router
 from app.api.health import router as health_router
 from app.api.internal_dev import router as internal_dev_router
 from app.api.kb_sources import router as kb_sources_router
+from app.api.knowledge_gaps import router as knowledge_gaps_router
 from app.api.logs import router as logs_router
 from app.api.sites import router as sites_router
 from app.api.visitor_blocks import router as visitor_blocks_router
@@ -88,6 +89,7 @@ def create_app() -> FastAPI:
     application.include_router(sites_router)
     application.include_router(articles_router)
     application.include_router(kb_sources_router)
+    application.include_router(knowledge_gaps_router)
     application.include_router(logs_router)
     application.include_router(visitor_ws_router)
     application.include_router(agent_ws_router)
@@ -125,6 +127,7 @@ def create_app() -> FastAPI:
             path.startswith("/auth")
             or path.startswith("/api/conversations")
             or path.startswith("/api/visitor-blocks")
+            or path.startswith("/api/knowledge-gaps")
             or path.startswith("/api/internal/")
             or path.startswith("/api/public/widget-bootstrap")
         ):

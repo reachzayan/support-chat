@@ -9,6 +9,7 @@ import { Spinner } from "@/components/ui/spinner"
 
 import { AgentComposer } from "./agent-composer"
 import { HandoffCard } from "./handoff-card"
+import { HotGapBadge } from "./hot-gap-badge"
 import { TranscriptPane } from "./transcript-pane"
 import type { CannedReply } from "./types"
 import type { useInboxLive } from "./use-inbox-live"
@@ -169,6 +170,7 @@ const TranscriptActions = (
   >,
 ) => (
   <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
+    <HotGapBadge key={props.conversationId} conversationId={props.conversationId} />
     {props.escalationReason ? (
       <HandoffCard
         key={props.conversationId}

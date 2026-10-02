@@ -78,6 +78,7 @@ from app.services.grounded_response import (
     _safe_technical_failure,
 )
 from app.services.handoff_service import EscalationReason, HandoffService, HandoffTrigger
+from app.services.knowledge_gap_service import KnowledgeGapService
 from app.services.pii_redactor import redact_for_log
 from app.services.rate_limit import RateLimiter, RateLimitExceeded, RateLimitUnavailable
 from app.services.refusal_library import fallback_refusal_body, lookup_refusal
@@ -1269,6 +1270,7 @@ class ConversationService:
             response_outcome=decision.outcome.value if decision.outcome is not None else None,
             response_reason_code=decision.reason_code,
         )
+        await KnowledgeGapService(self._session).record_miss(conversation, inserted, decision)
         for citation in citations:
             self._session.add(
                 MessageCitation(

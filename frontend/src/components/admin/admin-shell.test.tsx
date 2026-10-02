@@ -1,4 +1,4 @@
-import { screen, waitFor } from "@testing-library/react"
+import { screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest"
 
@@ -63,6 +63,8 @@ describe("admin shell", () => {
     expect(screen.getByRole("link", { name: "Sites" })).toHaveAttribute("href", "/admin/sites")
     expect(screen.getByRole("link", { name: "Blocked" })).toHaveAttribute("href", "/admin/blocked")
     expect(screen.getByRole("link", { name: "Logs" })).toHaveAttribute("href", "/admin/logs")
+    expect(screen.queryByText("Accepting chats")).not.toBeInTheDocument()
+    expect(screen.getByText("Admin")).toBeInTheDocument()
     const accountLink = screen.getByRole("link", { name: "Alex Morgan account" })
     expect(accountLink).toHaveAttribute("href", "/admin/settings")
     expect(accountLink.closest('[data-slot="sidebar-footer"]')).not.toBeNull()
@@ -96,6 +98,7 @@ describe("admin shell", () => {
     expect(signOut).not.toHaveTextContent("Sign out")
     expect(signOut.querySelector("svg")).not.toBeNull()
   })
+
 
   test("restores a collapsed sidebar from the preferences cookie", async () => {
     renderWithProviders(

@@ -9,6 +9,28 @@ const frontendRoot = path.dirname(fileURLToPath(import.meta.url))
 const nosniff = { key: "X-Content-Type-Options", value: "nosniff" }
 const referrer = { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" }
 const widgetReferrer = { key: "Referrer-Policy", value: "no-referrer" }
+const toApi = (source: string) => ({ source, destination: `${apiOrigin}${source}` })
+const API_REWRITES = [
+  "/auth/:path*",
+  "/api/public/:path*",
+  "/api/conversations",
+  "/api/conversations/:path*",
+  "/api/canned-replies",
+  "/api/canned-replies/:path*",
+  "/api/sites",
+  "/api/sites/:path*",
+  "/api/articles/:path*",
+  "/api/kb-sources/:path*",
+  "/api/kb-pages/:path*",
+  "/api/kb-chunks/:path*",
+  "/api/handoffs/:path*",
+  "/api/logs",
+  "/api/logs/:path*",
+  "/api/knowledge-gaps",
+  "/api/knowledge-gaps/:path*",
+  "/api/visitor-blocks",
+  "/api/visitor-blocks/:path*",
+].map(toApi)
 // Staff CSP (nonce + strict-dynamic) is applied per-request in src/proxy.ts.
 
 const nextConfig: NextConfig = {
@@ -46,76 +68,7 @@ const nextConfig: NextConfig = {
     ]
   },
   async rewrites() {
-    return [
-      {
-        source: "/auth/:path*",
-        destination: `${apiOrigin}/auth/:path*`,
-      },
-      {
-        source: "/api/public/:path*",
-        destination: `${apiOrigin}/api/public/:path*`,
-      },
-      {
-        source: "/api/conversations",
-        destination: `${apiOrigin}/api/conversations`,
-      },
-      {
-        source: "/api/conversations/:path*",
-        destination: `${apiOrigin}/api/conversations/:path*`,
-      },
-      {
-        source: "/api/canned-replies",
-        destination: `${apiOrigin}/api/canned-replies`,
-      },
-      {
-        source: "/api/canned-replies/:path*",
-        destination: `${apiOrigin}/api/canned-replies/:path*`,
-      },
-      {
-        source: "/api/sites",
-        destination: `${apiOrigin}/api/sites`,
-      },
-      {
-        source: "/api/sites/:path*",
-        destination: `${apiOrigin}/api/sites/:path*`,
-      },
-      {
-        source: "/api/articles/:path*",
-        destination: `${apiOrigin}/api/articles/:path*`,
-      },
-      {
-        source: "/api/kb-sources/:path*",
-        destination: `${apiOrigin}/api/kb-sources/:path*`,
-      },
-      {
-        source: "/api/kb-pages/:path*",
-        destination: `${apiOrigin}/api/kb-pages/:path*`,
-      },
-      {
-        source: "/api/kb-chunks/:path*",
-        destination: `${apiOrigin}/api/kb-chunks/:path*`,
-      },
-      {
-        source: "/api/handoffs/:path*",
-        destination: `${apiOrigin}/api/handoffs/:path*`,
-      },
-      {
-        source: "/api/logs",
-        destination: `${apiOrigin}/api/logs`,
-      },
-      {
-        source: "/api/logs/:path*",
-        destination: `${apiOrigin}/api/logs/:path*`,
-      },
-      {
-        source: "/api/visitor-blocks",
-        destination: `${apiOrigin}/api/visitor-blocks`,
-      },
-      {
-        source: "/api/visitor-blocks/:path*",
-        destination: `${apiOrigin}/api/visitor-blocks/:path*`,
-      },
-    ]
+    return API_REWRITES
   },
 }
 

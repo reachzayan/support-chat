@@ -138,6 +138,7 @@ describe("visitor block API routing", () => {
   })
 })
 
+
 describe("widget document CSP", () => {
   afterEach(() => {
     vi.unstubAllGlobals()

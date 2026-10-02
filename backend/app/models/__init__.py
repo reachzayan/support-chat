@@ -12,6 +12,7 @@ from app.models.kb_page_llm_extract import KbPageLlmExtract
 from app.models.kb_smoke_assertion import KbSmokeAssertion
 from app.models.kb_snapshot import KbSnapshot
 from app.models.kb_source import KbSource
+from app.models.knowledge_gap import KnowledgeGap, KnowledgeGapHit
 from app.models.message import Message
 from app.models.message_citation import MessageCitation
 from app.models.refresh_token import RefreshToken
@@ -35,6 +36,8 @@ __all__ = [
     "KbSmokeAssertion",
     "KbSnapshot",
     "KbSource",
+    "KnowledgeGap",
+    "KnowledgeGapHit",
     "Message",
     "MessageCitation",
     "RefreshToken",

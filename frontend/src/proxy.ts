@@ -64,6 +64,8 @@ export const STAFF_PREFIXES = [
   "/api/kb-chunks",
   "/api/handoffs",
   "/api/logs",
+  "/api/status",
+  "/api/knowledge-gaps",
   "/api/visitor-blocks",
 ]
 
