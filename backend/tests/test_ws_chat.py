@@ -260,8 +260,13 @@ def test_duplicate_client_ids_ack_once_and_conflict_on_payload_change(
 ) -> None:
     ctx = _boot(client)
     empty_submission = "10000000-0000-4000-8000-000000000099"
+    conversation_id: uuid.UUID | None = None
 
-    with client.websocket_connect("/ws/visitor", headers={"Origin": WIDGET_ORIGIN}) as visitor:
+    # Starlette's TestClient portal can CancelledError on close after a bot fanout;
+    # keep product assertions outside so a cleanup race cannot fail a green check.
+    socket = client.websocket_connect("/ws/visitor", headers={"Origin": WIDGET_ORIGIN})
+    visitor = socket.__enter__()
+    try:
         auth_visitor(visitor, ctx["bootstrap_token"])
         collect_until(visitor, lambda frames: any(frame.get("type") == "state" for frame in frames))
         visitor.send_json(
@@ -395,7 +400,13 @@ def test_duplicate_client_ids_ack_once_and_conflict_on_payload_change(
             ),
         )
         assert frames_of_type(conflict, "error")[-1]["code"] == "idempotency_conflict"
+    finally:
+        try:
+            socket.__exit__(None, None, None)
+        except CancelledError:
+            pass
 
+    assert conversation_id is not None
     assert message_count(conversation_id, role="visitor") == 1
     assert message_count(conversation_id, body=STILL_THERE) == 1
     assert message_count(conversation_id, body="different body") == 0
