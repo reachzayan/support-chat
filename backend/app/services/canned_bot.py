@@ -395,7 +395,7 @@ async def _dense_ids(
     ids: list[UUID] = []
     cosine_by_id: dict[UUID, float] = {}
     for reply_id, dist in result.all():
-        similarity = 1.0 - float(dist or 1.0)
+        similarity = 1.0 - float(dist if dist is not None else 1.0)
         ids.append(reply_id)
         cosine_by_id[reply_id] = similarity
     return ids, cosine_by_id

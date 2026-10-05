@@ -1,6 +1,7 @@
 """End-to-end coverage for the temporary, local-only chatbot workbench."""
 
 import asyncio
+import json
 from types import SimpleNamespace
 from uuid import UUID
 
@@ -33,6 +34,23 @@ VBANK_REPLY = "VBANK helps verify who owns a bank account."
 
 class _GroundedMessages:
     async def create(self, **kwargs):
+        stage = kwargs.get("tool_choice", {}).get("name")
+        if stage:
+            payload = json.loads(kwargs["messages"][-1]["content"])
+            if stage == "resolve_request":
+                latest = payload["latest_message"]
+                value = {
+                    "query": latest,
+                    "relation": "continuation" if "simpl" in latest else "topic_change",
+                    "intent": "information",
+                    "ambiguity": "",
+                }
+            else:
+                value = {"status": "answered", "reason": "responsive"}
+            return SimpleNamespace(
+                stop_reason="tool_use",
+                content=[SimpleNamespace(type="tool_use", name=stage, input=value)],
+            )
         latest = str(kwargs["messages"][-1]["content"])
         documents = kwargs["messages"][0]["content"]
         if "VBANK" in latest:

@@ -4,11 +4,14 @@
 from __future__ import annotations
 
 import re
+from dataclasses import replace
 
 import structlog
 
 from app.llm.prompts import document_body
+from app.llm.safety_markers import OUTPUT_PII_PATTERNS
 from app.services import output_validator
+from app.services.faq_fastpath import is_marketing_cta
 from app.services.grounded_response_types import (
     Citation,
     DraftValidation,
@@ -76,6 +79,22 @@ _LIMITATION_RE = re.compile(
     r"|(?:no puedo|no podemos) (?:confirmar|garantizar|verificar|determinar|proporcionar)\b"
     r"|(?:un|nuestro) especialista (?:debe|necesita|tiene que) "
     r"(?:confirmar|verificar|revisar|proporcionar)\b)",
+    re.I,
+)
+
+
+_UNPERFORMED_BOOKING_RE = re.compile(
+    r"^(?:I (?:have not|haven't|haven’t) (?:booked|reserved|scheduled) (?:an|any) appointment"
+    r"(?: for you)?(?: yet)?"
+    r"|No he (?:reservado|programado) (?:ninguna|una) cita(?: para usted)?)[.!]?$",
+    re.I,
+)
+
+# Mentioning a guarantee in a limitation or a request to ask about one is
+# not an affirmative business promise. Other commitment terms stay literal.
+_NON_ASSERTED_GUARANTEE_RE = re.compile(
+    r"(?:\b(?:i|we) (?:cannot|can't|do not|don't) confirm\b[^,;.!?]{0,90}"
+    r"|\b(?:ask|inquire|enquire) about\b[^,;.!?]{0,50})$",
     re.I,
 )
 
@@ -169,6 +188,7 @@ def _is_keepable_gap(text: str) -> bool:
         _is_courtesy_edge(stripped)
         or _is_clarifying_only(stripped)
         or _LIMITATION_RE.search(stripped)
+        or _UNPERFORMED_BOOKING_RE.fullmatch(stripped)
     )
 
 
@@ -185,6 +205,111 @@ def uncited_factual_sentences(draft: ModelDraft) -> list[str]:
     ]
 
 
+def remove_draft_sentences(draft: ModelDraft, selected: list[str]) -> ModelDraft | None:
+    """Delete only whole, exact sentences and remap retained citation offsets.
+
+    Selection is untrusted model data: it can remove text, never add claims or
+    evidence. Callers must validate and reassess the remaining answer.
+    """
+    spans = sentence_spans(draft.body)
+    removals = {text.strip() for text in selected}
+    if not removals or not removals.issubset({span.group().strip() for span in spans}):
+        return None
+    parts, citations, length = [], [], 0
+    for span in spans:
+        if span.group().strip() in removals:
+            continue
+        separator = " " if parts else ""
+        offset = length + len(separator) - span.start()
+        parts.append(separator + span.group())
+        length += len(parts[-1])
+        citations.extend(
+            replace(
+                citation,
+                response_start=max(citation.response_start, span.start()) + offset,
+                response_end=min(citation.response_end, span.end()) + offset,
+            )
+            for citation in draft.citations
+            if citation.response_start < span.end() and citation.response_end > span.start()
+        )
+    body = "".join(parts)
+    return ModelDraft(body, citations, draft.request_id) if body.strip() else None
+
+
+def attribute_contact_literals(draft: ModelDraft, units: list[EvidenceUnit]) -> ModelDraft:
+    """Attribute omitted contact literals only when they exactly occur in evidence.
+
+    This supports only the literal email/phone, not surrounding claims about
+    booking, availability, or callbacks. Full validation and semantic review
+    still apply to the answer.
+    """
+    citations = list(draft.citations)
+    for pattern in OUTPUT_PII_PATTERNS[-2:]:
+        for match in pattern.finditer(draft.body):
+            contact = match.group()
+            if any(
+                item.response_start <= match.start()
+                and item.response_end >= match.end()
+                and contact in item.cited_text
+                for item in citations
+            ):
+                continue
+            for unit in units:
+                source = redact_evidence(document_body(unit))
+                start = source.find(contact)
+                if start < 0:
+                    continue
+                citations.append(
+                    Citation(
+                        unit.id,
+                        unit.snapshot_id,
+                        match.start(),
+                        match.end(),
+                        start,
+                        start + len(contact),
+                        contact,
+                        unit.source_title,
+                        unit.source_url,
+                    )
+                )
+                break
+    return ModelDraft(draft.body, citations, draft.request_id)
+
+
+def focus_unknown_contact(draft: ModelDraft, units: list[EvidenceUnit]) -> ModelDraft:
+    """Keep a leading honest limitation and one verified route, without sales filler.
+
+    This narrow failure path adds no company claims: the limitation remains model
+    authored and the contact must occur literally in both the draft and evidence.
+    The returned draft still needs normal validation and semantic assessment.
+    """
+    sentences = sentence_spans(draft.body)
+    if not sentences:
+        return draft
+    limitation = sentences[0].group().strip()
+    if not _LIMITATION_RE.search(limitation) or not re.match(
+        r"^(?:I |We |No puedo |No podemos )", limitation, re.I
+    ):
+        return draft
+    sources = [redact_evidence(document_body(unit)) for unit in units]
+    matches = sorted(
+        (match for pattern in OUTPUT_PII_PATTERNS[-2:] for match in pattern.finditer(draft.body)),
+        key=lambda match: match.start(),
+    )
+    for match in matches:
+        contact = match.group()
+        if any(contact in source for source in sources):
+            route = (
+                f"Puede contactarnos en {contact}."
+                if limitation.casefold().startswith("no ")
+                else f"You can contact us at {contact}."
+            )
+            return attribute_contact_literals(
+                ModelDraft(f"{limitation}\n\n{route}", [], draft.request_id), units
+            )
+    return draft
+
+
 def validate_draft(  # noqa: C901
     draft: ModelDraft,
     units: list[EvidenceUnit],
@@ -194,6 +319,8 @@ def validate_draft(  # noqa: C901
     citations = list(draft.citations)
     if not body:
         return _reject("empty", draft)
+    if is_marketing_cta(body):
+        return _reject("non_actionable_cta", draft)
 
     allowed = {unit.id: unit for unit in units}
     cited_parts: list[str] = []
@@ -252,11 +379,16 @@ def validate_draft(  # noqa: C901
             # Citation text blocks may cover a clause, but attribution is
             # at the sentence level. Commitments still need literal backing.
             proof = " ".join(item.cited_text.casefold() for item in attached)
-            for term in re.findall(
+            for match in re.finditer(
                 r"\b(?:free|guarantee(?:d)?|unlimited|certified|accredited|licensed)\b",
                 text,
                 re.I,
             ):
+                term = match.group()
+                if term.casefold().startswith("guarantee") and _NON_ASSERTED_GUARANTEE_RE.search(
+                    text[: match.start()]
+                ):
+                    continue
                 if not re.search(rf"\b{re.escape(term.casefold())}\b", proof):
                     return _reject("unsupported_commitment", draft)
 
@@ -284,7 +416,19 @@ def validate_draft(  # noqa: C901
         max_chars=_MAX_CHARS,
         curated_refusal=clarifying
         or visitor_recap
-        or (not citations and bool(_LIMITATION_RE.search(body))),
+        or (
+            not citations
+            and (
+                bool(_LIMITATION_RE.search(body))
+                or (
+                    any(
+                        _UNPERFORMED_BOOKING_RE.fullmatch(s.group().strip())
+                        for s in sentence_spans(body)
+                    )
+                    and all(_is_keepable_gap(s.group()) for s in sentence_spans(body))
+                )
+            )
+        ),
         public_contact_text=cited_text,
     )
     if not safety.accepted:

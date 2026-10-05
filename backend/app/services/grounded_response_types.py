@@ -3,7 +3,11 @@ from __future__ import annotations
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from enum import StrEnum
+from typing import TYPE_CHECKING
 from uuid import UUID
+
+if TYPE_CHECKING:
+    from app.llm.answer_relevance import ResolvedRequest
 
 
 class ResponseOutcome(StrEnum):
@@ -62,6 +66,7 @@ class TurnContext:
     explicit_human_request: bool = False
     sensitive: bool = False
     off_brand_blocklist: tuple[str, ...] = ()
+    resolved_request: ResolvedRequest | None = None
 
 
 @dataclass(frozen=True)
