@@ -222,7 +222,7 @@ class KnowledgeGapService:
         await self.close(await self.open_gap(gap_id), "dismissed", user)
 
     async def open_gap(self, gap_id: UUID) -> KnowledgeGap:
-        gap = await self._gaps.get(gap_id)
+        gap = await self._gaps.lock(gap_id)
         if gap is None:
             raise KnowledgeGapError("not_found")
         if gap.status != "open":
