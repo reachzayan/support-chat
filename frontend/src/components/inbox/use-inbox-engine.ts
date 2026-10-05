@@ -1,13 +1,12 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useRef, type Dispatch, type SetStateAction } from "react"
+import { useCallback, useEffect, useRef, type Dispatch, type SetStateAction } from "react"
 
-import { agentSocketUrl, createAgentSocket } from "@/lib/agent-ws"
-import { getAccessToken, redirectToLogin, refreshSession } from "@/lib/auth-client"
 import { createReconnectScheduler } from "@/lib/ws-reconnect"
 
 import { fetchInboxDetail, fetchInboxList, mergeInboxMessages } from "./inbox-api"
-import { applyAgentFrame, emptyLive, maxMessageId, type InboxLive } from "./inbox-session"
+import { maxMessageId, type InboxLive } from "./inbox-session"
+import { bindAgentSocket, resumeAgentSocket, type SocketApi } from "./inbox-socket"
 import {
   INBOX_LIST_POLL_MS,
   type CannedReply,
@@ -16,167 +15,9 @@ import {
   type InboxListItem,
   type InboxSite,
 } from "./types"
+import type { InboxRefs } from "./use-inbox-refs"
 
-export type SocketApi = ReturnType<typeof createAgentSocket>
 type DetailBundle = NonNullable<Awaited<ReturnType<typeof fetchInboxDetail>>>
-
-export type InboxRefs = {
-  selectedRef: { current: string | null }
-  lastIdRef: { current: number }
-  filterRef: { current: InboxFilter }
-  siteIdRef: { current: string | null }
-  userRef: { current: string }
-  liveRef: { current: InboxLive }
-  markSelected: (id: string | null) => void
-  markFilter: (filter: InboxFilter) => void
-  markSiteId: (siteId: string | null) => void
-  resetLive: (live: InboxLive) => void
-}
-
-export const useInboxSyncRefs = (
-  selectedId: string | null,
-  live: InboxLive,
-  filter: InboxFilter,
-  siteId: string | null,
-  userId: string,
-): InboxRefs => {
-  const selectedRef = useRef(selectedId)
-  const lastIdRef = useRef(0)
-  const filterRef = useRef(filter)
-  const siteIdRef = useRef(siteId)
-  const userRef = useRef(userId)
-  const liveRef = useRef(live)
-  const markSelected = useCallback((id: string | null) => {
-    selectedRef.current = id
-  }, [])
-  const markFilter = useCallback((nextFilter: InboxFilter) => {
-    filterRef.current = nextFilter
-  }, [])
-  const markSiteId = useCallback((nextSiteId: string | null) => {
-    siteIdRef.current = nextSiteId
-  }, [])
-  const resetLive = useCallback((nextLive: InboxLive) => {
-    liveRef.current = nextLive
-  }, [])
-  const refs = useMemo(
-    () => ({
-      selectedRef,
-      lastIdRef,
-      filterRef,
-      siteIdRef,
-      userRef,
-      liveRef,
-      markSelected,
-      markFilter,
-      markSiteId,
-      resetLive,
-    }),
-    [
-      selectedRef,
-      lastIdRef,
-      filterRef,
-      siteIdRef,
-      userRef,
-      liveRef,
-      markSelected,
-      markFilter,
-      markSiteId,
-      resetLive,
-    ],
-  )
-  useEffect(() => {
-    selectedRef.current = selectedId
-  }, [selectedId])
-  useEffect(() => {
-    lastIdRef.current = maxMessageId(live.lines)
-  }, [live.lines])
-  useEffect(() => {
-    filterRef.current = filter
-  }, [filter])
-  useEffect(() => {
-    siteIdRef.current = siteId
-  }, [siteId])
-  useEffect(() => {
-    userRef.current = userId
-  }, [userId])
-  useEffect(() => {
-    if (live.detail === null && liveRef.current.detail !== null) {
-      return
-    }
-    liveRef.current = live
-  }, [live])
-  return refs
-}
-
-type AgentScheduler = ReturnType<typeof createReconnectScheduler>
-
-const bindAgentSocket = (
-  refs: InboxRefs,
-  setLive: (live: InboxLive) => void,
-  reloadList: (filter: InboxFilter) => void,
-  reloadDetail: (id: string) => void,
-  scheduler: AgentScheduler,
-) => {
-  const socket = createAgentSocket({
-    url: agentSocketUrl(),
-    accessToken: getAccessToken() ?? "",
-    onFrame: (frame) => {
-      scheduler.markAuthenticated()
-      const effect = applyAgentFrame(
-        refs.liveRef.current,
-        frame,
-        refs.userRef.current,
-        refs.selectedRef.current,
-      )
-      refs.liveRef.current = effect.live
-      setLive(effect.live)
-      if (effect.refetchList) {
-        reloadList(refs.filterRef.current)
-      }
-      if (effect.refetchDetailId !== null) {
-        reloadDetail(effect.refetchDetailId)
-      }
-    },
-    onClose: (code) => {
-      void handleAgentSocketClose(code, socket, refs, scheduler)
-    },
-  })
-  return socket
-}
-
-const resumeAgentSocket = (socket: SocketApi, refs: InboxRefs) => {
-  socket.reconnect()
-  if (refs.selectedRef.current !== null) {
-    socket.subscribe(refs.selectedRef.current, refs.lastIdRef.current)
-  }
-  socket.flushUnacked()
-}
-
-const handleAgentSocketClose = async (
-  code: number,
-  socket: SocketApi,
-  refs: InboxRefs,
-  scheduler: AgentScheduler,
-) => {
-  if (code === 1000 || code === 4403) {
-    return
-  }
-  if (code === 4401) {
-    const result = await refreshSession()
-    if (result.status === "unauthenticated") {
-      redirectToLogin()
-      return
-    }
-    if (result.status !== "authenticated") {
-      return
-    }
-    socket.setAccessToken(getAccessToken() ?? "")
-    scheduler.markAuthenticated()
-    resumeAgentSocket(socket, refs)
-    return
-  }
-  scheduler.handleClose()
-}
 
 const applyFetchedDetail = (
   conversationId: string,
@@ -584,7 +425,7 @@ export const useInboxSideEffects = (
 
   useEffect(() => {
     const timer = window.setInterval(() => {
-      if (document.hidden || socketRef.current?.isOpen()) {
+      if (document.hidden) {
         return
       }
       reloadList(refs.filterRef.current)
@@ -593,7 +434,7 @@ export const useInboxSideEffects = (
       }
     }, INBOX_LIST_POLL_MS)
     return () => window.clearInterval(timer)
-  }, [reloadDetail, reloadList, refs.filterRef, refs.selectedRef, socketRef])
+  }, [reloadDetail, reloadList, refs.filterRef, refs.selectedRef])
 
   useEffect(() => {
     let disposed = false
@@ -631,74 +472,4 @@ export const useInboxSideEffects = (
       socketRef.current = null
     }
   }, [reloadDetail, reloadList, refs, setLive, socketRef])
-}
-
-export const useInboxActions = (
-  refs: InboxRefs,
-  socketRef: { current: SocketApi | null },
-  setSelectedId: Dispatch<SetStateAction<string | null>>,
-  setLive: Dispatch<SetStateAction<InboxLive>>,
-  reloadDetail: (id: string) => void,
-  reloadList: (filter: InboxFilter, cursor?: string | null) => void,
-) => {
-  const handleSelect = useCallback(
-    (id: string) => {
-      if (refs.selectedRef.current === id && refs.liveRef.current.detail?.id === id) {
-        return
-      }
-      refs.markSelected(id)
-      setSelectedId(id)
-      const nextLive = emptyLive()
-      refs.resetLive(nextLive)
-      setLive(nextLive)
-      reloadDetail(id)
-    },
-    [refs, reloadDetail, setLive, setSelectedId],
-  )
-  const handleJoin = useCallback(() => {
-    if (refs.selectedRef.current === null) {
-      return
-    }
-    setLive((current) => ({ ...current, joinPending: true }))
-    socketRef.current?.join(refs.selectedRef.current)
-  }, [refs.selectedRef, setLive, socketRef])
-  const handleMarkContacted = useCallback(() => {
-    if (refs.selectedRef.current !== null) {
-      socketRef.current?.closeAttention(refs.selectedRef.current)
-    }
-  }, [refs.selectedRef, socketRef])
-  const handleEnd = useCallback(() => {
-    if (refs.selectedRef.current !== null) {
-      socketRef.current?.end(refs.selectedRef.current)
-    }
-  }, [refs.selectedRef, socketRef])
-  const handleTransfer = useCallback(() => {
-    if (refs.selectedRef.current !== null) {
-      socketRef.current?.transferToBot(refs.selectedRef.current)
-    }
-  }, [refs.selectedRef, socketRef])
-  const handleSend = useCallback(
-    (body: string) => {
-      if (refs.selectedRef.current !== null && socketRef.current !== null) {
-        return socketRef.current.sendMessage(refs.selectedRef.current, crypto.randomUUID(), body)
-      }
-      return false
-    },
-    [refs.selectedRef, socketRef],
-  )
-  const handleLoadMore = useCallback(
-    (cursor: string) => {
-      reloadList(refs.filterRef.current, cursor)
-    },
-    [refs.filterRef, reloadList],
-  )
-  return {
-    handleSelect,
-    handleJoin,
-    handleMarkContacted,
-    handleEnd,
-    handleTransfer,
-    handleSend,
-    handleLoadMore,
-  }
 }

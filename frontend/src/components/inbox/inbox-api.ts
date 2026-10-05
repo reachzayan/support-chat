@@ -1,5 +1,6 @@
 import { staffGet } from "@/lib/auth-client"
 
+import { parseCitations } from "./inbox-citations"
 import type {
   CannedReply,
   ConversationDetail,
@@ -62,7 +63,11 @@ export const fetchInboxDetailPage = async (conversationId: string, beforeId?: nu
   if (!response.ok) {
     return null
   }
-  return (await response.json()) as ConversationDetail
+  const detail = (await response.json()) as ConversationDetail
+  for (const message of detail.messages) {
+    message.citations = parseCitations(message.citations)
+  }
+  return detail
 }
 
 export const fetchInboxDetail = async (conversationId: string) => {
