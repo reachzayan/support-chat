@@ -8,7 +8,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from app.db import SessionDep
 from app.security.deps import CurrentAdmin, CurrentUser
-from app.services.conversation_queries import ConversationQueries
+from app.services.conversation_queries import EXPORT_MAX, EXPORTABLE_COLUMNS, ConversationQueries
 from app.services.conversation_types import CommandError
 from app.services.handoff_service import HandoffError, HandoffService
 from app.services.rate_limit import RateLimiter, RateLimitExceeded, RateLimitUnavailable
@@ -60,6 +60,12 @@ class PageFactsOut(BaseModel):
     referrer: str | None
 
 
+class CitationOut(BaseModel):
+    source_url: str | None
+    source_title: str | None
+    cited_text: str | None = None
+
+
 class MessageOut(BaseModel):
     id: int
     role: str
@@ -71,6 +77,7 @@ class MessageOut(BaseModel):
     display_locator: str | None = None
     source_title: str | None = None
     system_reason: str | None = None
+    citations: list[CitationOut] = Field(default_factory=list)
     created_at: datetime
 
 
@@ -135,13 +142,18 @@ class SubmissionListOut(BaseModel):
 class SubmissionExportIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    columns: list[str] = Field(min_length=1)
+    columns: list[str] = Field(min_length=1, max_length=len(EXPORTABLE_COLUMNS))
     site_id: UUID | None = None
     date_from: date | None = None
     date_to: date | None = None
 
 
 def _map_command_error(exc: CommandError) -> HTTPException:
+    if exc.code == "export_too_large":
+        return HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=f"Export exceeds {EXPORT_MAX:,} rows. Narrow the site or date filters.",
+        )
     if exc.code == "not_found":
         return HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
     if exc.code == "unknown_column":
