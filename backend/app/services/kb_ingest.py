@@ -54,6 +54,7 @@ async def enqueue_wakeup(source_id: UUID) -> None:
 
 
 def allowed_hosts_for(site: Site, start_url: str) -> set[str]:
+    """Crawl hosts for start_url plus the www twin. Widget embed origins are not crawl hosts."""
     hosts: set[str] = set()
     start_host = urlparse(start_url).hostname
     if start_host:
@@ -63,10 +64,6 @@ def allowed_hosts_for(site: Site, start_url: str) -> set[str]:
             hosts.add(folded.removeprefix("www."))
         else:
             hosts.add(f"www.{folded}")
-    for origin in site.allowed_origins:
-        host = urlparse(origin).hostname
-        if host:
-            hosts.add(host.casefold())
     return hosts
 
 
@@ -82,7 +79,7 @@ def path_under_prefix(url: str, start_url: str) -> bool:
     parsed = urlparse(url)
     if parsed.hostname != start.hostname:
         return False
-    start_path = start.path or "/"
+    start_path = (start.path or "/").rstrip("/") or "/"
     parsed_path = parsed.path or "/"
     if start_path == "/":
         return True
@@ -125,10 +122,6 @@ def _url_allowed_by_source_rules(url: str, source: KbSource) -> bool:
     if path_depth(url, source.start_url) > source.max_depth:
         return False
     return path_matches_globs(path, source.include_globs or [], source.exclude_globs or [])
-
-
-def _same_prefix(url: str, start_url: str) -> bool:
-    return path_under_prefix(url, start_url)
 
 
 def _links_from(html: str, page_url: str) -> list[str]:

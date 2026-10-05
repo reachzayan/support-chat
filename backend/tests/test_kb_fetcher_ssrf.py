@@ -8,6 +8,7 @@ from app.services.kb_fetcher import (
     _without_unsafe_browser_flags,
     fetch_page,
 )
+from app.services.kb_ingest import allowed_hosts_for, host_allowed
 
 
 def test_crawler_keeps_chromium_sandbox_enabled() -> None:
@@ -47,7 +48,7 @@ async def test_missing_playwright_binary_fails_with_browser_error(monkeypatch) -
         )
 
     monkeypatch.setattr("app.services.kb_fetcher._crawl4ai", boom)
-    monkeypatch.setattr("app.services.kb_fetcher.fetch_html", httpx_fetch)
+    monkeypatch.setattr("app.services.kb_crawl.fetch_html", httpx_fetch)
     try:
         await fetch_page("https://sample-site.example.com/faq", {"sample-site.example.com"})
         raised = False
@@ -126,6 +127,54 @@ async def test_crawler_redirected_url_off_allowlist_is_ssrf() -> None:
     except FetchError as exc:
         raised = True
         assert exc.code == "ssrf"
+    assert raised
+
+
+def test_widget_embed_origin_is_not_a_crawl_host() -> None:
+    site = SimpleNamespace(
+        allowed_origins=["https://sample-site.example.com", "https://preview.example.test"]
+    )
+    hosts = allowed_hosts_for(site, "https://sample-site.example.com/faq")
+    assert hosts == {"sample-site.example.com", "www.sample-site.example.com"}
+    assert (
+        host_allowed(
+            "https://preview.example.test/injected",
+            site,
+            "https://sample-site.example.com/faq",
+        )
+        is False
+    )
+
+
+async def test_crawler_redirect_to_widget_embed_origin_is_ssrf() -> None:
+    site = SimpleNamespace(
+        allowed_origins=["https://sample-site.example.com", "https://preview.example.test"]
+    )
+    hosts = allowed_hosts_for(site, "https://sample-site.example.com/faq")
+    public = ipaddress.ip_address("1.1.1.1")
+
+    async def crawler(_url: str):
+        return SimpleNamespace(
+            success=True,
+            html="<html><body><h1>Preview</h1><p>Injected from preview host.</p></body></html>",
+            url="https://sample-site.example.com/faq",
+            redirected_url="https://preview.example.test/injected",
+            status_code=200,
+            response_headers={"content-type": "text/html; charset=utf-8"},
+            markdown="# Preview\n\nInjected from preview host.",
+        )
+
+    with patch("app.services.kb_crawl._resolve_ips", return_value=[public]):
+        try:
+            await fetch_page(
+                "https://sample-site.example.com/faq",
+                hosts,
+                crawler=crawler,
+            )
+            raised = False
+        except FetchError as exc:
+            raised = True
+            assert exc.code == "ssrf"
     assert raised
 
 
