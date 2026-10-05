@@ -89,17 +89,20 @@ async def _refresh_canned_embeddings() -> bool:
 async def durable_work_loop() -> None:
     while True:
         try:
+            worked = False
             bot_claim = await _claim_bot()
             if bot_claim is not None:
                 await _run_bot(bot_claim)
-                continue
+                worked = True
             summary = await _claim_summary()
             if summary is not None:
                 await _run_summary(summary)
-                continue
+                worked = True
             if await _assign_gap_hit():
-                continue
+                worked = True
             if await _refresh_canned_embeddings():
+                worked = True
+            if worked:
                 continue
         except asyncio.CancelledError:
             raise

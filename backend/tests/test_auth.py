@@ -199,12 +199,16 @@ def test_refresh_rotation_and_reuse_revokes_family(client: TestClient) -> None:
     r2 = _cookie_value(rotated, "supportchat_refresh")
     assert r2 != r1
     assert rotated.json()["user"]["display_name"] == ALEX_NAME
+    csrf = client.cookies.get("supportchat_csrf")
 
     client.cookies.set("supportchat_refresh", r1, path="/auth")
     replay = client.post("/auth/refresh", headers=_csrf_headers(client))
     assert replay.status_code == 401
 
     client.cookies.set("supportchat_refresh", r2, path="/auth")
+    # A rejected replay clears the browser session. Simulate an attacker who
+    # retained both cookies to verify that the rotated family is revoked too.
+    client.cookies.set("supportchat_csrf", csrf, path="/")
     after_reuse = client.post("/auth/refresh", headers=_csrf_headers(client))
     assert after_reuse.status_code == 401
 

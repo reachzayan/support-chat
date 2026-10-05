@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.user import User
 from app.services.canned_reply_service import CannedReplyService
+from app.services.kb_ingest import enqueue_wakeup
 from app.services.kb_source_admin import KbSourceService
 from app.services.knowledge_gap_service import KnowledgeGapError, KnowledgeGapService
 
@@ -25,6 +26,7 @@ async def answer_with_canned_reply(
         body=body,
         bot_eligible=True,
         is_admin=user.is_admin,
+        commit=False,
     )
     await gaps.close(gap, "canned", user)
 
@@ -36,5 +38,8 @@ async def answer_with_knowledge_text(
         raise KnowledgeGapError("forbidden")
     gaps = KnowledgeGapService(session)
     gap = await gaps.open_gap(gap_id)
-    await KbSourceService(session).create_text_source(gap.site_id, user, title=title, body=body)
+    source = await KbSourceService(session).create_text_source(
+        gap.site_id, user, title=title, body=body, commit=False
+    )
     await gaps.close(gap, "knowledge", user)
+    await enqueue_wakeup(source.id)

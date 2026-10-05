@@ -27,6 +27,7 @@ def _queue_redis() -> redis.Redis:
         get_settings().redis_url,
         decode_responses=True,
         socket_connect_timeout=2,
+        socket_timeout=10,
     )
 
 
@@ -135,7 +136,12 @@ async def _drain_queued(hinted: UUID | None, embedder) -> None:
 async def _source_loop(embedder, lock: asyncio.Lock) -> None:
     while True:
         hinted = await _wait_wakeup(lock)
-        await _drain_queued(hinted, embedder)
+        try:
+            await _drain_queued(hinted, embedder)
+        except Exception as exc:
+            # Claim/reaper failures must not terminate every ingest consumer.
+            log.warning("ingest_drain_failed", error=type(exc).__name__)
+            await asyncio.sleep(RETRY_SLEEP)
 
 
 async def run_worker() -> None:

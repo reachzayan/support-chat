@@ -1,4 +1,6 @@
+import json
 import uuid
+from types import SimpleNamespace
 
 from sqlalchemy import select
 
@@ -28,6 +30,23 @@ from tests.ws_helpers import HOST_ORIGIN, message_count
 def _fake_anthropic(captured: dict, answer: str = SCRIPTED_ANSWER):
     class FakeMessages:
         async def create(self, **kwargs):
+            stage = kwargs.get("tool_choice", {}).get("name")
+            if stage:
+                payload = json.loads(kwargs["messages"][-1]["content"])
+                value = (
+                    {
+                        "query": payload["latest_message"],
+                        "relation": "standalone",
+                        "intent": "information",
+                        "ambiguity": "",
+                    }
+                    if stage == "resolve_request"
+                    else {"status": "answered", "reason": "responsive"}
+                )
+                return SimpleNamespace(
+                    stop_reason="tool_use",
+                    content=[SimpleNamespace(type="tool_use", name=stage, input=value)],
+                )
             captured.update(kwargs)
 
             # Documents are EvidenceUnit-like; cited_text must match the redacted body.

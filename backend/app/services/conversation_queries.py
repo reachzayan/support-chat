@@ -132,13 +132,15 @@ class ConversationQueries:
         )
         rows = await self._conversations.list_submissions(
             offset=0,
-            limit=EXPORT_MAX,
+            limit=EXPORT_MAX + 1,
             site_id=site_id,
             created_from=created_from,
             created_before=created_before,
         )
+        if len(rows) > EXPORT_MAX:
+            raise CommandError("export_too_large")
         buffer = StringIO()
-        writer = csv.writer(buffer)
+        writer = csv.writer(buffer, quoting=csv.QUOTE_ALL)
         writer.writerow(columns)
         for conversation, visitor, site, agent, opening, block_id in rows:
             item = _submission_item(conversation, visitor, site, agent, opening, block_id)
@@ -372,4 +374,10 @@ def _export_cell(column: str, item: dict) -> str:
         return ""
     if isinstance(value, datetime):
         return value.isoformat()
-    return str(value)
+    text = str(value)
+    # csv.writer escapes separators, but spreadsheets also interpret cell formulas.
+    if text.lstrip().startswith(
+        ("=", "+", "-", "@", "\uff1d", "\uff0b", "\uff0d", "\uff20")
+    ) or text.startswith(("\t", "\r", "\n")):
+        return "'" + text
+    return text

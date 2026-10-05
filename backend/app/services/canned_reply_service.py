@@ -94,6 +94,7 @@ class CannedReplyService:
         follows_id: UUID | None = None,
         hands_off: bool = False,
         is_admin: bool = False,
+        commit: bool = True,
     ) -> CannedReply:
         normalized_shortcut = normalize_shortcut(shortcut)
         normalized_aliases = normalize_aliases(aliases, normalized_shortcut)
@@ -115,7 +116,10 @@ class CannedReplyService:
                 hands_off=hands_off,
             )
             await embed_replies([reply])
-            await self._session.commit()
+            if commit:
+                await self._session.commit()
+            else:
+                await self._session.flush()
         except IntegrityError as exc:
             await self._session.rollback()
             raise CannedReplyError("conflict") from exc

@@ -3,7 +3,7 @@ import asyncio
 from datetime import UTC, datetime, timedelta
 
 import structlog
-from sqlalchemy import delete, exists, func, select
+from sqlalchemy import delete, exists, func, or_, select
 
 from app.db import session_maker
 from app.logging import configure_logging
@@ -21,6 +21,8 @@ async def purge_expired(
     batch_size: int = BATCH,
 ) -> dict[str, int]:
     settings = get_settings()
+    if batch_size < 1:
+        raise ValueError("batch_size must be positive")
     if settings.chat_retention_days < 1:
         raise ValueError("CHAT_RETENTION_DAYS must be a positive integer")
     moment = now or datetime.now(UTC)
@@ -42,9 +44,12 @@ async def purge_expired(
                 Conversation.last_message_at >= cutoff,
             )
         )
+        orphan = ~exists(select(Conversation.id).where(Conversation.visitor_id == Visitor.id))
         visitor_count = int(
             await session.scalar(
-                select(func.count()).select_from(Visitor).where(has_expired, ~has_kept)
+                select(func.count())
+                .select_from(Visitor)
+                .where(or_(has_expired & ~has_kept, orphan & (Visitor.created_at < cutoff)))
             )
             or 0
         )
@@ -53,28 +58,54 @@ async def purge_expired(
             log.info("purge_dry_run", conversations=conversation_count, visitors=visitor_count)
             return counts
         deleted_conversations = 0
+        deleted_visitors = 0
         while True:
-            ids = list(
-                await session.scalars(select(Conversation.id).where(expired).limit(batch_size))
-            )
-            if not ids:
+            rows = (
+                await session.execute(
+                    select(Conversation.id, Conversation.visitor_id)
+                    .where(expired)
+                    .order_by(Conversation.id)
+                    .limit(batch_size)
+                    .with_for_update(skip_locked=True)
+                )
+            ).all()
+            if not rows:
                 break
+            ids = [row.id for row in rows]
             await session.execute(delete(Conversation).where(Conversation.id.in_(ids)))
+            # Remove identities belonging to the expired chats in the same transaction.
+            removed = await session.scalars(
+                delete(Visitor)
+                .where(Visitor.id.in_([row.visitor_id for row in rows]), orphan)
+                .returning(Visitor.id)
+            )
+            deleted_visitors += len(list(removed))
             await session.commit()
             deleted_conversations += len(ids)
             log.info("purge_batch", conversations=len(ids))
-        deleted_visitors = 0
-        orphan = ~exists(select(Conversation.id).where(Conversation.visitor_id == Visitor.id))
+        # A fresh bootstrap intentionally has no conversation until prechat is submitted.
+        expired_orphan = orphan & (Visitor.created_at < cutoff)
         while True:
             visitor_ids = list(
-                await session.scalars(select(Visitor.id).where(orphan).limit(batch_size))
+                await session.scalars(
+                    select(Visitor.id)
+                    .where(expired_orphan)
+                    .order_by(Visitor.id)
+                    .limit(batch_size)
+                    .with_for_update(skip_locked=True)
+                )
             )
             if not visitor_ids:
                 break
-            await session.execute(delete(Visitor).where(Visitor.id.in_(visitor_ids)))
+            removed = await session.scalars(
+                delete(Visitor)
+                .where(Visitor.id.in_(visitor_ids), expired_orphan)
+                .returning(Visitor.id)
+            )
+            count = len(list(removed))
             await session.commit()
-            deleted_visitors += len(visitor_ids)
-            log.info("purge_visitor_batch", visitors=len(visitor_ids))
+            deleted_visitors += count
+            log.info("purge_visitor_batch", visitors=count)
         log.info(
             "purge_complete",
             conversations=deleted_conversations,

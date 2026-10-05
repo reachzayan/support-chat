@@ -118,6 +118,14 @@ class KnowledgeGapRepository:
     async def get(self, gap_id: UUID) -> KnowledgeGap | None:
         return await self._session.get(KnowledgeGap, gap_id)
 
+    async def lock(self, gap_id: UUID) -> KnowledgeGap | None:
+        return await self._session.scalar(
+            select(KnowledgeGap)
+            .where(KnowledgeGap.id == gap_id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+
     async def open_gaps(
         self,
         *,

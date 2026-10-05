@@ -14,8 +14,11 @@ _CTA_SNIPPETS = (
 
 
 def is_marketing_cta(text: str) -> bool:
-    body = " ".join((text or "").casefold().split())
-    return body in _CTA_SNIPPETS
+    body = " ".join((text or "").casefold().split()).strip(" .!;:")
+    # Only standalone labels/slogans: preserve paragraphs containing actual
+    # instructions, public contacts, or other useful facts beside a CTA.
+    parts = re.split(r"\s+(?:or|and)\s+|[.!;]+\s*", body)
+    return bool(parts) and all(part.strip() in _CTA_SNIPPETS for part in parts)
 
 
 def normalize_fast_query(value: str) -> str | None:

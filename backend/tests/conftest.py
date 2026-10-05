@@ -24,6 +24,7 @@ os.environ.setdefault("COOKIE_SECURE", "false")
 os.environ.setdefault("STAFF_APP_ORIGIN", "http://localhost:3000")
 os.environ.setdefault("WIDGET_ORIGIN", "http://widget.localhost:3000")
 os.environ.setdefault("KB_INGEST_HOST_DELAY_MS", "0")
+os.environ.setdefault("INTERNAL_EVAL_ENABLED", "false")
 
 
 def _assert_test_database() -> None:
@@ -140,6 +141,7 @@ def _disable_ingest_worker(monkeypatch) -> None:
 @pytest.fixture(autouse=True)
 def _blank_anthropic_key(monkeypatch) -> None:
     monkeypatch.setenv("ANTHROPIC_API_KEY", "")
+    monkeypatch.setenv("OPENAI_API_KEY", "")
 
 
 @pytest.fixture

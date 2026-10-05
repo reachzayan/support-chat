@@ -237,13 +237,21 @@ class SiteAdminService:
 
     async def _check_install(self, site: Site) -> None:
         assert site.website_url is not None
+        site_id, website_url, public_key = site.id, site.website_url, site.public_key
+        # Release the site lock before network I/O; chat commands use this lock too.
+        await self._session.commit()
         try:
-            html = await asyncio.to_thread(
-                fetch_html, site.website_url, _install_hosts(site.website_url)
-            )
-            installed = site.public_key in html
+            html = await asyncio.to_thread(fetch_html, website_url, _install_hosts(website_url))
+            installed = public_key in html
         except Exception:
             installed = False
+        site = await self._sites.lock_by_id(site_id)
+        if site is None:
+            raise AdminError("not_found")
+        if site.website_url != website_url or site.public_key != public_key:
+            # The fetched page no longer represents the saved configuration.
+            await self._session.commit()
+            return
         site.widget_installed = installed
         site.widget_checked_at = datetime.now(UTC)
         await self._session.commit()

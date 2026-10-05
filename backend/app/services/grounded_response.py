@@ -40,6 +40,8 @@ from app.services.grounded_response_validation import (
     _LIMITATION_RE,
     _is_clarifying_only,
     _normalize_copy,
+    attribute_contact_literals,
+    focus_unknown_contact,
     sentence_spans,
     validate_draft,
 )
@@ -270,7 +272,7 @@ class GroundedResponseEngine:
         if boundary is not None:
             return boundary
         evidence = _eligible(turn.evidence)
-        if not evidence:
+        if not evidence and turn.resolved_request is None:
             return _safe_no_evidence(_same_kind_miss_count(turn, "no_evidence"), turn.site_name)
 
         if self._complete is None:
@@ -281,6 +283,13 @@ class GroundedResponseEngine:
             return _safe_technical_failure(reason="provider_exception")
         if draft is None or not draft.body.strip():
             return _safe_technical_failure(reason="empty_draft")
+        if turn.resolved_request is not None:
+            original_count = len(draft.citations)
+            focused = focus_unknown_contact(draft, evidence)
+            record_trace("unknown_contact", condensed=focused.body != draft.body)
+            draft = focused
+            draft = attribute_contact_literals(draft, evidence)
+            record_trace("contact_attribution", attached=len(draft.citations) - original_count)
 
         started = time.perf_counter_ns()
         record_trace("draft", draft=draft)
@@ -292,7 +301,10 @@ class GroundedResponseEngine:
             validated_draft=validation.draft,
         )
         timings["validate"] = _elapsed_ms(started)
-        if validation.reason == "uncited_response_text" and self._repair is not None:
+        if (
+            validation.reason in {"uncited_response_text", "unsupported_commitment"}
+            and self._repair is not None
+        ):
             record_trace(
                 "citation_repair",
                 attempted=True,
@@ -306,7 +318,11 @@ class GroundedResponseEngine:
                 repaired = None
             timings["citation_repair"] = _elapsed_ms(started)
             if repaired is not None and repaired.body.strip():
-                draft = repaired
+                draft = (
+                    attribute_contact_literals(repaired, evidence)
+                    if turn.resolved_request is not None
+                    else repaired
+                )
                 started = time.perf_counter_ns()
                 validation = validate_draft(draft, evidence, turn)
                 timings["validate"] += _elapsed_ms(started)
@@ -332,6 +348,21 @@ class GroundedResponseEngine:
                 ResponseOutcome.BOUNDARY,
                 "off_topic",
                 validation.draft.body,
+                provider_status=ProviderStatus.OK,
+                request_id=draft.request_id,
+            )
+
+        if turn.resolved_request is not None:
+            # The separate assessor owns semantic completeness for resolved
+            # requests. Do not append an English transfer template before it can
+            # distinguish a useful next step from a repeated content miss.
+            return ResponseDecision(
+                ResponseOutcome.CLARIFICATION
+                if _is_clarifying_only(validation.draft.body)
+                else ResponseOutcome.SYNTHESIZED_ANSWER,
+                None,
+                validation.draft.body,
+                citations=validation.draft.citations,
                 provider_status=ProviderStatus.OK,
                 request_id=draft.request_id,
             )

@@ -137,7 +137,14 @@ const createAgentApi = (
   }
   return {
     subscribe: (conversation_id: string, last_event_id: number) => {
+      transport.queued.delete(`unsubscribe:${conversation_id}`)
       sendCommand({ v: 1, type: "subscribe", conversation_id, last_event_id })
+    },
+    unsubscribe: (conversation_id: string) => {
+      transport.queued.delete(`subscribe:${conversation_id}`)
+      if (transport.live) {
+        sendCommand({ v: 1, type: "unsubscribe", conversation_id })
+      }
     },
     join: (conversation_id: string) => {
       sendCommand({ v: 1, type: "join", conversation_id })

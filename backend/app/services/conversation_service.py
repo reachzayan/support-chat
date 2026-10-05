@@ -1,3 +1,4 @@
+import asyncio
 import time
 from datetime import UTC, datetime, timedelta
 from typing import Literal
@@ -7,7 +8,6 @@ import structlog
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.chat.display_citations import visitor_citation_payloads
 from app.chat.outcome_copy import (
     chitchat_reply,
     contact_line,
@@ -27,17 +27,11 @@ from app.llm.intent import (
 )
 from app.llm.safety_markers import SensitiveCategory
 from app.models.conversation import Conversation
-from app.models.kb_chunk import KbChunk
-from app.models.kb_page import KbPage
-from app.models.kb_snapshot import KbSnapshot
-from app.models.kb_source import KbSource
 from app.models.message import Message
-from app.models.message_citation import MessageCitation
 from app.models.site import Site
 from app.models.user import User
 from app.models.visitor import Visitor
 from app.repositories.conversation_repo import ConversationRepository
-from app.repositories.kb_chunk_repo import live_chunks_query
 from app.repositories.message_repo import MessageRepository
 from app.repositories.origins import InvalidOrigin, canonicalize_origin, sanitize_visitor_url
 from app.repositories.site_repo import SiteRepository
@@ -69,16 +63,14 @@ from app.services.conversation_types import (
     CommandResult as CommandResult,
 )
 from app.services.conversation_types import ReturningIdentity, VisitorConversationSummary
+from app.services.grounded_reply_writer import GroundedReplyWriter
 from app.services.grounded_response import (
-    Citation,
     EvidenceUnit,
-    ProviderStatus,
     ResponseDecision,
     ResponseOutcome,
     _safe_technical_failure,
 )
 from app.services.handoff_service import EscalationReason, HandoffService, HandoffTrigger
-from app.services.knowledge_gap_service import KnowledgeGapService
 from app.services.pii_redactor import redact_for_log
 from app.services.rate_limit import RateLimiter, RateLimitExceeded, RateLimitUnavailable
 from app.services.refusal_library import fallback_refusal_body, lookup_refusal
@@ -125,6 +117,7 @@ class ConversationService:
         self._bot_turn = BotTurnService(
             session, responder, embedder, evidence_loader=self._retrieve_evidence
         )
+        self._reply_writer = GroundedReplyWriter(session)
         self._pending_handoff_summary = None
         self._bootstrap_wakeups: list[Conversation] = []
 
@@ -1169,7 +1162,10 @@ class ConversationService:
             return CommandResult(conversation=conversation, site_key=site_key)
 
         visitor_text = await self._latest_visitor_body(conversation_id)
-        prepared = await self._bot_turn.prepare(conversation, site, visitor_text)
+        # Context resolution and relevance assessment share one deadline. Leave
+        # room to persist before another worker can reclaim the generation lease.
+        async with asyncio.timeout(get_settings().bot_generation_lease_seconds * 0.75):
+            prepared = await self._bot_turn.prepare(conversation, site, visitor_text)
         return await self._finalize_grounded_decision(
             conversation_id,
             generation_id,
@@ -1210,7 +1206,7 @@ class ConversationService:
             return CommandResult(conversation=conversation, site_key=site_key)
         if decision.citations:
             started = time.perf_counter_ns()
-            live = await self._grounded_citations_live(site.id, decision.citations)
+            live = await self._reply_writer.citations_live(site.id, decision.citations)
             timings["liveness_check"] = (time.perf_counter_ns() - started) // 1_000_000
             if not live:
                 decision = _safe_technical_failure(reason="stale_source")
@@ -1218,7 +1214,7 @@ class ConversationService:
             timings.setdefault("liveness_check", 0)
         conversation.active_generation_id = None
         started = time.perf_counter_ns()
-        inserted = await self._persist_grounded_reply(conversation, decision)
+        inserted = await self._reply_writer.persist(conversation, decision)
         if decision.handoff_reason:
             # The script just sent promised a person would follow up; make that true.
             await self._open_handoff(
@@ -1245,114 +1241,6 @@ class ConversationService:
             stage_timings=dict(timings),
         )
         return CommandResult(conversation=conversation, site_key=site_key, message=inserted)
-
-    async def _persist_grounded_reply(
-        self, conversation: Conversation, decision: ResponseDecision
-    ) -> Message:
-        citations = decision.citations
-        if citations:
-            conversation.state = _transition(conversation.state, "bot_reply")
-        chips = visitor_citation_payloads(citations=citations) if citations else []
-        inserted = await self._insert_message(
-            conversation,
-            "bot",
-            decision.body,
-            source_chunk_ids=list(dict.fromkeys(c.chunk_id for c in citations))
-            if citations
-            else None,
-            snapshot_id=citations[0].snapshot_id if citations else None,
-            system_reason=self._system_reason_for(decision),
-            source_urls=[str(chip["source_url"]) for chip in chips if chip["source_url"]]
-            if citations
-            else None,
-            source_title=chips[0]["source_title"] if chips else None,
-            display_locator=decision.display_locator,
-            response_outcome=decision.outcome.value if decision.outcome is not None else None,
-            response_reason_code=decision.reason_code,
-        )
-        await KnowledgeGapService(self._session).record_miss(conversation, inserted, decision)
-        for citation in citations:
-            self._session.add(
-                MessageCitation(
-                    message=inserted,
-                    site_id=conversation.site_id,
-                    chunk_id=citation.chunk_id,
-                    snapshot_id=citation.snapshot_id,
-                    response_start=citation.response_start,
-                    response_end=citation.response_end,
-                    source_start=citation.source_start,
-                    source_end=citation.source_end,
-                    cited_text=citation.cited_text,
-                    source_title=citation.source_title,
-                    source_url=citation.source_url,
-                )
-            )
-        if decision.outcome is ResponseOutcome.SYNTHESIZED_ANSWER:
-            conversation.fallback_count = 0
-        elif (
-            decision.reason_code in {"no_evidence", "grounding_reject", "needs_confirmation"}
-            or decision.outcome is ResponseOutcome.CLARIFICATION
-        ):
-            conversation.fallback_count += 1
-        elif decision.reason_code == "off_topic":
-            conversation.fallback_count = 0
-        if decision.offer_handoff and decision.outcome in {
-            ResponseOutcome.KNOWLEDGE_GAP,
-            ResponseOutcome.PARTIAL_ANSWER,
-            ResponseOutcome.BOUNDARY,
-            ResponseOutcome.SYNTHESIZED_ANSWER,
-            None,
-        }:
-            # Persist the offer as bot speech; consent on the next visitor turn.
-            conversation.fallback_count = max(conversation.fallback_count, 1)
-        return inserted
-
-    @staticmethod
-    def _system_reason_for(decision: ResponseDecision) -> str:
-        if decision.reason_code == "canned_reply":
-            return "canned"
-        if decision.outcome is ResponseOutcome.CLARIFICATION:
-            return "clarify"
-        if decision.reason_code == "source_followup":
-            return "answer"
-        if decision.reason_code == "tech_fail" or (
-            decision.provider_status is ProviderStatus.TECH_FAIL
-        ):
-            return "tech_fail"
-        if (
-            decision.reason_code == "grounding_reject"
-            or decision.outcome is ResponseOutcome.PARTIAL_ANSWER
-        ):
-            return "insufficient"
-        if decision.citations:
-            return "answer"
-        if decision.outcome is ResponseOutcome.BOUNDARY:
-            return "policy_boundary"
-        return "insufficient"
-
-    async def _grounded_citations_live(self, site_id: UUID, citations: list[Citation]) -> bool:
-        cited_chunk_ids = sorted(set(citation.chunk_id for citation in citations))
-        if not cited_chunk_ids:
-            return True
-        result = await self._session.execute(
-            live_chunks_query(site_id)
-            .with_only_columns(KbChunk.id, KbChunk.snapshot_id, KbChunk.site_id)
-            .where(KbChunk.id.in_(cited_chunk_ids))
-            .order_by(KbChunk.id)
-            .with_for_update(read=True, of=[KbChunk, KbPage, KbSource, KbSnapshot])
-        )
-        rows = result.all()
-        by_id = {row.id: row for row in rows}
-        if set(cited_chunk_ids) - set(by_id):
-            return False
-        citation_by_chunk = {citation.chunk_id: citation for citation in citations}
-        for chunk_id, row in by_id.items():
-            if row.site_id != site_id:
-                return False
-            citation = citation_by_chunk.get(chunk_id)
-            if citation is None or row.snapshot_id != citation.snapshot_id:
-                return False
-        return True
 
     async def _release_generation(self, conversation_id: UUID, generation_id: UUID) -> None:
         try:
@@ -1424,7 +1312,7 @@ class ConversationService:
 
     async def parent_origin_allowed(self, site_id: UUID, parent_origin: str) -> bool:
         site = await self._sites.get_by_id(site_id)
-        if site is None:
+        if site is None or not site.enabled:
             return False
         return parent_origin in site.allowed_origins
 
@@ -1601,7 +1489,7 @@ class ConversationService:
             site = await self._sites.get_by_id(visitor.site_id)
             if site is None:
                 raise CommandError("invalid")
-            if parent_origin not in site.allowed_origins:
+            if not site.enabled or parent_origin not in site.allowed_origins:
                 raise CommandError("origin_revoked")
             conversation = await self._open_or_create_conversation(site.id, visitor_id)
             site_key = site.key
@@ -1615,7 +1503,7 @@ class ConversationService:
         conversation, site = await self._lock_site_then_conversation(conversation_id)
         if conversation is None or site is None or conversation.visitor_id != visitor_id:
             raise CommandError("invalid")
-        if parent_origin not in site.allowed_origins:
+        if not site.enabled or parent_origin not in site.allowed_origins:
             raise CommandError("origin_revoked")
         return conversation, site.key
 

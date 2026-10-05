@@ -6,6 +6,7 @@ import { persistInboxSiteId, readStoredInboxSiteId } from "@/lib/pane-width"
 
 import { fetchInboxDetailPage, mergeInboxMessages } from "./inbox-api"
 import { emptyLive, type InboxLive } from "./inbox-session"
+import type { SocketApi } from "./inbox-socket"
 import {
   EMPTY_INBOX_COUNTS,
   type CannedReply,
@@ -13,14 +14,9 @@ import {
   type InboxListItem,
   type InboxSite,
 } from "./types"
-import {
-  useInboxActions,
-  useInboxLoaders,
-  useInboxSideEffects,
-  useInboxSyncRefs,
-  type InboxRefs,
-  type SocketApi,
-} from "./use-inbox-engine"
+import { useInboxActions } from "./use-inbox-actions"
+import { useInboxLoaders, useInboxSideEffects } from "./use-inbox-engine"
+import { useInboxSyncRefs, type InboxRefs } from "./use-inbox-refs"
 
 const useOlderMessages = (refs: InboxRefs, setLive: Dispatch<SetStateAction<InboxLive>>) => {
   const [loadingOlder, setLoadingOlder] = useState(false)
@@ -63,6 +59,7 @@ const useOlderMessages = (refs: InboxRefs, setLive: Dispatch<SetStateAction<Inbo
 
 const useInboxQueryHandlers = (
   refs: InboxRefs,
+  socketRef: { current: SocketApi | null },
   filter: InboxFilter,
   siteId: string | null,
   setFilter: Dispatch<SetStateAction<InboxFilter>>,
@@ -71,12 +68,15 @@ const useInboxQueryHandlers = (
   setLive: Dispatch<SetStateAction<InboxLive>>,
 ) => {
   const clearOpenChat = useCallback(() => {
+    if (refs.selectedRef.current !== null) {
+      socketRef.current?.unsubscribe(refs.selectedRef.current)
+    }
     refs.markSelected(null)
     const nextLive = emptyLive()
     refs.resetLive(nextLive)
     setSelectedId(null)
     setLive(nextLive)
-  }, [refs, setLive, setSelectedId])
+  }, [refs, setLive, setSelectedId, socketRef])
   const handleFilter = useCallback(
     (nextFilter: InboxFilter) => {
       if (nextFilter === filter) {
@@ -123,6 +123,7 @@ export const useInboxLive = (userId: string) => {
   const refs = useInboxSyncRefs(selectedId, live, filter, siteId, userId)
   const query = useInboxQueryHandlers(
     refs,
+    socketRef,
     filter,
     siteId,
     setFilter,

@@ -46,7 +46,7 @@ def redact_window_body(body: str) -> str:
 def conversation_window_messages(rows: list[Message], *, limit: int | None = None) -> list[dict]:
     settings = get_settings()
     size = limit if limit is not None else settings.conversation_window_size
-    selected = [row for row in rows if row.role in {"visitor", "bot"}][-size:]
+    selected = [row for row in rows if row.role in {"visitor", "bot", "agent"}][-size:]
     messages: list[dict] = []
     for row in selected:
         role = "user" if row.role == "visitor" else "assistant"

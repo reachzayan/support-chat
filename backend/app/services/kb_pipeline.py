@@ -284,7 +284,7 @@ async def _run_text_ingest(
     try:
         structured = await llm_client.structure_text(title, body)
     except Exception as exc:
-        await _fail_page(session, source, page, job, "llm_extract", str(exc))
+        await _fail_page(session, source, page, job, "llm_extract", type(exc).__name__)
         await _finish_ingest(session, source, snapshot_id, [])
         return
     pending = await _persist_extracted(
@@ -538,9 +538,9 @@ def _collect_prefix_links(
     from app.services.kb_ingest import (
         CanonicalError,
         _links_from,
-        _same_prefix,
         _url_allowed_by_source_rules,
         canonical_fetch_url,
+        path_under_prefix,
     )
 
     discovered = list(crawler_links) + _links_from(html, fetch_url)
@@ -553,7 +553,7 @@ def _collect_prefix_links(
             continue
         if not _url_allowed_by_source_rules(link, source):
             continue
-        if _same_prefix(link, source.start_url):
+        if path_under_prefix(link, source.start_url):
             extra_urls.append(link)
 
 

@@ -4,6 +4,7 @@ from uuid import UUID
 
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app.db import SessionDep
@@ -126,20 +127,24 @@ async def refresh(
     response: Response,
     session: SessionDep,
     settings: Annotated[Settings, Depends(get_settings)],
-) -> SessionOut:
+) -> SessionOut | Response:
     require_csrf(request)
     raw = request.cookies.get(REFRESH_COOKIE)
     if raw is None:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
+        return _expired_session(settings)
     try:
         issued = await AuthService(session, settings).refresh(raw)
     except AuthFailed:
-        clear_session_cookies(response, settings)
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated"
-        ) from None
+        return _expired_session(settings)
     _attach_session(response, issued.refresh_token, settings)
     return SessionOut(access_token=issued.access_token, user=_user_out(issued.user))
+
+
+def _expired_session(settings: Settings) -> JSONResponse:
+    # Return the response carrying the deletions; raising HTTPException discards it.
+    response = JSONResponse(status_code=401, content={"detail": "Not authenticated"})
+    clear_session_cookies(response, settings)
+    return response
 
 
 @router.post("/logout")

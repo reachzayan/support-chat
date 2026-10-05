@@ -5,16 +5,19 @@ ConversationService alone owns generation leases, transitions and persistence.
 
 import asyncio
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
+from inspect import signature
 from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.llm.answer_relevance import ResolvedRequest
 from app.llm.bot_responder import BotResponder
 from app.llm.intent import (
     is_handoff_declined,
 )
 from app.llm.prompts import document_body
+from app.llm.safety_markers import OUTPUT_PII_PATTERNS
 from app.models.conversation import Conversation
 from app.models.kb_chunk import KbChunk
 from app.models.message import Message
@@ -22,7 +25,7 @@ from app.models.site import Site
 from app.models.visitor import Visitor
 from app.repositories.kb_chunk_repo import live_chunks_query
 from app.repositories.message_repo import MessageRepository
-from app.services.bot_trace import record_trace
+from app.services.bot_trace import capture_trace, record_trace
 from app.services.canned_bot import canned_reply_decision
 from app.services.full_context import prior_provider_messages
 from app.services.grounded_response import (
@@ -31,11 +34,16 @@ from app.services.grounded_response import (
     GroundedResponseEngine,
     ModelDraft,
     ResponseDecision,
+    ResponseOutcome,
     TurnContext,
     _has_prior_assistant,
     _is_source_followup,
+    _safe_grounding_reject,
+    _safe_technical_failure,
     history_recap_decision,
 )
+from app.services.grounded_response_types import ProviderStatus
+from app.services.grounded_response_validation import remove_draft_sentences, validate_draft
 from app.services.kb_embedder import default_embedder
 from app.services.kb_hybrid import HybridKbSearch
 from app.services.pii_redactor import redact_for_model
@@ -84,7 +92,7 @@ class BotTurnService:
         started = time.perf_counter_ns()
         window = await self._messages.list_recent_roles(
             conversation_id,
-            {"visitor", "bot"},
+            {"visitor", "bot", "agent"},
             get_settings().conversation_window_size + 1,
         )
         prior_messages = tuple(prior_provider_messages(window, visitor_text))
@@ -117,16 +125,64 @@ class BotTurnService:
         )
         if boundary is not None:
             return PreparedBotReply(boundary, stage_timings)
-        canned = await self._canned_reply(conversation, site, visitor_text, window)
+        resolved = None
+        resolver = getattr(self._responder, "resolve_request", None)
+        if resolver is not None and getattr(self._responder, "_complete", None) is None:
+            started = time.perf_counter_ns()
+            try:
+                resolved = await resolver(visitor_text, prior_messages)
+            except Exception as exc:
+                record_trace("resolve_request", error_class=type(exc).__name__)
+                return PreparedBotReply(
+                    _safe_technical_failure(reason="intent_resolution"), stage_timings
+                )
+            stage_timings["resolve_request"] = (time.perf_counter_ns() - started) // 1_000_000
+        query = resolved.query if resolved is not None else visitor_text
+        if resolved is not None and resolved.intent == "handoff" and not resolved.ambiguity:
+            return PreparedBotReply(
+                ResponseDecision(
+                    ResponseOutcome.BOUNDARY,
+                    "visitor_request",
+                    "You've asked to speak with a specialist.",
+                    handoff_reason="visitor_request",
+                ),
+                stage_timings,
+            )
+        canned = None
+        if resolved is None or not resolved.ambiguity:
+            canned_window = (
+                window if resolved is None or resolved.relation == "continuation" else []
+            )
+            canned = await self._canned_reply(conversation, site, query, canned_window)
+        turn = TurnContext(
+            visitor_text=visitor_text,
+            evidence=[],
+            site_name=site.name,
+            prior_messages=prior_messages,
+            resolved_request=resolved,
+            prior_miss_count=conversation.fallback_count,
+            prior_miss_reason=self._last_bot_reason(window, conversation.fallback_count),
+            off_brand_blocklist=tuple(getattr(site, "off_brand_blocklist", None) or ()),
+        )
         if canned is not None:
-            return PreparedBotReply(canned, stage_timings)
+            return PreparedBotReply(
+                await self._assess_answer(turn, canned, stage_timings), stage_timings
+            )
         record_trace("history", prior_messages=prior_messages)
-        # Retrieval answers the current message exactly as written. Conversation
-        # continuity comes from live evidence cited by the previous bot answer,
-        # not from guessing whether this wording looks like a follow-up.
-        record_trace("retrieval", query=redact_for_model(visitor_text))
-        current_evidence = await self._evidence_loader(site.id, visitor_text, stage_timings)
-        carried_evidence = await self._load_carried_evidence(site.id, window)
+        record_trace(
+            "retrieval",
+            query=redact_for_model(query),
+            original_query=redact_for_model(visitor_text),
+        )
+        current_evidence = await self._evidence_loader(site.id, query, stage_timings)
+        current_evidence = await self._supporting_evidence(
+            site.id, current_evidence, resolved, stage_timings
+        )
+        carried_evidence = (
+            await self._load_carried_evidence(site.id, window)
+            if resolved is None or resolved.relation == "continuation"
+            else []
+        )
         evidence = self._merge_evidence(current_evidence, carried_evidence)
         record_trace(
             "retrieval",
@@ -143,19 +199,163 @@ class BotTurnService:
             row.role == "visitor" and is_handoff_declined(row.body or "") for row in window
         )
         record_trace("classification", handoff_declined=handoff_declined)
-        decision = await self._grounded_response_engine(site, stage_timings).respond(
-            TurnContext(
-                visitor_text=visitor_text,
-                evidence=evidence,
-                site_name=site.name,
-                prior_messages=prior_messages,
-                prior_miss_count=0 if handoff_declined else conversation.fallback_count,
-                prior_miss_reason=self._last_bot_reason(window, conversation.fallback_count),
-                off_brand_blocklist=tuple(getattr(site, "off_brand_blocklist", None) or ()),
-            ),
-            stage_timings=stage_timings,
+        turn = replace(
+            turn,
+            evidence=evidence,
+            prior_miss_count=0 if handoff_declined else conversation.fallback_count,
         )
+        decision = await self._grounded_response_engine(site, stage_timings).respond(
+            turn, stage_timings=stage_timings
+        )
+        decision = await self._assess_answer(turn, decision, stage_timings)
         return PreparedBotReply(decision, stage_timings)
+
+    async def _supporting_evidence(
+        self,
+        site_id: UUID,
+        evidence: list[EvidenceUnit],
+        resolved: ResolvedRequest | None,
+        timings: dict[str, int],
+    ) -> list[EvidenceUnit]:
+        if resolved is None or resolved.ambiguity:
+            return evidence
+        # Topical queries can bury public contact and account introduction
+        # passages. Reserve one slot per relevant short lexical query, using
+        # the existing corpus without another embedding or model call.
+        queries = [("contact specialist call email phone", "contact")]
+        if resolved.intent == "account_setup":
+            queries.append(("account setup", "account_setup"))
+        for query, stage in queries:
+            started = time.perf_counter_ns()
+            with capture_trace() as supporting_trace:
+                units = await self.retrieve_evidence(site_id, query, lexical_only=True)
+            if stage == "contact":
+                units = [
+                    unit
+                    for unit in units
+                    if any(
+                        pattern.search(unit.answer_verbatim) for pattern in OUTPUT_PII_PATTERNS[-2:]
+                    )
+                ]
+            timings[f"{stage}_retrieve"] = (time.perf_counter_ns() - started) // 1_000_000
+            record_trace(f"{stage}_retrieval", **supporting_trace.get("retrieval", {}))
+            ids = {unit.id for unit in units[:1]}
+            evidence = [*units[:1], *(unit for unit in evidence if unit.id not in ids)]
+        return evidence
+
+    async def _assess_answer(
+        self,
+        turn: TurnContext,
+        decision: ResponseDecision,
+        timings: dict[str, int],
+        *,
+        allow_repair: bool = True,
+    ) -> ResponseDecision:
+        assessor = getattr(self._responder, "assess_answer", None)
+        if (
+            assessor is None
+            or getattr(self._responder, "_complete", None) is not None
+            or decision.provider_status is ProviderStatus.TECH_FAIL
+            or decision.reason_code in {"grounding_reject", "repeated_miss", "no_evidence"}
+            or decision.outcome is ResponseOutcome.BOUNDARY
+        ):
+            return decision
+        started = time.perf_counter_ns()
+        try:
+            assessment = await assessor(turn, decision)
+        except Exception as exc:
+            record_trace("assess_answer", error_class=type(exc).__name__)
+            return _safe_technical_failure(reason="answer_assessment")
+        finally:
+            timings["assess_answer"] = (
+                timings.get("assess_answer", 0) + (time.perf_counter_ns() - started) // 1_000_000
+            )
+        record_trace(
+            "answer_quality", relevance=assessment.status, relevance_reason=assessment.reason
+        )
+        if assessment.status == "reject" or assessment.reason in {
+            "wrong_subject",
+            "wrong_action",
+            "unsupported_claim",
+            "irrelevant",
+        }:
+            if allow_repair and decision.reason_code != "canned_reply":
+                trimmed = self._trim_relevance(turn, decision, assessment.remove_sentences)
+                if trimmed is not None:
+                    return await self._assess_answer(turn, trimmed, timings, allow_repair=False)
+                repaired = await self._repair_relevance(
+                    turn, decision, assessment.repair_instruction or assessment.reason, timings
+                )
+                if repaired is not None:
+                    return await self._assess_answer(turn, repaired, timings, allow_repair=False)
+            return _safe_grounding_reject(
+                prior_miss_count=turn.prior_miss_count, request_id=decision.request_id
+            )
+        if assessment.status == "supported_next_step":
+            return replace(
+                decision,
+                outcome=ResponseOutcome.PARTIAL_ANSWER,
+                reason_code="canned_reply"
+                if decision.reason_code == "canned_reply"
+                else "supported_next_step",
+            )
+        if assessment.status == "unsupported_detail":
+            return replace(
+                decision,
+                outcome=ResponseOutcome.PARTIAL_ANSWER
+                if decision.citations
+                else ResponseOutcome.KNOWLEDGE_GAP,
+                reason_code="needs_confirmation",
+            )
+        if assessment.status == "clarification":
+            return replace(decision, outcome=ResponseOutcome.CLARIFICATION, reason_code=None)
+        return decision
+
+    @staticmethod
+    def _trim_relevance(
+        turn: TurnContext, decision: ResponseDecision, selected: list[str]
+    ) -> ResponseDecision | None:
+        trimmed = remove_draft_sentences(
+            ModelDraft(decision.body, decision.citations, decision.request_id), selected
+        )
+        if trimmed is None:
+            return None
+        validation = validate_draft(trimmed, turn.evidence, turn)
+        if not validation.accepted or validation.draft is None:
+            return None
+        record_trace("relevance_edit", removed=selected)
+        return replace(
+            decision,
+            body=validation.draft.body,
+            citations=validation.draft.citations,
+        )
+
+    async def _repair_relevance(
+        self, turn: TurnContext, decision: ResponseDecision, reason: str, timings: dict[str, int]
+    ) -> ResponseDecision | None:
+        repair = getattr(self._responder, "repair_grounded_draft", None)
+        if repair is None or turn.resolved_request is None:
+            return None
+        started = time.perf_counter_ns()
+        record_trace("relevance_repair", attempted=True, reason=reason)
+
+        async def complete(context, units):
+            return await repair(
+                context,
+                units,
+                ModelDraft(decision.body, decision.citations, decision.request_id),
+                stage_timings=timings,
+                relevance_reason=reason,
+            )
+
+        # No repair provider on this engine: one rewrite, with the same source,
+        # citation, and safety checks. Reassessment cannot recursively retry.
+        repaired = await GroundedResponseEngine(complete=complete).respond(
+            turn, stage_timings=timings
+        )
+        timings["relevance_repair"] = (time.perf_counter_ns() - started) // 1_000_000
+        record_trace("relevance_repair", outcome=repaired.outcome, reason_code=repaired.reason_code)
+        return repaired
 
     async def _canned_reply(
         self,
@@ -229,7 +429,7 @@ class BotTurnService:
                     answer_mode=chunk.answer_mode,
                     enabled=chunk.enabled,
                     live=True,
-                    source_heading="" if chunk.context_prefix else chunk.heading,
+                    source_heading=chunk.heading,
                 )
             )
         return carried
@@ -259,12 +459,16 @@ class BotTurnService:
 
         else:
             original_complete = complete
+            try:
+                signature(original_complete).bind(None, None, stage_timings=stage_timings)
+                supports_timings = True
+            except TypeError:
+                supports_timings = False
 
             async def complete(turn, units):
-                try:
+                if supports_timings:
                     return await original_complete(turn, units, stage_timings=stage_timings)
-                except TypeError:
-                    return await original_complete(turn, units)
+                return await original_complete(turn, units)
 
         repair_draft = getattr(self._responder, "repair_grounded_draft", None)
         repair = None
@@ -286,15 +490,19 @@ class BotTurnService:
         site_id: UUID,
         visitor_text: str,
         stage_timings: dict[str, int] | None = None,
+        *,
+        lexical_only: bool = False,
     ) -> list[EvidenceUnit]:
         snapshots = await live_snapshots_for_site(self._session, site_id)
         if not snapshots:
             return []
-        hits = await HybridKbSearch(self._session).search_with_deferred_embed(
-            self._embedder,
-            site_id,
-            visitor_text,
-            stage_timings=stage_timings,
+        search = HybridKbSearch(self._session)
+        hits = (
+            await search.search(site_id, visitor_text)
+            if lexical_only
+            else await search.search_with_deferred_embed(
+                self._embedder, site_id, visitor_text, stage_timings=stage_timings
+            )
         )
         return [
             EvidenceUnit(
@@ -310,7 +518,7 @@ class BotTurnService:
                 answer_mode=hit.answer_mode,
                 enabled=hit.enabled,
                 live=True,
-                source_heading="" if hit.structured else hit.heading,
+                source_heading=hit.heading,
             )
             for hit in hits
         ]

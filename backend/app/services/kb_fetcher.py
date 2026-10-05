@@ -13,7 +13,6 @@ from app.services.kb_crawl import (
     MAX_BYTES,
     FetchError,
     allowed_fetch_url,
-    fetch_html,
     pinned_get,
     public_fetch_url,
 )
@@ -433,20 +432,20 @@ async def _crawl4ai(url: str, allowed_hosts: set[str]) -> Any:
         return await crawl(url)
 
 
-async def fetch_html_async(url: str, allowed_hosts: set[str]) -> str:
-    return await asyncio.to_thread(fetch_html, url, allowed_hosts)
-
-
 class LazyPageCrawler:
     def __init__(self, allowed_hosts: set[str]) -> None:
         self._hosts = allowed_hosts
         self._cm = None
         self._crawl: CrawlerFn | None = None
+        self._start_lock = asyncio.Lock()
 
     async def fetch(self, url: str) -> Any:
-        if self._crawl is None:
-            self._cm = page_crawler(self._hosts)
-            self._crawl = await self._cm.__aenter__()
+        async with self._start_lock:
+            if self._crawl is None:
+                cm = page_crawler(self._hosts)
+                crawl = await cm.__aenter__()
+                self._cm = cm
+                self._crawl = crawl
         return await self._crawl(url)
 
     async def aclose(self) -> None:

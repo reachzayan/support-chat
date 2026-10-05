@@ -112,6 +112,7 @@ class KbSourceService:
         *,
         title: str,
         body: str,
+        commit: bool = True,
     ) -> KbSource:
         site = await self._session.get(Site, site_id)
         if site is None:
@@ -134,8 +135,11 @@ class KbSourceService:
             enabled=True,
         )
         self._session.add(source)
-        await self._session.commit()
-        await enqueue_wakeup(source.id)
+        if commit:
+            await self._session.commit()
+            await enqueue_wakeup(source.id)
+        else:
+            await self._session.flush()
         return source
 
     @staticmethod

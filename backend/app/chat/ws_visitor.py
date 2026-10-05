@@ -28,6 +28,14 @@ ORIGIN_RECHECK_SECONDS = 10.0
 _bot_generation_tasks: set[asyncio.Task] = set()
 
 
+async def stop_bot_generations() -> None:
+    tasks = list(_bot_generation_tasks)
+    for task in tasks:
+        task.cancel()
+    with CancelScope(shield=True):
+        await asyncio.gather(*tasks, return_exceptions=True)
+
+
 async def _idle_watch(websocket: WebSocket, last_seen: dict[str, float]) -> None:
     try:
         while True:
@@ -203,7 +211,8 @@ async def _visitor_loop(websocket: WebSocket, connection: VisitorConnection) -> 
     finally:
         watcher.cancel()
         idle_nudge.cancel()
-        await asyncio.gather(watcher, idle_nudge, return_exceptions=True)
+        with CancelScope(shield=True):
+            await asyncio.gather(watcher, idle_nudge, return_exceptions=True)
 
 
 async def _handle_visitor_ping_pong(
@@ -213,6 +222,7 @@ async def _handle_visitor_ping_pong(
         return
     if frame_type == "ping":
         await websocket.send_json({"v": 1, "type": "pong"})
+    await connection_manager.catch_up_socket(websocket)
 
 
 async def _handle_visitor_resume(
@@ -253,6 +263,9 @@ async def _handle_visitor_frame(
         await connection_manager.send_error(websocket, "invalid")
         return
     frame_type = frame.get("type")
+    if not isinstance(frame_type, str):
+        await connection_manager.send_error(websocket, "invalid")
+        return
     if frame_type in {"pong", "ping"}:
         await _handle_visitor_ping_pong(websocket, connection, frame_type)
         return

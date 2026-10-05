@@ -21,6 +21,7 @@ from app.settings import get_settings
 log = structlog.get_logger("chat")
 FRAME_MAX = 16384
 SEND_TIMEOUT = 3.0
+MAX_AGENT_SUBSCRIPTIONS = 32
 
 
 @dataclass
@@ -82,11 +83,22 @@ class ConnectionManager:
     def agent_for(self, websocket: WebSocket) -> AgentConnection | None:
         return self._agents.get(id(websocket))
 
-    def subscribe(self, websocket: WebSocket, conversation_id: UUID, last_event_id: int) -> None:
+    def subscribe(self, websocket: WebSocket, conversation_id: UUID, last_event_id: int) -> bool:
         agent = self.agent_for(websocket)
         if agent is None:
-            return
+            return False
+        if (
+            conversation_id not in agent.subscriptions
+            and len(agent.subscriptions) >= MAX_AGENT_SUBSCRIPTIONS
+        ):
+            return False
         agent.subscriptions[conversation_id] = last_event_id
+        return True
+
+    def unsubscribe(self, websocket: WebSocket, conversation_id: UUID) -> None:
+        agent = self.agent_for(websocket)
+        if agent is not None:
+            agent.subscriptions.pop(conversation_id, None)
 
     def oldest_message_cursor(self, conversation_id: UUID) -> int | None:
         cursors: list[int] = []
@@ -312,9 +324,10 @@ class ConnectionManager:
         if cursor is None:
             return
         delivered = await self._send_new_messages(agent.websocket, messages, cursor)
-        agent.subscriptions[conversation.id] = max(
-            agent.subscriptions.get(conversation.id, cursor), delivered
-        )
+        if conversation.id in agent.subscriptions:
+            agent.subscriptions[conversation.id] = max(
+                agent.subscriptions[conversation.id], delivered
+            )
         await self.send_state(agent.websocket, conversation, assigned)
 
     async def _replay_visitor(self, visitor: VisitorConnection) -> None:
