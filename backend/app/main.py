@@ -21,6 +21,7 @@ from app.api.widget_bootstrap import router as widget_bootstrap_router
 from app.chat.fanout import start_fanout, stop_fanout
 from app.chat.ws_agent import router as agent_ws_router
 from app.chat.ws_visitor import router as visitor_ws_router
+from app.chat.ws_visitor import stop_bot_generations
 from app.db import dispose_engine, session_maker
 from app.llm.bot_responder import BotResponder
 from app.logging import configure_logging
@@ -38,14 +39,17 @@ async def lifespan(application: FastAPI):
     await start_fanout()
     if settings.enable_background_workers:
         await start_kb_workers()
-    yield
-    if settings.enable_background_workers:
-        await stop_kb_workers()
-    await stop_fanout()
-    await close_redis()
-    await BotResponder.close_shared_client()
-    await OpenAIEmbedder.close_shared_clients()
-    await dispose_engine()
+    try:
+        yield
+    finally:
+        if settings.enable_background_workers:
+            await stop_kb_workers()
+        await stop_bot_generations()
+        await stop_fanout()
+        await close_redis()
+        await BotResponder.close_shared_client()
+        await OpenAIEmbedder.close_shared_clients()
+        await dispose_engine()
 
 
 async def _persist_unhandled_exception(request: Request, exc: Exception) -> None:
@@ -125,15 +129,7 @@ def create_app() -> FastAPI:
             await _persist_unhandled_exception(request, exc)
             response = JSONResponse(status_code=500, content={"detail": "Internal server error"})
         path = request.url.path
-        if (
-            path.startswith("/auth")
-            or path.startswith("/api/conversations")
-            or path.startswith("/api/visitor-blocks")
-            or path.startswith("/api/knowledge-gaps")
-            or path.startswith("/api/status")
-            or path.startswith("/api/internal/")
-            or path.startswith("/api/public/widget-bootstrap")
-        ):
+        if path.startswith(("/auth", "/api/")):
             response.headers.setdefault("Cache-Control", "no-store")
         response.headers.setdefault("X-Content-Type-Options", "nosniff")
         return response

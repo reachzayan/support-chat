@@ -4,6 +4,7 @@ from datetime import UTC, datetime
 from uuid import UUID
 
 import jwt
+from anyio import CancelScope
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from starlette.websockets import WebSocketState
 
@@ -91,8 +92,9 @@ async def agent_socket(websocket: WebSocket) -> None:
         await _agent_loop(websocket, connection)
     finally:
         closer.cancel()
-        await asyncio.gather(closer, return_exceptions=True)
         connection_manager.drop(websocket)
+        with CancelScope(shield=True):
+            await asyncio.gather(closer, return_exceptions=True)
 
 
 async def _close_agent(websocket: WebSocket, code: int) -> None:
@@ -139,7 +141,8 @@ async def _agent_loop(websocket: WebSocket, connection: AgentConnection) -> None
                 return
     finally:
         watcher.cancel()
-        await asyncio.gather(watcher, return_exceptions=True)
+        with CancelScope(shield=True):
+            await asyncio.gather(watcher, return_exceptions=True)
 
 
 async def _handle_agent_frame(
@@ -149,17 +152,21 @@ async def _handle_agent_frame(
         await connection_manager.send_error(websocket, "invalid")
         return
     frame_type = frame.get("type")
+    if not isinstance(frame_type, str):
+        await connection_manager.send_error(websocket, "invalid")
+        return
     if frame_type in {"pong", "ping"}:
         if not await _staff_still_valid(connection):
             await _close_agent(websocket, 4401)
             return
         if frame_type == "ping":
             await websocket.send_json({"v": 1, "type": "pong"})
+        await connection_manager.catch_up_socket(websocket)
         return
     if not await _staff_still_valid(connection):
         await _close_agent(websocket, 4401)
         return
-    if frame_type == "subscribe":
+    if frame_type in {"subscribe", "unsubscribe"}:
         await _subscribe(websocket, frame)
         return
     if frame_type in {"join", "close_attention", "message", "end", "transfer_to_bot"}:
@@ -181,11 +188,23 @@ async def _staff_still_valid(connection: AgentConnection) -> bool:
 async def _subscribe(websocket: WebSocket, frame: dict) -> None:
     try:
         conversation_id = UUID(str(frame["conversation_id"]))
-        last_event_id = int(frame.get("last_event_id") or 0)
     except (KeyError, ValueError, TypeError):
         await connection_manager.send_error(websocket, "invalid")
         return
-    connection_manager.subscribe(websocket, conversation_id, last_event_id)
+    if frame["type"] == "unsubscribe":
+        connection_manager.unsubscribe(websocket, conversation_id)
+        return
+    last_event_id = frame.get("last_event_id", 0)
+    if (
+        not isinstance(last_event_id, int)
+        or isinstance(last_event_id, bool)
+        or not 0 <= last_event_id <= (1 << 63) - 1
+    ):
+        await connection_manager.send_error(websocket, "invalid")
+        return
+    if not connection_manager.subscribe(websocket, conversation_id, last_event_id):
+        await connection_manager.send_error(websocket, "subscription_limit")
+        return
     await connection_manager.catch_up_socket(websocket)
 
 
