@@ -81,7 +81,7 @@ const HandoffCardInner = ({ conversationId, isAdmin }: HandoffCardProps) => {
         className="border-line bg-ice text-navy hover:bg-ice-2 focus-visible:ring-steel flex shrink-0 items-center gap-2 rounded-[8px] border px-3 py-2 text-xs font-bold focus-visible:ring-2 focus-visible:outline-none"
       >
         <Badge className={`${reasonClass} pointer-events-none`}>{handoff.escalation_reason}</Badge>
-        <span>{resolved ? "Handoff resolved" : "Handoff context"}</span>
+        <span>{resolved ? "Handoff outcome saved" : "Handoff context"}</span>
       </Button>
       <HandoffCardDialog
         handoff={handoff}
