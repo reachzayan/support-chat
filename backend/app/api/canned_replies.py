@@ -5,6 +5,7 @@ from uuid import UUID
 from fastapi import APIRouter, File, Form, HTTPException, Query, UploadFile, status
 from pydantic import BaseModel, ConfigDict, Field
 
+from app.api.canned_import_history import router as history_router
 from app.db import SessionDep
 from app.models.canned_reply import CannedReply
 from app.security.deps import CurrentAdmin, CurrentUser
@@ -12,6 +13,7 @@ from app.services.canned_import import BODY_MAX, ImportPlanRow, bot_block_reason
 from app.services.canned_reply_service import CannedReplyError, CannedReplyService
 
 router = APIRouter()
+router.include_router(history_router)
 
 
 class CannedReplyCreateIn(BaseModel):
@@ -248,7 +250,7 @@ def _parse_decisions(raw: str | None) -> tuple[set[int], dict[int, UUID | None]]
 @router.post("/api/canned-replies/import", response_model=CannedImportCommitOut)
 async def commit_canned_import(
     session: SessionDep,
-    _admin: CurrentAdmin,
+    admin: CurrentAdmin,
     file: Annotated[UploadFile, File()],
     decisions: Annotated[str | None, Form()] = None,
 ) -> CannedImportCommitOut:
@@ -258,6 +260,8 @@ async def commit_canned_import(
             await _read_csv(file),
             discard_ids=discard_ids,
             remap_groups=remap_groups,
+            filename=file.filename or "canned-responses.csv",
+            staff=admin,
         )
     except CannedReplyError as exc:
         raise _http_error(exc) from exc

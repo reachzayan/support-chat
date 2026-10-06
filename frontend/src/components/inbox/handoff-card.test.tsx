@@ -62,7 +62,7 @@ describe("handoff card density", () => {
       "false",
     )
     expect(screen.queryByText("intent_ms")).not.toBeInTheDocument()
-    expect(screen.getByRole("button", { name: "Resolve handoff" })).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Save outcome" })).toBeInTheDocument()
   })
 
   test("expands technical details on demand", async () => {
@@ -82,6 +82,27 @@ describe("handoff card density", () => {
 })
 
 describe("handoff outcome save", () => {
+  test("saves the chosen No response outcome and shows it as a closed handoff", async () => {
+    staffFetch.mockImplementation(async (_input, init) => ({
+      ok: true,
+      status: 200,
+      json: async () =>
+        init?.method === "POST"
+          ? {
+              ...openHandoff,
+              outcome: { outcome: "no_response", note: null, resolved_at: "2026-10-06T12:00:00Z" },
+            }
+          : openHandoff,
+    }))
+    renderWithProviders(<HandoffCard conversationId={CONVO_ID} isAdmin={false} />)
+    const user = userEvent.setup()
+    await user.click(await screen.findByRole("button", { name: /Handoff context/ }))
+    await user.click(screen.getByRole("radio", { name: "No response" }))
+    await user.click(screen.getByRole("button", { name: "Save outcome" }))
+    expect(await screen.findByText("Outcome saved: No response")).toBeInTheDocument()
+    const write = staffFetch.mock.calls.find(([, init]) => init?.method === "POST")
+    expect(JSON.parse(write?.[1].body)).toEqual({ outcome: "no_response", note: null })
+  })
   test("posts to /api/handoffs/:id/outcome and surfaces the resolved state", async () => {
     const user = userEvent.setup()
     const onResolved = vi.fn()
@@ -99,7 +120,7 @@ describe("handoff outcome save", () => {
       }),
     })
     renderWithProviders(<HandoffOutcomeForm handoffId={HANDOFF_ID} onResolved={onResolved} />)
-    await user.click(screen.getByRole("button", { name: "Resolve handoff" }))
+    await user.click(screen.getByRole("button", { name: "Save outcome" }))
     await waitFor(() => expect(onResolved).toHaveBeenCalledTimes(1))
     expect(onResolved).toHaveBeenCalledWith({
       outcome: "resolved",
@@ -121,7 +142,7 @@ describe("handoff outcome save", () => {
       json: async () => ({ detail: "Not Found" }),
     })
     renderWithProviders(<HandoffOutcomeForm handoffId={HANDOFF_ID} onResolved={noopResolved} />)
-    await user.click(screen.getByRole("button", { name: "Resolve handoff" }))
+    await user.click(screen.getByRole("button", { name: "Save outcome" }))
     expect(await screen.findByRole("alert")).toHaveTextContent(
       "Could not save the outcome. Try again.",
     )

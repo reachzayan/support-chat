@@ -7,6 +7,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.canned_reply import CannedReply
 from app.models.site import Site
+from app.models.user import User
+from app.repositories.canned_import_repo import CannedImportRepository
 from app.repositories.canned_reply_repo import CannedReplyRepository
 from app.repositories.site_repo import SiteRepository
 from app.services.canned_bot import embed_replies
@@ -214,6 +216,8 @@ class CannedReplyService:
         *,
         discard_ids: set[int] | None = None,
         remap_groups: dict[int, UUID | None] | None = None,
+        filename: str = "canned-responses.csv",
+        staff: User | None = None,
     ) -> dict[str, int]:
         if remap_groups:
             for site_id in remap_groups.values():
@@ -226,8 +230,12 @@ class CannedReplyService:
         updated = 0
         skipped = 0
         changed: list[CannedReply] = []
+        reply_ids: dict[int, UUID | None] = {
+            index: row.existing_id if row.action == "unchanged" else None
+            for index, row in enumerate(planned)
+        }
         try:
-            for row in planned:
+            for index, row in enumerate(planned):
                 if row.action not in {"create", "update"}:
                     skipped += 1
                     continue
@@ -245,6 +253,7 @@ class CannedReplyService:
                     reply.hands_off = row.hands_off
                     reply.external_id = row.livechat_id
                     changed.append(reply)
+                    reply_ids[index] = reply.id
                     updated += 1
                     continue
                 reply = await self._replies.create(
@@ -259,8 +268,17 @@ class CannedReplyService:
                     hands_off=row.hands_off,
                 )
                 changed.append(reply)
+                reply_ids[index] = reply.id
                 created += 1
             await embed_replies(changed)
+            await CannedImportRepository(self._session).record(
+                raw=raw,
+                filename=filename,
+                staff=staff,
+                counts={"created": created, "updated": updated, "skipped": skipped},
+                planned=planned,
+                reply_ids=reply_ids,
+            )
             await self._session.commit()
         except IntegrityError as exc:
             await self._session.rollback()

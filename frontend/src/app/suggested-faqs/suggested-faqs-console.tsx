@@ -1,6 +1,6 @@
 "use client"
 
-/* oxlint-disable react-perf/jsx-no-new-function-as-prop, react-perf/jsx-no-new-array-as-prop -- Website options and card actions use the current queue. */
+/* oxlint-disable react-perf/jsx-no-new-function-as-prop, react-perf/jsx-no-new-array-as-prop, react-perf/jsx-no-jsx-as-prop -- Website options and card actions use the current queue. */
 
 import { CannedResponseSelect } from "@/app/canned-responses/canned-response-select"
 import { useOptionalAdminUser } from "@/components/admin/admin-shell"
@@ -10,6 +10,7 @@ import { Skeleton } from "@/components/ui/skeleton"
 
 import { AnswerDialog } from "./suggested-faq-answer-dialog"
 import { SuggestedFaqCard } from "./suggested-faq-card"
+import { SuggestedFaqInfo } from "./suggested-faq-info"
 import type { GapQueue, GapView } from "./suggested-faq-model"
 import { ViewTabs } from "./suggested-faq-tabs"
 import { ALL_WEBSITES, useSuggestedFaqsState } from "./use-suggested-faqs-state"
@@ -17,9 +18,13 @@ import { ALL_WEBSITES, useSuggestedFaqsState } from "./use-suggested-faqs-state"
 const TITLE = "Suggested FAQs"
 const DESCRIPTION = "Questions visitors keep asking that the assistant could not answer."
 
-const PageFrame = ({ children }: { children: React.ReactNode }) => (
+const PageFrame = ({ children, queue }: { children: React.ReactNode; queue: GapQueue | null }) => (
   <div className="view-transition-enter bg-ice flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
-    <StaffHeader title={TITLE} description={DESCRIPTION} />
+    <StaffHeader
+      title={TITLE}
+      description={DESCRIPTION}
+      titleAction={<SuggestedFaqInfo queue={queue} />}
+    />
     {children}
   </div>
 )
@@ -63,7 +68,7 @@ export const SuggestedFaqsConsole = () => {
 
   if (state.loadError) {
     return (
-      <PageFrame>
+      <PageFrame queue={queue}>
         <main id="main-content" className="flex flex-1 items-center justify-center p-6">
           <div className="border-line bg-paper w-full max-w-md rounded-xl border p-6 text-center">
             <p className="text-navy heading text-base">Suggested FAQs could not be loaded</p>
@@ -84,7 +89,7 @@ export const SuggestedFaqsConsole = () => {
 
   if (!state.hasLoaded) {
     return (
-      <PageFrame>
+      <PageFrame queue={queue}>
         <main className="flex flex-col gap-4 px-5 py-6 lg:px-8 lg:py-8">
           <Skeleton className="h-16 w-full rounded-xl" />
           <Skeleton className="h-32 w-full rounded-xl" />
@@ -97,7 +102,7 @@ export const SuggestedFaqsConsole = () => {
     state.sites.length > 1 ? (state.sites.find((site) => site.id === siteId)?.name ?? null) : null
 
   return (
-    <PageFrame>
+    <PageFrame queue={queue}>
       <main
         id="main-content"
         className="flex min-h-0 min-w-0 flex-1 flex-col gap-4 overflow-y-auto overscroll-none px-5 py-6 lg:px-8 lg:py-8"

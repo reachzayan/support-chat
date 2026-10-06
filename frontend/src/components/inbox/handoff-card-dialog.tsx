@@ -15,7 +15,7 @@ import {
 
 import { CandidateEvidenceList } from "./candidate-evidence-list"
 import { HandoffDialogMeta, HandoffMachineSummary } from "./handoff-dialog-sections"
-import { HandoffOutcomeForm } from "./handoff-outcome-form"
+import { HANDOFF_OUTCOMES, HandoffOutcomeForm } from "./handoff-outcome-form"
 
 const TIMING_KEYS = [
   "intent_ms",
@@ -46,7 +46,11 @@ const HandoffResolvedBlock = ({
   outcome: NonNullable<HandoffContextRecord["outcome"]>
 }) => (
   <div className="bg-ice rounded-[8px] px-3 py-2">
-    <p className="text-navy heading text-sm">Resolved: {outcome.outcome.replaceAll("_", " ")}</p>
+    <p className="text-navy heading text-sm">
+      Outcome saved:{" "}
+      {HANDOFF_OUTCOMES.find((option) => option.value === outcome.outcome)?.label ??
+        outcome.outcome.replaceAll("_", " ")}
+    </p>
     {outcome.note ? <p className="text-mute mt-1 text-xs leading-5">{outcome.note}</p> : null}
   </div>
 )
@@ -105,42 +109,44 @@ export const HandoffCardDialog = ({
           <HandoffDialogMeta handoff={handoff} reasonClass={reasonClass} routeLabel={routeLabel} />
         </DialogHeader>
 
-        <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto overscroll-none px-5 py-4">
-          <blockquote className="border-line bg-ice text-ink border-l-steel rounded-[8px] border-l-4 px-3 py-2 font-mono text-xs leading-5">
-            {handoff.original_question}
-          </blockquote>
+        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
+          <div className="flex flex-col gap-4 px-5 py-4">
+            <blockquote className="border-line bg-ice text-ink border-l-steel rounded-[8px] border-l-4 px-3 py-2 font-mono text-xs leading-5">
+              {handoff.original_question}
+            </blockquote>
 
-          <HandoffMachineSummary
-            handoff={handoff}
-            isAdmin={isAdmin}
-            resolved={resolved}
-            onRegenerate={onRegenerate}
-          />
-          {regenError ? (
-            <RetryError
-              text="Could not regenerate the summary."
-              onRetry={onRegenerate}
-              className="mt-0"
+            <HandoffMachineSummary
+              handoff={handoff}
+              isAdmin={isAdmin}
+              resolved={resolved}
+              onRegenerate={onRegenerate}
             />
-          ) : null}
+            {regenError ? (
+              <RetryError
+                text="Could not regenerate the summary."
+                onRetry={onRegenerate}
+                className="mt-0"
+              />
+            ) : null}
 
-          <Collapsible defaultOpen={false}>
-            <CollapsibleTrigger aria-label="Technical details">
-              <span>Technical details</span>
-              <span className="text-mute text-xs font-normal">Show</span>
-            </CollapsibleTrigger>
-            <CollapsibleContent className="flex flex-col gap-3">
-              <CandidateEvidenceList candidates={handoff.candidates ?? EMPTY_CANDIDATES} />
-              <StageTimings handoff={handoff} />
-            </CollapsibleContent>
-          </Collapsible>
-        </div>
-        <div className="border-line bg-paper shrink-0 border-t px-5 py-4">
-          {resolved && handoff.outcome ? (
-            <HandoffResolvedBlock outcome={handoff.outcome} />
-          ) : (
-            <HandoffOutcomeForm handoffId={handoff.id} onResolved={handleResolved} />
-          )}
+            <Collapsible defaultOpen={false}>
+              <CollapsibleTrigger aria-label="Technical details">
+                <span>Technical details</span>
+                <span className="text-mute text-xs font-normal">Show</span>
+              </CollapsibleTrigger>
+              <CollapsibleContent className="flex flex-col gap-3">
+                <CandidateEvidenceList candidates={handoff.candidates ?? EMPTY_CANDIDATES} />
+                <StageTimings handoff={handoff} />
+              </CollapsibleContent>
+            </Collapsible>
+          </div>
+          <div className="border-line bg-paper shrink-0 border-t px-5 py-4">
+            {resolved && handoff.outcome ? (
+              <HandoffResolvedBlock outcome={handoff.outcome} />
+            ) : (
+              <HandoffOutcomeForm handoffId={handoff.id} onResolved={handleResolved} />
+            )}
+          </div>
         </div>
       </DialogContent>
     </Dialog>
