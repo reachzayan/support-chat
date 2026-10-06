@@ -80,6 +80,21 @@ describe("suggested FAQs queue", () => {
     vi.unstubAllGlobals()
   })
 
+  test("opens the FAQ explanation from its title and returns to the queue", async () => {
+    stubFetch([enrollGap])
+    renderWithProviders(<SuggestedFaqsConsole />)
+    await screen.findByText(ENROLL)
+    const user = userEvent.setup()
+    await user.click(screen.getByRole("button", { name: "How Suggested FAQs work" }))
+    const dialog = screen.getByRole("dialog", { name: "How Suggested FAQs work" })
+    expect(
+      within(dialog).getByRole("heading", { name: "How Suggested FAQs work" }),
+    ).toBeInTheDocument()
+    await user.keyboard("{Escape}")
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument())
+    expect(screen.getByText(ENROLL)).toBeInTheDocument()
+  })
+
   test("ranks repeated questions with their chat counts, other phrasings and website", async () => {
     stubFetch([enrollGap, reportGap])
     renderWithProviders(<SuggestedFaqsConsole />)
