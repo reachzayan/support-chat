@@ -1,6 +1,7 @@
 from app.models.app_log import AppLog
 from app.models.article import KbArticle
 from app.models.base import Base
+from app.models.canned_import import CannedImport, CannedImportRow
 from app.models.canned_reply import CannedReply
 from app.models.conversation import Conversation
 from app.models.handoff_context import HandoffContext
@@ -25,6 +26,8 @@ from app.models.visitor_block import VisitorBlock
 __all__ = [
     "AppLog",
     "Base",
+    "CannedImport",
+    "CannedImportRow",
     "CannedReply",
     "Conversation",
     "HandoffContext",

@@ -2,7 +2,7 @@
 
 /* oxlint-disable react-perf/jsx-no-jsx-as-prop, react-perf/jsx-no-new-function-as-prop -- StaffHeader actions and dialog callbacks use the current library state. */
 
-import { Plus, Search, Upload } from "lucide-react"
+import { History, Plus, Search, Upload } from "lucide-react"
 import { useState } from "react"
 
 import { useOptionalAdminUser } from "@/components/admin/admin-shell"
@@ -20,6 +20,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 
 import { ImportDialog } from "./canned-import-dialog"
+import { ImportHistoryDialog } from "./canned-import-history"
 import { DeleteDialog, ResponseForm } from "./canned-response-dialogs"
 import {
   CannedResponsesSkeleton,
@@ -41,6 +42,7 @@ export const CannedResponsesConsole = () => {
   const state = useCannedResponsesState()
   const staff = useOptionalAdminUser()
   const [importOpen, setImportOpen] = useState(false)
+  const [historyOpen, setHistoryOpen] = useState(false)
 
   if (state.loadError) {
     return (
@@ -87,7 +89,10 @@ export const CannedResponsesConsole = () => {
         title="Canned responses"
         description="Reuse approved specialist wording across chats."
         action={
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center justify-end gap-2">
+            <Button variant="outline" size="lg" onClick={() => setHistoryOpen(true)}>
+              <History data-icon="inline-start" aria-hidden="true" /> Upload history
+            </Button>
             {staff?.is_admin ? (
               <Button variant="outline" size="lg" onClick={() => setImportOpen(true)}>
                 <Upload data-icon="inline-start" aria-hidden="true" /> Import CSV
@@ -295,6 +300,19 @@ export const CannedResponsesConsole = () => {
           await state.load()
         }}
       />
+      {historyOpen ? (
+        <ImportHistoryDialog
+          sites={state.sites}
+          onClose={() => setHistoryOpen(false)}
+          onViewCurrent={(id) => {
+            const record = records.find((item) => item.id === id)
+            if (record) {
+              setHistoryOpen(false)
+              state.openEdit(record)
+            }
+          }}
+        />
+      ) : null}
     </div>
   )
 }
