@@ -67,23 +67,25 @@ const RailSection = ({
     <Collapsible
       open={open}
       onOpenChange={handleOpenChange}
-      className="border-line bg-paper mx-3 mt-3 overflow-hidden rounded-lg border"
+      className="border-line border-b last:border-b-0"
     >
-      <CollapsibleTrigger
-        aria-label={title}
-        className="group text-navy hover:bg-ice-2 h-11 w-full justify-between rounded-none px-3.5 text-left text-[10px] font-bold tracking-[0.14em] uppercase aria-expanded:bg-transparent"
-      >
-        <span>{title}</span>
-        <motion.span
-          aria-hidden="true"
-          className="inline-flex"
-          animate={chevronAnimate}
-          transition={chevronTransition}
+      <h2>
+        <CollapsibleTrigger
+          aria-label={title}
+          className="group text-navy hover:bg-ice-2 h-11 w-full justify-between rounded-none px-4 text-left text-[10px] font-bold tracking-[0.14em] uppercase aria-expanded:bg-transparent"
         >
-          <ChevronDown className="size-3.5" aria-hidden="true" />
-        </motion.span>
-      </CollapsibleTrigger>
-      <CollapsibleContent className="mt-0 px-3 pb-2">
+          <span>{title}</span>
+          <motion.span
+            aria-hidden="true"
+            className="inline-flex"
+            animate={chevronAnimate}
+            transition={chevronTransition}
+          >
+            <ChevronDown className="size-3.5" aria-hidden="true" />
+          </motion.span>
+        </CollapsibleTrigger>
+      </h2>
+      <CollapsibleContent className="mt-0 px-4 pb-4">
         <dl>{children}</dl>
       </CollapsibleContent>
     </Collapsible>
@@ -140,7 +142,7 @@ const ContactSection = ({
     <Fact label="IP">
       <span className="font-mono text-xs">{orNone(detail.visitor.ip)}</span>
     </Fact>
-    <Fact label="Location">{orNone(detail.visitor.location)}</Fact>
+    <Fact label="Location">{detail.visitor.location ?? "Not available yet"}</Fact>
     <div className="pt-3 pb-1">
       <BlockToggle
         blocked={blocked}
@@ -279,23 +281,28 @@ export const VisitorRail = ({ detail }: VisitorRailProps) => {
   return (
     <aside
       aria-label="Visitor facts"
-      className="border-line bg-ice/60 flex min-h-0 w-full flex-col overflow-y-auto border-l pb-3 lg:w-[320px] lg:shrink-0"
+      className="border-line bg-paper flex min-h-0 w-full flex-col overflow-hidden border-l lg:w-[320px] lg:shrink-0"
     >
       <VisitorRailHeader
         name={name}
         siteName={detail.site_name}
         closed={detail.state === "closed"}
       />
-      <ContactSection
-        detail={detail}
-        blocked={blocked}
-        pendingUnblock={pendingUnblock}
-        onBlock={handleOpenBlock}
-        onUnblock={handleUnblockClick}
-      />
-      <ConversationSection detail={detail} assigned={assigned} />
-      <PageSection detail={detail} />
-      <TechnicalSection browser={device.browser} os={device.os} />
+      <section
+        className="min-h-0 flex-1 overflow-y-auto overscroll-contain pb-3"
+        aria-label="Visitor information"
+      >
+        <ContactSection
+          detail={detail}
+          blocked={blocked}
+          pendingUnblock={pendingUnblock}
+          onBlock={handleOpenBlock}
+          onUnblock={handleUnblockClick}
+        />
+        <ConversationSection detail={detail} assigned={assigned} />
+        <PageSection detail={detail} />
+        <TechnicalSection browser={device.browser} os={device.os} />
+      </section>
       {blockOpen ? (
         <BlockVisitorDialog
           key={detail.id}

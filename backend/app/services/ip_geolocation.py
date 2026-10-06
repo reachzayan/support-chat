@@ -7,7 +7,7 @@ import httpx
 
 from app.services.kb_crawl import FetchError, public_fetch_url
 
-LOOKUP_TIMEOUT_SECONDS = 1.0
+LOOKUP_TIMEOUT_SECONDS = 3.0
 
 
 def _location_from_payload(payload: Any) -> str | None:

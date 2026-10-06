@@ -36,6 +36,8 @@ async def location_enrichment_loop() -> None:
                     if visitor is not None and visitor.ip == address:
                         visitor.location = location
                     await session.commit()
+            # FreeIPAPI allows 10 lookups per 10 seconds (60 per minute).
+            await asyncio.sleep(max(1.1, settings.background_job_poll_seconds))
         except asyncio.CancelledError:
             raise
         except Exception as exc:

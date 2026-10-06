@@ -4,6 +4,49 @@ import httpx
 import pytest
 
 from app.services.ip_geolocation import lookup_location
+from app.settings import Settings
+
+
+def test_location_lookup_is_enabled_without_undocumented_environment_setup() -> None:
+    settings = Settings(_env_file=None)
+    assert settings.ip_geolocation_provider_url == "https://free.freeipapi.com/api/v1/json"
+
+
+@pytest.mark.parametrize(
+    ("payload", "expected"),
+    [
+        (
+            {
+                "success": True,
+                "cityName": "New York",
+                "regionName": "New York",
+                "countryName": "United States",
+            },
+            "New York, New York, United States",
+        ),
+        (
+            {
+                "success": True,
+                "cityName": "",
+                "regionName": "California",
+                "countryName": "United States",
+            },
+            "California, United States",
+        ),
+        ({"error": "Rate limit exceeded"}, None),
+        ({"success": True}, None),
+    ],
+)
+async def test_lookup_location_reads_provider_response(monkeypatch, payload, expected) -> None:
+    original_client = httpx.AsyncClient
+    transport = httpx.MockTransport(lambda request: httpx.Response(200, json=payload))
+    monkeypatch.setattr(
+        httpx, "AsyncClient", lambda **kwargs: original_client(transport=transport, **kwargs)
+    )
+    assert (
+        await lookup_location("8.8.8.8", provider_url="https://free.freeipapi.com/api/v1/json")
+        == expected
+    )
 
 
 class _LocationResponse:

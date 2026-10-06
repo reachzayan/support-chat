@@ -146,7 +146,8 @@ class Settings(BaseSettings):
     knowledge_gap_spike_conversations: int = 3
     knowledge_gap_spike_hours: int = 24
     knowledge_gap_similarity: float = 0.82
-    ip_geolocation_provider_url: str | None = None
+    # FreeIPAPI public HTTPS endpoint; set to an empty string to disable IP lookups.
+    ip_geolocation_provider_url: str | None = "https://free.freeipapi.com/api/v1/json"
     ip_geolocation_retry_hours: int = 24
 
     def trusted_proxy_networks(self) -> list:
