@@ -44,6 +44,30 @@ const stubMedia = () => {
   })
 }
 
+test("selected page and navigation toggle retain their state after the pointer leaves", async () => {
+  stubMedia()
+  const user = userEvent.setup()
+  renderWithProviders(
+    <AdminShell>
+      <div>Inbox view</div>
+    </AdminShell>,
+  )
+  await screen.findByText("Inbox view")
+  const inbox = screen.getByRole("link", { name: "Inbox" })
+  const sites = screen.getByRole("link", { name: "Sites" })
+  const toggle = screen.getByRole("button", { name: "Toggle Sidebar" })
+  expect(inbox).toHaveAttribute("aria-current", "page")
+  expect(sites).not.toHaveAttribute("aria-current")
+  expect(toggle).toHaveAttribute("aria-expanded", "true")
+  await user.click(toggle)
+  await user.unhover(toggle)
+  expect(toggle).toHaveAttribute("aria-expanded", "false")
+  expect(inbox).toHaveAttribute("aria-current", "page")
+  await user.click(toggle)
+  await user.unhover(toggle)
+  expect(toggle).toHaveAttribute("aria-expanded", "true")
+})
+
 describe("admin shell", () => {
   beforeEach(stubMedia)
 
@@ -69,13 +93,6 @@ describe("admin shell", () => {
     const accountLink = screen.getByRole("link", { name: "Alex Morgan account" })
     expect(accountLink).toHaveAttribute("href", "/admin/settings")
     expect(accountLink.closest('[data-slot="sidebar-footer"]')).not.toBeNull()
-    const footer = accountLink.closest('[data-slot="sidebar-footer"]')
-    expect(footer?.querySelector('[data-sidebar="trigger"]')).not.toBeNull()
-    expect(
-      footer?.querySelector(
-        'button[aria-label="Switch to dark mode"], button[aria-label="Switch to light mode"]',
-      ),
-    ).not.toBeNull()
     expect(screen.queryByRole("link", { name: "Settings" })).not.toBeInTheDocument()
     const sidebar = screen.getByTestId("admin-sidebar")
     expect(sidebar).toHaveAttribute("data-slot", "sidebar-container")
@@ -149,6 +166,10 @@ describe("admin shell hover peek", () => {
     const sidebar = screen.getByTestId("admin-sidebar")
     await user.hover(sidebar)
     expect(knowledge).toHaveTextContent("Knowledge base")
+    expect(screen.getByRole("link", { name: "Notification settings" })).toHaveAttribute(
+      "href",
+      "/admin/notifications",
+    )
     expect(sidebarCookie()).toBeNull()
 
     await user.unhover(sidebar)
@@ -260,4 +281,97 @@ describe("admin shell session gate", () => {
     await waitFor(() => expect(replace).toHaveBeenCalledWith("/login"))
     expect(screen.queryByText("Could not reach the staff API.")).not.toBeInTheDocument()
   })
+})
+
+describe("mobile admin navigation", () => {
+  beforeEach(stubMedia)
+  test("theme controls work from the mobile navigation footer", async () => {
+    const originalWidth = window.innerWidth
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: 390 })
+    try {
+      const user = userEvent.setup()
+      renderWithProviders(
+        <AdminShell>
+          <div>Inbox view</div>
+        </AdminShell>,
+        { initialTheme: "light" },
+      )
+      await screen.findByText("Inbox view")
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument()
+      expect(screen.queryByRole("button", { name: "Switch to dark mode" })).not.toBeInTheDocument()
+      await user.click(screen.getByRole("button", { name: "Open navigation" }))
+      const drawer = await screen.findByRole("dialog")
+      await user.click(within(drawer).getByRole("button", { name: "Switch to dark mode" }))
+      expect(document.documentElement).toHaveClass("dark")
+      expect(document.cookie).toContain("supportchat_theme=dark")
+      expect(
+        within(drawer).getByRole("button", { name: "Switch to light mode" }),
+      ).toBeInTheDocument()
+      await user.click(within(drawer).getByRole("button", { name: "Close panel" }))
+      await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument())
+    } finally {
+      Object.defineProperty(window, "innerWidth", { configurable: true, value: originalWidth })
+    }
+  })
+  test("mobile navigation opens outside the drawer and closes after choosing a page", async () => {
+    const originalWidth = window.innerWidth
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: 390 })
+    try {
+      const user = userEvent.setup()
+      renderWithProviders(
+        <AdminShell>
+          <div>Inbox view</div>
+        </AdminShell>,
+      )
+      await screen.findByText("Inbox view")
+      await user.click(screen.getByRole("button", { name: "Open navigation" }))
+      const drawer = await screen.findByRole("dialog")
+      expect(within(drawer).getByRole("link", { name: "Sites" })).toHaveTextContent("Sites")
+      await user.click(within(drawer).getByRole("link", { name: "Sites" }))
+      await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument())
+      expect(screen.getByRole("button", { name: "Open navigation" })).toBeInTheDocument()
+    } finally {
+      Object.defineProperty(window, "innerWidth", { configurable: true, value: originalWidth })
+    }
+  })
+})
+
+test("the sidebar Inbox count shares read state with the notification bell", async () => {
+  stubMedia()
+  vi.stubGlobal("fetch", async (_input: RequestInfo | URL, init?: RequestInit) =>
+    init?.method === "POST"
+      ? new Response(null, { status: 204 })
+      : Response.json({
+          items: [
+            {
+              id: 41,
+              site_id: "easy",
+              site_name: "SampleSite",
+              conversation_id: "chat-1",
+              scenario: "needs_attention",
+              created_at: "2026-10-06T12:00:00Z",
+              read_at: null,
+            },
+          ],
+          unread_count: 1,
+          next_cursor: null,
+        }),
+  )
+  try {
+    const user = userEvent.setup()
+    renderWithProviders(
+      <AdminShell>
+        <div>Inbox view</div>
+      </AdminShell>,
+    )
+    const inbox = await screen.findByRole("link", { name: "Inbox, 1 unread" })
+    expect(inbox).toHaveTextContent("1")
+    await user.click(screen.getByRole("button", { name: "Notifications, 1 unread" }))
+    await user.click(screen.getByRole("button", { name: "Mark all read" }))
+    await waitFor(() => expect(inbox).toHaveAccessibleName("Inbox"))
+    expect(inbox).toHaveTextContent("Inbox")
+    expect(inbox).not.toHaveTextContent("1")
+  } finally {
+    vi.unstubAllGlobals()
+  }
 })

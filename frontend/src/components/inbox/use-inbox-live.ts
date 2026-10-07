@@ -2,9 +2,11 @@
 
 import { useCallback, useRef, useState, type Dispatch, type SetStateAction } from "react"
 
+import { useSearchTarget } from "@/components/search/workspace-route"
 import { persistInboxSiteId, readStoredInboxSiteId } from "@/lib/pane-width"
 
 import { fetchInboxDetailPage, mergeInboxMessages } from "./inbox-api"
+import { updateInboxLink } from "./inbox-link"
 import { emptyLive, type InboxLive } from "./inbox-session"
 import type { SocketApi } from "./inbox-socket"
 import {
@@ -68,6 +70,7 @@ const useInboxQueryHandlers = (
   setLive: Dispatch<SetStateAction<InboxLive>>,
 ) => {
   const clearOpenChat = useCallback(() => {
+    updateInboxLink(null)
     if (refs.selectedRef.current !== null) {
       socketRef.current?.unsubscribe(refs.selectedRef.current)
     }
@@ -105,12 +108,13 @@ const useInboxQueryHandlers = (
     refs.markSiteId(null)
     setSiteId(null)
   }, [refs, setSiteId])
-  return { handleFilter, handleSite, handleUnknownSite }
+  return { handleFilter, handleSite, handleUnknownSite, clearOpenChat }
 }
 
 export const useInboxLive = (userId: string) => {
   const [filter, setFilter] = useState<InboxFilter>("human")
-  const [siteId, setSiteId] = useState<string | null>(readStoredInboxSiteId)
+  const target = useSearchTarget()
+  const [siteId, setSiteId] = useState<string | null>(() => target.site ?? readStoredInboxSiteId())
   const [sites, setSites] = useState<InboxSite[]>([])
   const [loadError, setLoadError] = useState(false)
   const [items, setItems] = useState<InboxListItem[]>([])
@@ -131,7 +135,7 @@ export const useInboxLive = (userId: string) => {
     setSelectedId,
     setLive,
   )
-  const { reloadList, reloadDetail, clearLoadedCursors } = useInboxLoaders(
+  const { reloadList, reloadDetail, clearLoadedCursors, detailError } = useInboxLoaders(
     refs,
     socketRef,
     setItems,
@@ -166,6 +170,7 @@ export const useInboxLive = (userId: string) => {
     reloadList(refs.filterRef.current)
   }, [refs.filterRef, reloadList])
   return {
+    detailError,
     filter,
     setFilter: query.handleFilter,
     siteId,
@@ -178,6 +183,7 @@ export const useInboxLive = (userId: string) => {
     selectedId,
     live,
     canned,
+    clearSelection: query.clearOpenChat,
     counts,
     ...olderMessages,
     ...actions,

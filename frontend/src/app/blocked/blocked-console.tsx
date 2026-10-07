@@ -1,10 +1,11 @@
 "use client"
 
-/* oxlint-disable react-perf/jsx-no-new-function-as-prop -- Unblock and retry close over the current row. */
+/* oxlint-disable react-perf/jsx-no-new-array-as-prop, react-perf/jsx-no-new-function-as-prop -- Unblock and retry close over the current row. */
 
 import { formatWhen } from "@/app/data/data-shared"
 import { RetryError } from "@/components/admin/retry-error"
 import { StaffHeader } from "@/components/admin/staff-nav"
+import { useSearchTarget } from "@/components/search/workspace-route"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
 
@@ -31,6 +32,7 @@ export const BlockedConsole = () => {
 }
 
 const BlockedBody = ({ state }: { state: ReturnType<typeof useBlockedState> }) => {
+  const target = useSearchTarget()
   if (state.loadError) {
     return <RetryError text="Blocked visitors could not be loaded." onRetry={state.handleRetry} />
   }
@@ -47,7 +49,17 @@ const BlockedBody = ({ state }: { state: ReturnType<typeof useBlockedState> }) =
       </section>
     )
   }
-  return <BlockedTable state={state} rows={state.rows} />
+  const rows = target.block ? state.rows.filter((row) => row.id === target.block) : state.rows
+  return (
+    <>
+      {target.block ? (
+        <p className="text-mute mb-3 text-sm">
+          {rows.length ? "Selected search result" : "This blocked visitor is no longer available."}
+        </p>
+      ) : null}
+      <BlockedTable state={state} rows={rows} />
+    </>
+  )
 }
 
 const BlockedTable = ({

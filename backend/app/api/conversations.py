@@ -193,6 +193,18 @@ async def list_submissions(
     return SubmissionListOut.model_validate({"items": items, "has_more": has_more})
 
 
+@router.get("/api/conversations/submissions/{conversation_id}", response_model=SubmissionItemOut)
+async def get_submission(
+    conversation_id: UUID, session: SessionDep, _staff: CurrentUser
+) -> SubmissionItemOut:
+    try:
+        return SubmissionItemOut.model_validate(
+            await ConversationQueries(session).get_submission(conversation_id)
+        )
+    except CommandError as exc:
+        raise _map_command_error(exc) from exc
+
+
 @router.post("/api/conversations/submissions/export")
 async def export_submissions(
     payload: SubmissionExportIn,

@@ -1,9 +1,8 @@
 "use client"
 
-import { useCallback, useMemo, type ChangeEvent } from "react"
+import { useCallback, useMemo } from "react"
 
 import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
 import {
   Select,
   SelectContent,
@@ -53,21 +52,13 @@ export const DataFilterBar = ({
     ],
     [intents],
   )
-  const { handleSearch, handleSite, handleIntent, handleState, handleClear } =
-    useDataFilterHandlers(filters, onFilters)
+  const { handleSite, handleIntent, handleState, handleClear } = useDataFilterHandlers(
+    filters,
+    onFilters,
+  )
 
   return (
     <div className="flex flex-wrap items-center gap-2">
-      <Input
-        type="search"
-        autoComplete="off"
-        spellCheck={false}
-        value={filters.search}
-        onChange={handleSearch}
-        aria-label="Search submissions"
-        placeholder="Search name, email, phone, or message"
-        className="border-line bg-ice h-8 min-w-48 flex-1"
-      />
       <DataFilterSelect
         label="Site"
         value={filters.siteId ?? ALL}
@@ -98,12 +89,6 @@ export const DataFilterBar = ({
 }
 
 const useDataFilterHandlers = (filters: DataFilters, onFilters: (next: DataFilters) => void) => {
-  const handleSearch = useCallback(
-    (event: ChangeEvent<HTMLInputElement>) => {
-      onFilters({ ...filters, search: event.target.value })
-    },
-    [filters, onFilters],
-  )
   const handleSite = useCallback(
     (value: unknown) => {
       const selected = selectedString(value)
@@ -136,7 +121,7 @@ const useDataFilterHandlers = (filters: DataFilters, onFilters: (next: DataFilte
   )
   const handleClear = useCallback(() => onFilters(EMPTY_FILTERS), [onFilters])
 
-  return { handleSearch, handleSite, handleIntent, handleState, handleClear }
+  return { handleSite, handleIntent, handleState, handleClear }
 }
 
 const DataFilterSelect = ({

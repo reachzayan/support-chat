@@ -20,6 +20,7 @@ export const applyHostFrame = (
     }
     return
   }
+  if (frame.type === "host.sound") return
   if (knownParent === "" || origin !== knownParent) {
     return
   }

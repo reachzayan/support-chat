@@ -69,6 +69,7 @@ html {
 }
 
 body {
+  position: relative;
   background: var(--color-ice);
   color: var(--color-ink);
   font-family: var(--font-sans);
@@ -212,6 +213,42 @@ body {
   transform: scale(0.92);
 }
 
+/* Switch between the artist's regular and filled glyphs; never flood an outline SVG. */
+.state-icon use {
+  transition: opacity 150ms ease;
+}
+.state-icon-fill {
+  opacity: 0;
+}
+:where(button, a, [role="button"]):is(
+    :focus-visible,
+    [aria-current="page"],
+    [aria-expanded="true"],
+    [aria-pressed="true"],
+    [aria-selected="true"]
+  )
+  .state-icon-regular {
+  opacity: 0;
+}
+:where(button, a, [role="button"]):is(
+    :focus-visible,
+    [aria-current="page"],
+    [aria-expanded="true"],
+    [aria-pressed="true"],
+    [aria-selected="true"]
+  )
+  .state-icon-fill {
+  opacity: 1;
+}
+@media (hover: hover) {
+  :where(button, a, [role="button"]):not(:disabled):hover .state-icon-regular {
+    opacity: 0;
+  }
+  :where(button, a, [role="button"]):not(:disabled):hover .state-icon-fill {
+    opacity: 1;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
@@ -223,6 +260,7 @@ body {
 }
 
 :root {
+  --workspace-toolbar-height: 3.5rem;
   color-scheme: light;
   --navy: #0b2347;
   --navy-deep: #0d1f3a;

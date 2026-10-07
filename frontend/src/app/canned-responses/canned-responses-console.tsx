@@ -2,7 +2,7 @@
 
 /* oxlint-disable react-perf/jsx-no-jsx-as-prop, react-perf/jsx-no-new-function-as-prop -- StaffHeader actions and dialog callbacks use the current library state. */
 
-import { History, Plus, Search, Upload } from "lucide-react"
+import { History, Plus, Upload } from "lucide-react"
 import { useState } from "react"
 
 import { useOptionalAdminUser } from "@/components/admin/admin-shell"
@@ -17,7 +17,6 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
 import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
 
 import { ImportDialog } from "./canned-import-dialog"
 import { ImportHistoryDialog } from "./canned-import-history"
@@ -109,7 +108,7 @@ export const CannedResponsesConsole = () => {
         className="flex min-h-0 min-w-0 flex-1 flex-col gap-4 overflow-hidden px-5 py-6 lg:px-8 lg:py-8"
       >
         <section className="border-line bg-paper shrink-0 rounded-xl border p-4 sm:p-5">
-          <div className="grid gap-3 lg:grid-cols-[minmax(15rem,0.8fr)_minmax(18rem,1.2fr)_10rem_11rem]">
+          <div className="grid gap-3 lg:grid-cols-[minmax(15rem,1fr)_10rem_11rem]">
             <div className="text-ink flex flex-col gap-1.5 text-xs font-medium">
               <span>Scope</span>
               <CannedResponseSelect
@@ -118,22 +117,6 @@ export const CannedResponsesConsole = () => {
                 items={scopeOptions(state.sites)}
                 label="Scope"
               />
-            </div>
-            <div className="text-ink flex flex-col gap-1.5 text-xs font-medium">
-              <span>Search</span>
-              <span className="border-line bg-ice flex h-10 items-center gap-2 rounded-[8px] border px-3">
-                <Search aria-hidden="true" className="text-mute size-4" />
-                <Input
-                  type="search"
-                  autoComplete="off"
-                  spellCheck={false}
-                  aria-label="Search canned responses"
-                  value={state.query}
-                  onChange={(event) => state.updateQuery(event.target.value)}
-                  placeholder="# or message…"
-                  className="h-auto border-0 bg-transparent p-0 shadow-none focus-visible:ring-0"
-                />
-              </span>
             </div>
             <div className="text-ink flex flex-col gap-1.5 text-xs font-medium">
               <span>Status</span>

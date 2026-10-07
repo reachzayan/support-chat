@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 
 import { staffRead, staffWrite, type SiteRecord } from "@/components/admin/staff-api"
+import { useSearchTarget, useOpenSearchTarget } from "@/components/search/workspace-route"
 
 import type {
   AnswerPayload,
@@ -53,13 +54,26 @@ const fetchQueue = async (website: string, view: GapView) => {
   }
 }
 
+const queueSelection = (target: Readonly<Record<string, string>>) => {
+  const initialWebsite = target.site ?? ALL_WEBSITES
+  const initialView: GapView =
+    target.view === "dismissed"
+      ? "dismissed"
+      : target.view === "canned" || target.view === "knowledge" || target.view === "answered"
+        ? "answered"
+        : "open"
+  return { website: initialWebsite, view: initialView }
+}
+
 const useGapQueue = () => {
+  const target = useSearchTarget()
+  const { website: initialWebsite, view: initialView } = queueSelection(target)
   const [queue, setQueue] = useState<GapQueue | null>(null)
   // Which view the loaded queue belongs to, so a tab never shows another tab's cards.
-  const [queueView, setQueueView] = useState<GapView>("open")
+  const [queueView, setQueueView] = useState<GapView>(initialView)
   const [sites, setSites] = useState<SiteRecord[]>([])
-  const [website, setWebsite] = useState(ALL_WEBSITES)
-  const [view, setView] = useState<GapView>("open")
+  const [website, setWebsite] = useState(initialWebsite)
+  const [view, setView] = useState<GapView>(initialView)
   const [loadError, setLoadError] = useState("")
   // A slow answer for one website or tab must never overwrite the list chosen next.
   const latestLoad = useRef(0)
@@ -84,8 +98,8 @@ const useGapQueue = () => {
 
   useEffect(() => {
     // oxlint-disable-next-line react/set-state-in-effect -- Start the initial asynchronous queue request after the client mounts.
-    void load(ALL_WEBSITES, "open")
-  }, [load])
+    void load(initialWebsite, initialView)
+  }, [load, initialWebsite, initialView])
 
   const updateItems = useCallback((change: (items: GapRecord[]) => GapRecord[]) => {
     setQueue((current) => (current ? { ...current, items: change(current.items) } : current))
@@ -278,5 +292,7 @@ export const useSuggestedFaqsState = () => {
   const [announcement, setAnnouncement] = useState("")
   const actions = useCardActions(queueState.removeGap, queueState.updateGap, setAnnouncement)
   const answerFlow = useAnswerFlow(queueState.removeGap, setAnnouncement)
+  const target = useSearchTarget()
+  useOpenSearchTarget(target.gap, queueState.queue?.items ?? null, answerFlow.openAnswer)
   return { ...queueState, ...actions, ...answerFlow, announcement }
 }

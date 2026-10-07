@@ -1,6 +1,5 @@
 "use client"
 
-import { Info } from "lucide-react"
 import { useCallback, useState } from "react"
 
 import { Button } from "@/components/ui/button"
@@ -11,6 +10,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
+import { StateIcon } from "@/components/ui/state-icon"
 
 import type { GapQueue } from "./suggested-faq-model"
 
@@ -91,7 +91,7 @@ export const SuggestedFaqInfo = ({ queue }: { queue: GapQueue | null }) => {
         aria-haspopup="dialog"
         onClick={show}
       >
-        <Info aria-hidden="true" className="size-5" />
+        <StateIcon name="info" className="size-5" />
       </Button>
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent className="max-w-xl">

@@ -42,6 +42,7 @@ export type ConversationHistoryItem = {
 }
 
 export type HostToWidget =
+  | { type: "host.sound"; enabled: boolean }
   | {
       type: "host.bootstrap"
       bootstrap_token: string
@@ -61,6 +62,8 @@ export type HostToWidget =
   | { type: "host.context"; page_url: string; page_title: string; referrer: string }
 
 export type WidgetToHost =
+  | { type: "widget.sound"; enabled: boolean }
+  | { type: "widget.message"; conversation_id: string; message_id: number }
   | { type: "widget.ready" }
   | { type: "widget.painted" }
   | { type: "widget.rebootstrap"; conversation_id?: string }
@@ -264,6 +267,11 @@ export const parseHostToWidget = (value: unknown): HostToWidget | null => {
   if (!isRecord(value) || typeof value.type !== "string") {
     return null
   }
+  if (value.type === "host.sound") {
+    return typeof value.enabled === "boolean"
+      ? { type: "host.sound", enabled: value.enabled }
+      : null
+  }
   if (value.type === "host.bootstrap") {
     return parseBootstrap(value)
   }
@@ -346,6 +354,26 @@ const parseOpenUrl = (value: Record<string, unknown>): WidgetToHost | null => {
 export const parseWidgetToHost = (value: unknown): WidgetToHost | null => {
   if (!isRecord(value) || typeof value.type !== "string") {
     return null
+  }
+  if (value.type === "widget.sound") {
+    return typeof value.enabled === "boolean"
+      ? { type: "widget.sound", enabled: value.enabled }
+      : null
+  }
+  if (value.type === "widget.message") {
+    if (
+      typeof value.conversation_id !== "string" ||
+      !UUID_PATTERN.test(value.conversation_id) ||
+      typeof value.message_id !== "number" ||
+      !Number.isSafeInteger(value.message_id) ||
+      value.message_id <= 0
+    )
+      return null
+    return {
+      type: "widget.message",
+      conversation_id: value.conversation_id,
+      message_id: value.message_id,
+    }
   }
   const simple = parseSimpleWidget(value.type)
   if (simple !== null) {

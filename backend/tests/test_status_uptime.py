@@ -28,8 +28,11 @@ from tests.ws_helpers import (
     login_staff,
 )
 
-NOW = datetime.now(UTC)
 DAY = timedelta(days=1)
+
+
+def _utc_now() -> datetime:
+    return datetime.now(UTC)
 
 
 def _auth(token: str) -> dict[str, str]:
@@ -83,11 +86,12 @@ def _seed_history() -> None:
     Redis: 5 ok in the last few hours (100% in every window).
     Latency: current hour 10, 20, 30 ms (median 20); previous hour 42 ms.
     """
-    hour = NOW.replace(minute=0, second=0, microsecond=0)
+    now = _utc_now()
+    hour = now.replace(minute=0, second=0, microsecond=0)
     with db() as session:
-        _add_sample(session, service="postgres", ok=True, created_at=NOW, latency_ms=10)
-        _add_sample(session, service="postgres", ok=True, created_at=NOW, latency_ms=20)
-        _add_sample(session, service="postgres", ok=True, created_at=NOW, latency_ms=30)
+        _add_sample(session, service="postgres", ok=True, created_at=now, latency_ms=10)
+        _add_sample(session, service="postgres", ok=True, created_at=now, latency_ms=20)
+        _add_sample(session, service="postgres", ok=True, created_at=now, latency_ms=30)
         _add_sample(
             session,
             service="postgres",
@@ -95,13 +99,13 @@ def _seed_history() -> None:
             created_at=hour - timedelta(minutes=30),
             latency_ms=42,
         )
-        _add_sample(session, service="postgres", ok=False, created_at=NOW)
+        _add_sample(session, service="postgres", ok=False, created_at=now)
         for index in range(5):
             _add_sample(
                 session,
                 service="postgres",
                 ok=True,
-                created_at=NOW - 3 * DAY - timedelta(minutes=index),
+                created_at=now - 3 * DAY - timedelta(minutes=index),
                 latency_ms=8,
             )
         for index in range(10):
@@ -109,16 +113,16 @@ def _seed_history() -> None:
                 session,
                 service="postgres",
                 ok=True,
-                created_at=NOW - 40 * DAY - timedelta(minutes=index),
+                created_at=now - 40 * DAY - timedelta(minutes=index),
                 latency_ms=8,
             )
-        _add_sample(session, service="postgres", ok=False, created_at=NOW - 91 * DAY)
+        _add_sample(session, service="postgres", ok=False, created_at=now - 91 * DAY)
         for index in range(5):
             _add_sample(
                 session,
                 service="redis",
                 ok=True,
-                created_at=NOW - timedelta(minutes=index + 1),
+                created_at=now - timedelta(minutes=index + 1),
                 latency_ms=4,
             )
 
@@ -195,6 +199,6 @@ def test_incidents_name_today_as_postgres_down_and_the_other_six_days_clear(
     body = client.get("/api/status", headers=_auth(token)).json()
     days = body["incidents"]
     assert len(days) == 7
-    assert days[0]["date"] == NOW.date().isoformat()
+    assert days[0]["date"] == _utc_now().date().isoformat()
     assert days[0]["summary"] == "Postgres was down"
     assert [row["summary"] for row in days[1:]] == ["No incidents"] * 6

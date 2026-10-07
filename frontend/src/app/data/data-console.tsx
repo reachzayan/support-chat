@@ -5,6 +5,7 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 
 import { StaffHeader } from "@/components/admin/staff-nav"
+import { useSearchTarget } from "@/components/search/workspace-route"
 import { Button } from "@/components/ui/button"
 import { staffGet } from "@/lib/auth-client"
 
@@ -106,9 +107,32 @@ const useSubmissionsFeed = () => {
 export const DataConsole = () => {
   const { rows, hasMore, loadError, loadMoreError, loadingMore, handleLoadMore } =
     useSubmissionsFeed()
-  const [selectedId, setSelectedId] = useState<string | null>(null)
+  const target = useSearchTarget()
+  const [selectedId, setSelectedId] = useState<string | null>(target.conversation ?? null)
+  const [linkedRow, setLinkedRow] = useState<SubmissionRow | null>(null)
+  const [selectionError, setSelectionError] = useState(false)
+  useEffect(() => {
+    if (!target.conversation) return
+    let active = true
+    void (async () => {
+      try {
+        const response = await staffGet(
+          `/api/conversations/submissions/${encodeURIComponent(target.conversation)}`,
+        )
+        if (!response.ok) throw new Error("Unavailable submission")
+        const row = (await response.json()) as SubmissionRow
+        if (active) setLinkedRow(row)
+      } catch {
+        if (active) setSelectionError(true)
+      }
+    })()
+    return () => {
+      active = false
+    }
+  }, [target.conversation])
   const [exportOpen, setExportOpen] = useState(false)
-  const selected = rows?.find((row) => row.id === selectedId) ?? null
+  const selected =
+    rows?.find((row) => row.id === selectedId) ?? (linkedRow?.id === selectedId ? linkedRow : null)
 
   const handleSheetOpen = useCallback((open: boolean) => {
     if (!open) {
@@ -135,6 +159,11 @@ export const DataConsole = () => {
         id="main-content"
         className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden px-5 py-5 lg:px-8 lg:py-8"
       >
+        {selectionError ? (
+          <p role="alert" className="text-ember mb-3 text-sm">
+            This submission is no longer available. Search again for the latest records.
+          </p>
+        ) : null}
         <DataConsoleBody
           rows={rows}
           loadError={loadError}

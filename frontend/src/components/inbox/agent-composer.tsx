@@ -2,7 +2,6 @@
 
 /* oxlint-disable react-perf/jsx-no-jsx-as-prop, react-perf/jsx-no-new-function-as-prop, eslint/complexity -- Base UI render props and picker item handlers depend on live composer state; the keyboard map is deliberately a single reviewable interaction contract. */
 
-import { ArrowUp, Hash } from "lucide-react"
 import Link from "next/link"
 import {
   useCallback,
@@ -18,6 +17,7 @@ import {
 
 import { Button } from "@/components/ui/button"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import { StateIcon } from "@/components/ui/state-icon"
 
 import type { CannedReply } from "./types"
 
@@ -139,7 +139,7 @@ const ComposerField = ({
           />
         }
       >
-        <Hash aria-hidden="true" className="size-4" />
+        <StateIcon name="hash" className="size-4" />
       </PopoverTrigger>
       <PopoverContent initialFocus={false} finalFocus={false} className="overflow-hidden">
         <div className="border-line flex items-center justify-between border-b px-3 py-2">
@@ -209,10 +209,10 @@ const ComposerField = ({
           ? "bg-line text-mute"
           : disabled
             ? "bg-line text-mute/80 cursor-not-allowed"
-            : "bg-steel hover:bg-navy disabled:bg-ember-soft focus-visible:ring-steel text-white hover:text-white"
+            : "bg-steel hover:bg-steel! disabled:bg-ember-soft focus-visible:ring-steel text-white hover:text-white"
       }`}
     >
-      <ArrowUp aria-hidden="true" className="size-5" strokeWidth={2.4} />
+      <StateIcon name="arrow-up" className="size-5" />
       <span className="sr-only">Send</span>
     </Button>
   </div>
@@ -351,7 +351,7 @@ export const AgentComposer = ({
   return (
     <form
       onSubmit={handleSubmit}
-      className={`border-line border-t px-5 py-4 ${closed ? "bg-ice-2" : "bg-ice"}`}
+      className={`border-line shrink-0 border-t px-3 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] lg:px-5 lg:py-4 ${closed ? "bg-ice-2" : "bg-ice"}`}
     >
       <label className="sr-only" htmlFor={inputId}>
         Message

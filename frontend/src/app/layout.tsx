@@ -39,6 +39,7 @@ const staffChrome = async () => {
   return {
     theme: readTheme(jar.get("supportchat_theme")?.value),
     sidebarOpen: jar.get("sidebar_state")?.value !== "false",
+    notificationSound: jar.get("supportchat_notification_sound")?.value !== "false",
   }
 }
 
@@ -48,7 +49,9 @@ export default async function RootLayout({
   children: React.ReactNode
 }>) {
   const isWidget = (await headers()).get("x-supportchat-surface") === "widget"
-  const chrome = isWidget ? { theme: "light" as Theme, sidebarOpen: true } : await staffChrome()
+  const chrome = isWidget
+    ? { theme: "light" as Theme, sidebarOpen: true, notificationSound: false }
+    : await staffChrome()
 
   return (
     <html lang="en" className={htmlClassName(chrome.theme)} suppressHydrationWarning>
@@ -58,7 +61,11 @@ export default async function RootLayout({
         {isWidget ? (
           children
         ) : (
-          <AppProviders initialTheme={chrome.theme} initialSidebarOpen={chrome.sidebarOpen}>
+          <AppProviders
+            initialTheme={chrome.theme}
+            initialSidebarOpen={chrome.sidebarOpen}
+            initialNotificationSound={chrome.notificationSound}
+          >
             {children}
           </AppProviders>
         )}

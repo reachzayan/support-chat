@@ -2,11 +2,13 @@ import { screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { afterEach, describe, expect, test, vi } from "vitest"
 
+import { NotificationsProvider } from "@/components/notifications/notifications-context"
 import { renderWithProviders } from "@/test/render"
 
 import { SettingsConsole } from "./settings-console"
 
 const originalLocation = window.location
+vi.mock("next/navigation", () => ({ useRouter: () => ({ push: vi.fn() }) }))
 
 const stubReplace = () => {
   const replace = vi.fn()
@@ -37,7 +39,9 @@ describe("settings console", () => {
 
   test("gives specialists a clear profile and workspace settings view", () => {
     renderWithProviders(
-      <SettingsConsole displayName="Alex Morgan" email="alex@example.local" isAdmin={true} />,
+      <NotificationsProvider enabled={false}>
+        <SettingsConsole displayName="Alex Morgan" email="alex@example.local" isAdmin={true} />
+      </NotificationsProvider>,
     )
 
     expect(screen.getByRole("heading", { name: "Settings" })).toBeInTheDocument()
@@ -47,6 +51,11 @@ describe("settings console", () => {
     expect(screen.queryByText("supportchat / samplesite")).not.toBeInTheDocument()
     expect(screen.getByText("Alex Morgan")).toBeInTheDocument()
     expect(screen.getByText("alex@example.local")).toBeInTheDocument()
+    expect(screen.getByRole("link", { name: "Notification settings" })).toHaveAttribute(
+      "href",
+      "/admin/notifications",
+    )
+    expect(screen.queryByRole("switch", { name: "Message tone" })).not.toBeInTheDocument()
     expect(screen.queryByDisplayValue("Alex Morgan")).not.toBeInTheDocument()
     expect(document.querySelector(".view-transition-enter")).toBeInTheDocument()
   })
@@ -64,7 +73,9 @@ describe("settings console", () => {
     )
     const user = userEvent.setup()
     renderWithProviders(
-      <SettingsConsole displayName="Alex Morgan" email="alex@example.local" isAdmin={true} />,
+      <NotificationsProvider enabled={false}>
+        <SettingsConsole displayName="Alex Morgan" email="alex@example.local" isAdmin={true} />
+      </NotificationsProvider>,
     )
 
     await user.click(screen.getAllByRole("button", { name: "Sign out" })[0]!)

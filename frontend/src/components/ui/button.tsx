@@ -30,6 +30,33 @@ const buttonVariants = cva(
         "icon-lg": "size-9",
       },
     },
+    compoundVariants: [
+      {
+        size: ["icon", "icon-xs", "icon-sm", "icon-lg"],
+        variant: ["ghost", "link"],
+        className: "hover:bg-transparent! aria-expanded:bg-transparent! dark:hover:bg-transparent!",
+      },
+      {
+        size: ["icon", "icon-xs", "icon-sm", "icon-lg"],
+        variant: "outline",
+        className: "hover:bg-paper! aria-expanded:bg-paper! dark:hover:bg-paper!",
+      },
+      {
+        size: ["icon", "icon-xs", "icon-sm", "icon-lg"],
+        variant: "default",
+        className: "hover:bg-primary!",
+      },
+      {
+        size: ["icon", "icon-xs", "icon-sm", "icon-lg"],
+        variant: "secondary",
+        className: "hover:bg-secondary!",
+      },
+      {
+        size: ["icon", "icon-xs", "icon-sm", "icon-lg"],
+        variant: "destructive",
+        className: "hover:bg-destructive/10! dark:hover:bg-destructive/20!",
+      },
+    ],
     defaultVariants: {
       variant: "default",
       size: "default",

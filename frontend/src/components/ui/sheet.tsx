@@ -4,10 +4,10 @@
 
 import { Dialog as SheetPrimitive } from "@base-ui/react/dialog"
 import { cn } from "cn"
-import { XIcon } from "lucide-react"
 import * as React from "react"
 
 import { Button } from "@/components/ui/button"
+import { StateIcon } from "@/components/ui/state-icon"
 
 const SHEET_SIDES = {
   top: "data-[side=top]:inset-x-0 data-[side=top]:top-0 data-[side=top]:h-auto data-[side=top]:border-b data-[side=top]:data-ending-style:translate-y-[-2.5rem] data-[side=top]:data-starting-style:translate-y-[-2.5rem]",
@@ -77,13 +77,13 @@ function SheetContent({
             render={
               <Button
                 variant="ghost"
-                className="absolute top-3 right-3"
+                className="absolute top-1 right-1 min-h-11 min-w-11"
                 size="icon-sm"
                 aria-label="Close panel"
               />
             }
           >
-            <XIcon aria-hidden="true" />
+            <StateIcon name="x" />
           </SheetPrimitive.Close>
         )}
       </SheetPrimitive.Popup>

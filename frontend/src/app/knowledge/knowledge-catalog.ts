@@ -9,6 +9,8 @@ import {
   type KbSourceRecord,
   type SiteRecord,
 } from "@/components/admin/staff-api"
+import { useSearchTarget } from "@/components/search/workspace-route"
+import { toast } from "@/components/ui/toast"
 
 import { useKnowledgePageHandlers } from "./knowledge-page-handlers"
 import { resolveKnowledgeSiteId } from "./knowledge-site"
@@ -26,6 +28,7 @@ const sourceFingerprint = (row: KbSourceRecord) =>
   ].join(":")
 
 const useKnowledgeSites = () => {
+  const target = useSearchTarget()
   const [sites, setSites] = useState<SiteRecord[]>([])
   const [siteId, setSiteId] = useState("")
   const [loadError, setLoadError] = useState<string | null>(null)
@@ -46,8 +49,14 @@ const useKnowledgeSites = () => {
         const payload = (await response.json()) as { items: SiteRecord[] }
         setLoadError(null)
         setSites(payload.items)
+        if (target.site && !payload.items.some((site) => site.id === target.site)) {
+          setLoadError("This website is no longer available")
+          return
+        }
         if (payload.items[0]) {
-          setSiteId(payload.items[0].id)
+          setSiteId(
+            payload.items.find((site) => site.id === target.site)?.id ?? payload.items[0].id,
+          )
         }
       } catch {
         if (request !== retryNonce) {
@@ -57,7 +66,7 @@ const useKnowledgeSites = () => {
       }
     }
     void load()
-  }, [retryNonce])
+  }, [retryNonce, target.site])
 
   const handleSite = useCallback((nextSiteId: string) => {
     setSiteId(nextSiteId)
@@ -85,9 +94,11 @@ const applySourceList = (
 }
 
 const useKnowledgeSources = (siteId: string) => {
+  const target = useSearchTarget()
   const [sources, setSources] = useState<KbSourceRecord[]>([])
   const [sourceId, setSourceId] = useState<string | null>(null)
   const siteIdRef = useRef(siteId)
+  const searchSourceApplied = useRef(false)
 
   const loadSources = useCallback(async () => {
     const currentSiteId = siteIdRef.current
@@ -103,7 +114,12 @@ const useKnowledgeSources = (siteId: string) => {
       return
     }
     applySourceList(payload.items, setSources, setSourceId)
-  }, [])
+    if (!searchSourceApplied.current) {
+      searchSourceApplied.current = true
+      if (target.source && payload.items.some((source) => source.id === target.source))
+        setSourceId(target.source)
+    }
+  }, [target.source])
 
   useEffect(() => {
     siteIdRef.current = siteId
@@ -132,7 +148,20 @@ const useKnowledgeSources = (siteId: string) => {
   return { sources, sourceId, setSources, setSourceId, resetForSite }
 }
 
+const preferredKnowledgePage = (
+  pages: KbPageRecord[],
+  selectedId: string | null,
+  target: Readonly<Record<string, string>>,
+) => {
+  const selected = pages.find((page) => page.id === selectedId)
+  if (selected) return selected
+  if (target.page) return pages.find((page) => page.id === target.page)
+  if (target.source) return pages.find((page) => page.source_id === target.source)
+  return pages[0]
+}
+
 const useKnowledgePages = (sources: KbSourceRecord[]) => {
+  const target = useSearchTarget()
   const [pages, setPages] = useState<KbPageRecord[]>([])
   const [pageDetail, setPageDetail] = useState<KbPageDetail | null>(null)
   const selectedPageIdRef = useRef<string | null>(null)
@@ -174,9 +203,10 @@ const useKnowledgePages = (sources: KbSourceRecord[]) => {
       const visible = lists.flat()
       setPages(visible)
       const selectedId = selectedPageIdRef.current
-      const kept = selectedId ? visible.find((page) => page.id === selectedId) : undefined
-      const next = kept ?? visible[0]
+      const next = preferredKnowledgePage(visible, selectedId, target)
       if (next === undefined) {
+        if (target.page)
+          toast.add({ title: "This knowledge page is no longer available", type: "warning" })
         setPageDetail(null)
         return
       }
@@ -189,7 +219,7 @@ const useKnowledgePages = (sources: KbSourceRecord[]) => {
     return () => {
       ignore = true
     }
-  }, [pageRefreshKey])
+  }, [pageRefreshKey, target])
 
   const resetPages = useCallback(() => {
     setPages([])

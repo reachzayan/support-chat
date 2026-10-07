@@ -111,6 +111,14 @@ class ConversationQueries:
         ]
         return items, bool(extra)
 
+    async def get_submission(self, conversation_id: UUID) -> dict:
+        rows = await self._conversations.list_submissions(
+            offset=0, limit=1, conversation_id=conversation_id
+        )
+        if not rows:
+            raise CommandError("not_found")
+        return _submission_item(*rows[0])
+
     async def export_submissions(
         self,
         columns: list[str],

@@ -15,6 +15,8 @@ type PreferencesContextValue = {
   toggleTheme: () => void
   sidebarOpen: boolean
   setSidebarOpen: (open: boolean) => void
+  notificationSound: boolean
+  setNotificationSound: (enabled: boolean) => void
 }
 
 const PreferencesContext = createContext<PreferencesContextValue | null>(null)
@@ -30,13 +32,20 @@ export const PreferencesProvider = ({
   children,
   initialTheme = "light",
   initialSidebarOpen = true,
+  initialNotificationSound = true,
 }: {
   children: ReactNode
   initialTheme?: Theme
   initialSidebarOpen?: boolean
+  initialNotificationSound?: boolean
 }) => {
   const [theme, setThemeState] = useState<Theme>(initialTheme)
   const [sidebarOpen, setSidebarOpenState] = useState(initialSidebarOpen)
+  const [notificationSound, setSoundState] = useState(initialNotificationSound)
+  const setNotificationSound = useCallback((enabled: boolean) => {
+    writeCookie("supportchat_notification_sound", String(enabled))
+    setSoundState(enabled)
+  }, [])
 
   const setTheme = useCallback((next: Theme) => {
     document.documentElement.classList.toggle("dark", next === "dark")
@@ -61,8 +70,18 @@ export const PreferencesProvider = ({
       toggleTheme,
       sidebarOpen,
       setSidebarOpen,
+      notificationSound,
+      setNotificationSound,
     }),
-    [setSidebarOpen, setTheme, sidebarOpen, theme, toggleTheme],
+    [
+      setSidebarOpen,
+      setTheme,
+      sidebarOpen,
+      theme,
+      toggleTheme,
+      notificationSound,
+      setNotificationSound,
+    ],
   )
 
   return <PreferencesContext.Provider value={value}>{children}</PreferencesContext.Provider>

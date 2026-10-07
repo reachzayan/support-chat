@@ -106,11 +106,21 @@ const applyBootstrapConversation = (
     return
   }
   setLoadingOlder(false)
-  setView(() => {
-    const next = applyConversationSnapshot(emptyChat(), snapshot)
-    viewRef.current = next
-    return next
-  })
+  const current = viewRef.current
+  const sameChat = Boolean(snapshot.id && current.conversationId === snapshot.id)
+  const next = applyConversationSnapshot(sameChat ? current : emptyChat(), snapshot)
+  const snapshotView = applyConversationSnapshot(emptyChat(), snapshot)
+  const updated =
+    sameChat && snapshotView.lastEventId < current.lastEventId
+      ? {
+          ...next,
+          conversation: current.conversation,
+          assignedName: current.assignedName,
+          waitPromptId: current.waitPromptId,
+        }
+      : next
+  viewRef.current = updated
+  setView(() => updated)
 }
 
 const applyHostBootstrap = (
@@ -260,6 +270,7 @@ export const WidgetApp = () => {
           onPrechat={actions.handlePrechat}
           onRestart={actions.handleRestart}
           onSend={actions.handleSend}
+          onWaitChoice={actions.handleWaitChoice}
           onLoadOlder={loadOlder}
           onDismissPrivacy={actions.handleDismissPrivacy}
         />

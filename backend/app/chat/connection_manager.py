@@ -457,6 +457,7 @@ def state_frame(conversation: Conversation, assigned: dict | None) -> dict[str, 
         "conversation_id": str(conversation.id),
         "state": conversation.state,
         "assigned_agent": assigned,
+        "handoff_wait_prompt_id": conversation.handoff_wait_prompt_id,
     }
 
 

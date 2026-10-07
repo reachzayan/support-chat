@@ -2,8 +2,10 @@ import asyncio
 from datetime import UTC, datetime, timedelta
 
 import structlog
+from sqlalchemy import delete
 
 from app.db import session_maker
+from app.models.push_subscription import PushDelivery
 from app.repositories.status_sample_repo import SAMPLE_RETENTION_DAYS, StatusSampleRepository
 from scripts.purge_expired_chats import purge_expired
 from scripts.purge_expired_logs import purge_expired_logs
@@ -25,6 +27,9 @@ async def run_maintenance_once() -> None:
     async with session_maker()() as session:
         await StatusSampleRepository(session).delete_older_than(
             now - timedelta(days=SAMPLE_RETENTION_DAYS)
+        )
+        await session.execute(
+            delete(PushDelivery).where(PushDelivery.finished_at < now - timedelta(days=7))
         )
         await session.commit()
 

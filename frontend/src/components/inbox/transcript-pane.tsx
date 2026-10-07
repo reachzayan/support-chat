@@ -22,6 +22,7 @@ export const TranscriptPane = ({
   const notice = closed && !lines.some(isClosedNotice) ? "This chat is closed" : undefined
   return (
     <Transcript
+      autoFollow
       lines={lines}
       selfRole="agent"
       logLabel="Transcript"

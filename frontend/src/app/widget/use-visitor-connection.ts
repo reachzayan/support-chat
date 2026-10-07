@@ -7,6 +7,7 @@ import { createVisitorSocket, visitorSocketUrl } from "@/lib/widget-ws"
 import { createReconnectScheduler } from "@/lib/ws-reconnect"
 
 import { isTrustedHostFrame, postToParent } from "./host-bridge"
+import { isCenteredNotice, type TranscriptLine } from "./transcript"
 import {
   applyVisitorFrame,
   isAck,
@@ -171,11 +172,11 @@ const openSocket = (
     onFrame: (frame) => {
       schedulerRef.current?.markAuthenticated()
       setReconnecting(false)
-      setView((current) => {
-        const next = applyVisitorFrame(current, frame)
-        viewRef.current = next
-        return next
-      })
+      const current = viewRef.current
+      const next = applyVisitorFrame(current, frame)
+      viewRef.current = next
+      setView(() => next)
+      announceVisitorReply(current, next, frame, origin)
       if (isPrechatAccepted(frame)) {
         postToParent({ type: "widget.activated" }, origin)
       }
@@ -198,6 +199,27 @@ const openSocket = (
   })
   socket.sendHello(page.page_url, page.page_title, page.referrer)
   return socket
+}
+
+const isNotifiableReply = (reply: TranscriptLine) =>
+  ["bot", "agent", "admin"].includes(reply.role) ||
+  (reply.role === "system" && !isCenteredNotice(reply))
+
+const announceVisitorReply = (
+  current: ChatView,
+  next: ChatView,
+  frame: unknown,
+  origin: string,
+) => {
+  if (typeof frame !== "object" || frame === null || !("type" in frame) || frame.type !== "message")
+    return
+  if (!next.conversationId || next.lastEventId <= current.lastEventId) return
+  const reply = next.lines.find((line) => line.id === next.lastEventId)
+  if (!reply || !isNotifiableReply(reply)) return
+  postToParent(
+    { type: "widget.message", conversation_id: next.conversationId, message_id: next.lastEventId },
+    origin,
+  )
 }
 
 const handleSocketClose = (

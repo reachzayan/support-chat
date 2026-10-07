@@ -70,6 +70,14 @@ export const useWidgetActions = (
     },
     [setSending, socketRef],
   )
+  const handleWaitChoice = useCallback(
+    (promptId: number, choice: "wait" | "end") => {
+      if (!socketRef.current) return
+      setSending(true)
+      socketRef.current.respondHandoffWait(promptId, choice)
+    },
+    [socketRef, setSending],
+  )
   const handleDismissPrivacy = useCallback(() => setPrivacyVisible(false), [setPrivacyVisible])
   const handleResize = useCallback(
     (size: WidgetSize) => {
@@ -81,6 +89,7 @@ export const useWidgetActions = (
     [parentRef],
   )
   return {
+    handleWaitChoice,
     handleClose,
     handleResetCurrent,
     handleDeleteAll,

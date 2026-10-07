@@ -6,17 +6,11 @@ import { mergeProps } from "@base-ui/react/merge-props"
 import { useRender } from "@base-ui/react/use-render"
 import { cva, type VariantProps } from "class-variance-authority"
 import { cn } from "cn"
-import { PanelLeftIcon } from "lucide-react"
 import * as React from "react"
 
 import { Button } from "@/components/ui/button"
-import {
-  Sheet,
-  SheetContent,
-  SheetDescription,
-  SheetHeader,
-  SheetTitle,
-} from "@/components/ui/sheet"
+import { Drawer, DrawerContent, DrawerDescription, DrawerTitle } from "@/components/ui/drawer"
+import { StateIcon } from "@/components/ui/state-icon"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { useIsMobile } from "@/hooks/use-mobile"
 
@@ -182,27 +176,30 @@ function Sidebar({
 
   if (isMobile) {
     return (
-      <Sheet open={openMobile} onOpenChange={setOpenMobile} {...props}>
-        <SheetContent
+      <Drawer open={openMobile} onOpenChange={setOpenMobile} swipeDirection={side}>
+        <DrawerContent
           dir={dir}
           data-sidebar="sidebar"
           data-slot="sidebar"
           data-mobile="true"
-          className="bg-sidebar text-sidebar-foreground w-(--sidebar-width) p-0 [&>button]:hidden"
+          className="bg-sidebar text-sidebar-foreground border-sidebar-border w-(--sidebar-width) max-w-[calc(100vw-2rem)] p-0"
           style={
             {
               "--sidebar-width": SIDEBAR_WIDTH_MOBILE,
+              ...props.style,
             } as React.CSSProperties
           }
-          side={side}
         >
-          <SheetHeader className="sr-only">
-            <SheetTitle>Sidebar</SheetTitle>
-            <SheetDescription>Displays the mobile sidebar.</SheetDescription>
-          </SheetHeader>
-          <div className="flex h-full w-full flex-col">{children}</div>
-        </SheetContent>
-      </Sheet>
+          <DrawerTitle className="sr-only">Sidebar</DrawerTitle>
+          <DrawerDescription className="sr-only">Navigate your workspace.</DrawerDescription>
+          <div
+            className="flex min-h-0 w-full flex-1 flex-col [&_[data-slot=sidebar-menu-button]]:min-h-11 [&>[data-slot=sidebar-footer]]:border-t [&>[data-slot=sidebar-footer]]:border-white/10 [&>[data-slot=sidebar-header]]:h-16 [&>[data-slot=sidebar-header]]:border-b [&>[data-slot=sidebar-header]]:border-white/10 [&>[data-slot=sidebar-header]]:pr-16"
+            onClickCapture={props.onClickCapture}
+          >
+            {children}
+          </div>
+        </DrawerContent>
+      </Drawer>
     )
   }
 
@@ -259,14 +256,15 @@ function Sidebar({
 }
 
 function SidebarTrigger({ className, onClick, ...props }: React.ComponentProps<typeof Button>) {
-  const { toggleSidebar } = useSidebar()
+  const { toggleSidebar, isMobile, openMobile, state } = useSidebar()
 
   return (
     <Button
       data-sidebar="trigger"
       data-slot="sidebar-trigger"
       variant="ghost"
-      size="icon-sm"
+      size="icon"
+      aria-expanded={isMobile ? openMobile : state === "expanded"}
       className={cn(className)}
       onClick={(event) => {
         onClick?.(event)
@@ -274,7 +272,7 @@ function SidebarTrigger({ className, onClick, ...props }: React.ComponentProps<t
       }}
       {...props}
     >
-      <PanelLeftIcon />
+      <StateIcon name="sidebar-simple" className="size-5" />
       <span className="sr-only">Toggle Sidebar</span>
     </Button>
   )

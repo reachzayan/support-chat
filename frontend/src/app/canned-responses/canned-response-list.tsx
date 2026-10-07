@@ -1,4 +1,4 @@
-import { Pencil, Trash2 } from "lucide-react"
+import { Pencil } from "lucide-react"
 import { useEffect, useRef, type ReactNode } from "react"
 
 /* oxlint-disable react-perf/jsx-no-new-function-as-prop -- Row controls close over response records. */
@@ -7,6 +7,7 @@ import { type SiteRecord } from "@/components/admin/staff-api"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
+import { StateIcon } from "@/components/ui/state-icon"
 import { Switch } from "@/components/ui/switch"
 
 import {
@@ -63,7 +64,7 @@ export const ResponseRow = ({
           aria-label={`Remove #${record.shortcut}`}
           onClick={() => onDelete(record)}
         >
-          <Trash2 aria-hidden="true" />
+          <StateIcon name="trash" />
         </Button>
       </div>
     </td>

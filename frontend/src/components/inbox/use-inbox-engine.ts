@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useRef, type Dispatch, type SetStateAction } from "react"
+import { useCallback, useEffect, useRef, useState, type Dispatch, type SetStateAction } from "react"
 
 import { createReconnectScheduler } from "@/lib/ws-reconnect"
 
@@ -242,15 +242,14 @@ const loadInboxDetail = async (
   socketRef: { current: SocketApi | null },
   setCanned: Dispatch<SetStateAction<CannedReply[]>>,
   setLive: Dispatch<SetStateAction<InboxLive>>,
+  setDetailError: Dispatch<SetStateAction<boolean>>,
 ) => {
-  const next = await fetchInboxDetail(conversationId)
-  if (
-    next === null ||
-    request !== detailRequestRef.current ||
-    refs.selectedRef.current !== conversationId
-  ) {
+  const next = await fetchInboxDetail(conversationId).catch(() => null)
+  if (request !== detailRequestRef.current || refs.selectedRef.current !== conversationId) {
     return
   }
+  setDetailError(next === null)
+  if (next === null) return
   applyFetchedDetail(
     conversationId,
     next,
@@ -279,6 +278,7 @@ export const useInboxLoaders = (
   const loadedCursorsRef = useRef<Set<string>>(new Set())
   const listGenerationRef = useRef(0)
   const detailRequestRef = useRef(0)
+  const [detailError, setDetailError] = useState(false)
   const clearLoadedCursors = useCallback(() => {
     extraCursorsRef.current = []
     loadedCursorsRef.current = new Set()
@@ -329,12 +329,13 @@ export const useInboxLoaders = (
         socketRef,
         setCanned,
         setLive,
+        setDetailError,
       )
     },
     [refs, setCanned, setLive, socketRef],
   )
 
-  return { reloadList, reloadDetail, clearLoadedCursors }
+  return { reloadList, reloadDetail, clearLoadedCursors, detailError }
 }
 
 const useInboxListFetch = (

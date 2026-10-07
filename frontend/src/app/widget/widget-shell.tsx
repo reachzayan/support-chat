@@ -5,7 +5,7 @@
 
 "use client"
 
-import { Ellipsis, Maximize2, Minimize2, RotateCcw, Trash2, X } from "lucide-react"
+import { RotateCcw, Trash2 } from "lucide-react"
 import { motion, useReducedMotion } from "motion/react"
 import {
   useCallback,
@@ -27,6 +27,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
 import { Button } from "@/components/ui/button"
+import { StateIcon } from "@/components/ui/state-icon"
 import {
   WIDGET_DEFAULT_HEIGHT,
   WIDGET_DEFAULT_WIDTH,
@@ -34,13 +35,17 @@ import {
   WIDGET_EXPANDED_WIDTH,
 } from "@/lib/postmessage"
 
+import { WidgetSoundOption } from "./widget-sound-option"
+
 const FOCUSABLE = "button, a[href], input, select, textarea"
 
 const trapTab = (event: KeyboardEvent<HTMLDialogElement>) => {
   if (event.key !== "Tab") {
     return
   }
-  const nodes = [...event.currentTarget.querySelectorAll<HTMLElement>(FOCUSABLE)]
+  const nodes = [...event.currentTarget.querySelectorAll<HTMLElement>(FOCUSABLE)].filter(
+    (node) => !node.closest("[hidden]"),
+  )
   if (nodes.length === 0) {
     return
   }
@@ -73,7 +78,7 @@ type WidgetShellProps = {
 }
 
 const ICON_BUTTON =
-  "bg-white/75 text-ink backdrop-blur-xl hover:bg-white focus-visible:ring-steel flex size-10 cursor-pointer items-center justify-center rounded-full transition-[background-color,transform] duration-200 ease-out focus-visible:ring-2 focus-visible:outline-none active:scale-95"
+  "text-ink focus-visible:ring-steel flex size-10 cursor-pointer items-center justify-center rounded-full transition-transform duration-200 ease-out focus-visible:ring-2 focus-visible:outline-none active:scale-95"
 
 export const WidgetShell = ({
   name,
@@ -178,8 +183,9 @@ const WidgetTopbar = ({
           aria-label="Close chat"
           onClick={onClose}
           className={ICON_BUTTON}
+          size="icon"
         >
-          <X aria-hidden="true" className="size-5" strokeWidth={2.4} />
+          <StateIcon name="x" className="size-5" />
         </Button>
       </div>
     </motion.div>
@@ -229,6 +235,7 @@ const ConversationMenu = ({
           aria-haspopup="menu"
           aria-expanded={open}
           className={ICON_BUTTON}
+          size="icon"
           onClick={() => setOpen((current) => !current)}
           onKeyDown={(event) => {
             if (event.key === "ArrowDown") {
@@ -237,9 +244,9 @@ const ConversationMenu = ({
             }
           }}
         >
-          <Ellipsis aria-hidden="true" className="size-5" strokeWidth={2.4} />
+          <StateIcon name="dots-three" className="size-5" />
         </Button>
-        {open ? (
+        <div hidden={!open}>
           <div
             role="menu"
             tabIndex={-1}
@@ -259,7 +266,9 @@ const ConversationMenu = ({
               if (event.key === "ArrowDown" || event.key === "ArrowUp") {
                 event.preventDefault()
                 const items = [
-                  ...event.currentTarget.querySelectorAll<HTMLButtonElement>('[role="menuitem"]'),
+                  ...event.currentTarget.querySelectorAll<HTMLButtonElement>(
+                    '[role="menuitem"], [role="menuitemcheckbox"]',
+                  ),
                 ]
                 const current = items.indexOf(event.target as HTMLButtonElement)
                 const change = event.key === "ArrowDown" ? 1 : -1
@@ -267,6 +276,7 @@ const ConversationMenu = ({
               }
             }}
           >
+            <WidgetSoundOption className={`${MENU_ITEM} w-full`} />
             <Button
               ref={firstItemRef}
               type="button"
@@ -295,7 +305,7 @@ const ConversationMenu = ({
               Delete all chats
             </Button>
           </div>
-        ) : null}
+        </div>
       </div>
       <AlertDialog
         open={confirmation !== null}
@@ -359,6 +369,7 @@ const ResizeHandle = ({ onResize }: { onResize: (size: WidgetSize) => void }) =>
       aria-pressed={expanded}
       onClick={handleToggle}
       className={ICON_BUTTON}
+      size="icon"
     >
       <motion.span
         animate={{ rotate: expanded ? 180 : 0, scale: expanded ? 0.92 : 1 }}
@@ -368,9 +379,9 @@ const ResizeHandle = ({ onResize }: { onResize: (size: WidgetSize) => void }) =>
         className="flex"
       >
         {expanded ? (
-          <Minimize2 aria-hidden="true" className="size-[18px]" strokeWidth={2.2} />
+          <StateIcon name="arrows-in-simple" className="size-[18px]" />
         ) : (
-          <Maximize2 aria-hidden="true" className="size-[18px]" strokeWidth={2.2} />
+          <StateIcon name="arrows-out-simple" className="size-[18px]" />
         )}
       </motion.span>
     </Button>

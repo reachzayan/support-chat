@@ -16,6 +16,7 @@ import {
   type BlockVisitorTarget,
 } from "@/components/admin/block-visitor-dialog"
 import { staffWrite } from "@/components/admin/staff-api"
+import { useSearchTarget } from "@/components/search/workspace-route"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
@@ -262,7 +263,8 @@ export const SubmissionsTable = ({
   onLoadMore: () => void
   onTranscript: (id: string) => void
 }) => {
-  const [filters, setFilters] = useState<DataFilters>(EMPTY_FILTERS)
+  const target = useSearchTarget()
+  const [filters, setFilters] = useState<DataFilters>({ ...EMPTY_FILTERS, search: target.q ?? "" })
   const [sort, setSort] = useState<DataSort | null>(null)
   const [blockTarget, setBlockTarget] = useState<(BlockVisitorTarget & { rowId: string }) | null>(
     null,

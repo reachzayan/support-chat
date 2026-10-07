@@ -6,6 +6,7 @@ import { staffRead, type SiteRecord } from "@/components/admin/staff-api"
 
 export const useSitesList = () => {
   const [sites, setSites] = useState<SiteRecord[]>([])
+  const [loaded, setLoaded] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [retryNonce, setRetryNonce] = useState(0)
 
@@ -24,6 +25,7 @@ export const useSitesList = () => {
         const body = (await response.json()) as { items: SiteRecord[] }
         setError(null)
         setSites(body.items)
+        setLoaded(true)
       } catch {
         if (request !== retryNonce) {
           return
@@ -35,5 +37,5 @@ export const useSitesList = () => {
   }, [retryNonce])
 
   const handleRetry = () => setRetryNonce((current) => current + 1)
-  return { sites, setSites, error, setError, handleRetry }
+  return { sites, loaded, setSites, error, setError, handleRetry }
 }

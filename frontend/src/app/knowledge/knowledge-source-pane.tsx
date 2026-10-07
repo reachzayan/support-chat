@@ -1,7 +1,8 @@
-import { useDeferredValue, useMemo, useState } from "react"
+import { useDeferredValue, useMemo } from "react"
 
 import { ResizableListPane } from "@/components/admin/pane-resize-handle"
 import type { KbPageRecord, KbSourceRecord } from "@/components/admin/staff-api"
+import { useSearchTarget } from "@/components/search/workspace-route"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import {
   KNOWLEDGE_SOURCE_DEFAULT_WIDTH,
@@ -12,7 +13,6 @@ import {
 } from "@/lib/pane-width"
 import { matchesSearchQuery } from "@/lib/search"
 
-import { PaneSearch } from "./knowledge-pane-search"
 import { SourceRow } from "./knowledge-source-row"
 import type { SourceListProps, SourcePaneProps } from "./knowledge-source-types"
 
@@ -55,7 +55,7 @@ export const SourcePane = ({
   onSelectPage,
   onViewChanges,
 }: SourcePaneProps) => {
-  const [query, setQuery] = useState("")
+  const query = useSearchTarget().q ?? ""
   const deferredQuery = useDeferredValue(query)
   const pagesBySource = useMemo(() => groupPagesBySource(pages), [pages])
   const filtered = useMemo(() => {
@@ -84,7 +84,6 @@ export const SourcePane = ({
         selectedSourceId={selectedSourceId}
         selectedPageId={selectedPageId}
         query={query}
-        onQuery={setQuery}
         onSync={onSync}
         onToggle={onToggle}
         onDelete={onDelete}
@@ -104,7 +103,6 @@ const SourcePaneBody = ({
   selectedSourceId,
   selectedPageId,
   query,
-  onQuery,
   onSync,
   onToggle,
   onDelete,
@@ -115,7 +113,6 @@ const SourcePaneBody = ({
   filtered: KbSourceRecord[]
   pagesBySource: Record<string, KbPageRecord[]>
   query: string
-  onQuery: (query: string) => void
 }) => (
   <>
     <div className="flex h-14 items-center justify-between gap-3 px-5">
@@ -130,15 +127,6 @@ const SourcePaneBody = ({
       </div>
     ) : (
       <>
-        <div className="px-4 pb-3">
-          <PaneSearch
-            id="knowledge-source-search"
-            label="Search sources"
-            value={query}
-            onQuery={onQuery}
-            placeholder="Search sources"
-          />
-        </div>
         <ScrollArea className="min-h-0 flex-1">
           {filtered.length === 0 ? (
             <div className="px-6 py-10 text-center">

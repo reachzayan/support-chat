@@ -74,6 +74,7 @@ export const createVisitorSocket = (options: VisitorSocketOptions) => {
   const unacked: Unacked[] = []
   const sentOnConnection = new Set<string>()
   let pendingPrechat: ({ submission_id: string } & Record<string, string>) | null = null
+  let pendingWait: { prompt_id: number; choice: "wait" | "end" } | null = null
 
   const flushUnacked = () => {
     if (!transport.live || transport.socket?.readyState !== AUTH_OPEN) {
@@ -125,6 +126,10 @@ export const createVisitorSocket = (options: VisitorSocketOptions) => {
     }
     if (isRecord(frame) && frame.type === "error") {
       pendingPrechat = null
+      pendingWait = null
+    }
+    if (isRecord(frame) && frame.type === "handoff_wait_accepted") {
+      pendingWait = null
     }
     if (isRecord(frame) && frame.type === "ping") {
       sendJson(transport, { v: 1, type: "pong" })
@@ -143,6 +148,9 @@ export const createVisitorSocket = (options: VisitorSocketOptions) => {
       flushQueued(transport)
       if (pendingPrechat !== null) {
         sendJson(transport, { v: 1, type: "prechat", ...pendingPrechat })
+      }
+      if (pendingWait !== null) {
+        sendJson(transport, { v: 1, type: "handoff_wait_response", ...pendingWait })
       }
       flushUnacked()
     }
@@ -179,6 +187,12 @@ export const createVisitorSocket = (options: VisitorSocketOptions) => {
       sendJson(transport, { v: 1, type: "hello", page_url, page_title, referrer })
     },
     sendEscalate: () => sendJson(transport, { v: 1, type: "escalate" }),
+    respondHandoffWait: (prompt_id: number, choice: "wait" | "end") => {
+      pendingWait = { prompt_id, choice }
+      if (transport.live) {
+        sendJson(transport, { v: 1, type: "handoff_wait_response", ...pendingWait })
+      }
+    },
     resume: (last_event_id: number) => sendJson(transport, { v: 1, type: "resume", last_event_id }),
     loadOlder: (before_id: number) => sendJson(transport, { v: 1, type: "older", before_id }),
     reconnect: () => {
@@ -207,6 +221,7 @@ export const createVisitorSocket = (options: VisitorSocketOptions) => {
         unacked.length = 0
         sentOnConnection.clear()
         pendingPrechat = null
+        pendingWait = null
         transport.queued.clear()
       }
     },

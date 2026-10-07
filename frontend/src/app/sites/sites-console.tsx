@@ -4,6 +4,7 @@ import { useMemo } from "react"
 
 import { RetryError } from "@/components/admin/retry-error"
 import { StaffHeader } from "@/components/admin/staff-nav"
+import { useSearchTarget, useOpenSearchTarget } from "@/components/search/workspace-route"
 
 import { SitesConsoleModals } from "./sites-console-modals"
 import { SitesDirectory } from "./sites-directory"
@@ -16,8 +17,12 @@ type SitesConsoleProps = {
 }
 
 export const SitesConsole = ({ isAdmin, displayName: _displayName }: SitesConsoleProps) => {
-  const { sites, setSites, error, setError, handleRetry } = useSitesList()
+  const { sites, loaded, setSites, error, setError, handleRetry } = useSitesList()
   const actions = useSitesConsoleActions(setSites, setError)
+  const target = useSearchTarget()
+  useOpenSearchTarget(target.site, loaded ? sites : null, (site) =>
+    actions.handleOpenManage(site.id),
+  )
 
   const activeSite = useMemo(
     () => sites.find((row) => row.id === actions.activeId) ?? null,

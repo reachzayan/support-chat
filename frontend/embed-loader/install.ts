@@ -1,7 +1,9 @@
+import { createMessageTone, MESSAGE_TONE_URL } from "../src/lib/message-tone"
 import type { HostToWidget } from "../src/lib/postmessage"
+import { preferNativeSound, showSystemNotification } from "../src/lib/system-notification"
 import { requestBootstrap, type BootstrapAction, type BootstrapResult } from "./bootstrap"
-import { acceptWidgetFrame, createPanel, sendBootstrap, sendContext } from "./iframe"
-import { hideHostError, mountLauncher, showHostError } from "./launcher"
+import { acceptWidgetFrame, createPanel, postToWidget, sendBootstrap, sendContext } from "./iframe"
+import { hideHostError, mountLauncher, setLauncherUnread, showHostError } from "./launcher"
 import { watchNavigation } from "./navigation"
 import { originFromHref, originFromScript } from "./sanitize"
 import { clearResumeToken, readResumeToken, writeResumeToken } from "./storage"
@@ -9,6 +11,10 @@ import { clearResumeToken, readResumeToken, writeResumeToken } from "./storage"
 type LoaderConfig = { siteKey: string; publicKey: string }
 
 type Runtime = {
+  unread: number
+  lastMessageId: number
+  soundEnabled: boolean
+  tone: ReturnType<typeof createMessageTone>
   win: Window
   doc: Document
   widgetOrigin: string
@@ -122,6 +128,8 @@ const hidePanel = (runtime: Runtime) => {
 }
 
 const showPanel = (runtime: Runtime) => {
+  runtime.unread = 0
+  setLauncherUnread(runtime.launcher, 0)
   clearHideTimer(runtime)
   setLauncherBusy(runtime, false)
   if (runtime.iframe !== null) {
@@ -200,9 +208,41 @@ const applyBootstrap = (
 
 const handleHostMessage = (runtime: Runtime, event: MessageEvent) => {
   acceptWidgetFrame(panelState(runtime), event, {
-    onReady: () => sendBootstrapWithRetry(runtime),
+    onReady: () => {
+      postToWidget(panelState(runtime), { type: "host.sound", enabled: runtime.soundEnabled })
+      sendBootstrapWithRetry(runtime)
+    },
+    onMessage: (_chatId, messageId) => {
+      if (messageId <= runtime.lastMessageId) return
+      runtime.lastMessageId = messageId
+      if (!runtime.panelPainted || runtime.launcher.hidden) return
+      runtime.unread += 1
+      setLauncherUnread(runtime.launcher, runtime.unread)
+      if (runtime.soundEnabled) {
+        const native =
+          preferNativeSound() &&
+          showSystemNotification(
+            "New chat message",
+            "Open chat to read your reply.",
+            `supportchat-widget-${runtime.config.siteKey}`,
+            () => showPanel(runtime),
+          )
+        if (!native) void runtime.tone.play()
+      }
+    },
+    onSound: (enabled) => {
+      runtime.soundEnabled = enabled
+      if (!enabled) runtime.tone.stop()
+      try {
+        runtime.win.localStorage.setItem(`supportchat.sound.${runtime.config.siteKey}`, String(enabled))
+      } catch {
+        /* Storage may be disabled by the host. */
+      }
+      postToWidget(panelState(runtime), { type: "host.sound", enabled })
+    },
     onPainted: () => {
       runtime.panelPainted = true
+      postToWidget(panelState(runtime), { type: "host.sound", enabled: runtime.soundEnabled })
       showPanel(runtime)
     },
     onActivated: () => persistActivated(runtime),
@@ -261,6 +301,7 @@ const runBootstrap = async (runtime: Runtime, options: BootstrapAction = {}) => 
 }
 
 const handleOpen = (runtime: Runtime) => {
+  if (runtime.soundEnabled) runtime.tone.prepare()
   hideHostError(runtime.doc)
   if (runtime.iframe !== null && runtime.panelPainted) {
     showPanel(runtime)
@@ -298,7 +339,17 @@ export const installSupportChat = (win: Window, doc: Document, script: HTMLScrip
   }
   win.__supportchatInstalled = true
   preconnectWidget(doc, widgetOrigin)
+  let soundEnabled = true
+  try {
+    soundEnabled = win.localStorage.getItem(`supportchat.sound.${config.siteKey}`) !== "false"
+  } catch {
+    /* Private contexts may disable storage. */
+  }
   const runtime: Runtime = {
+    unread: 0,
+    lastMessageId: 0,
+    soundEnabled,
+    tone: createMessageTone(new URL(MESSAGE_TONE_URL, widgetOrigin).href),
     win,
     doc,
     widgetOrigin,

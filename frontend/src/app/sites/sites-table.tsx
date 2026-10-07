@@ -1,11 +1,12 @@
 "use client"
 
-import { RefreshCw, Settings2 } from "lucide-react"
+import { Settings2 } from "lucide-react"
 import { useCallback, useMemo } from "react"
 
 import type { SiteRecord } from "@/components/admin/staff-api"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
+import { StateIcon } from "@/components/ui/state-icon"
 
 import { CopyButton } from "./copy-button"
 import { useSitesColumnWidths } from "./sites-column-widths"
@@ -106,7 +107,7 @@ const InstalledCell = ({
           {checking ? (
             <Spinner data-icon="inline-start" />
           ) : (
-            <RefreshCw aria-hidden="true" className="size-3.5" />
+            <StateIcon name="arrow-clockwise" className="size-3.5" />
           )}
         </Button>
       ) : null}

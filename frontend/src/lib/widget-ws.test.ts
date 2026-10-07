@@ -81,4 +81,31 @@ describe("visitor socket client", () => {
     expect(messages).toHaveLength(1)
     expect(messages[0]?.client_message_id).toBe("10000000-0000-4000-8000-000000000099")
   })
+
+  test("a wait choice survives reconnect until acknowledged, then stops retrying", async () => {
+    FakeSocket.instances = []
+    vi.stubGlobal("WebSocket", FakeSocket)
+    const socket = createVisitorSocket({
+      url: "ws://127.0.0.1:8000/ws/visitor",
+      bootstrapToken: "boot",
+      parentOrigin: "http://host.localhost:3000",
+      onFrame: () => undefined,
+      onClose: () => undefined,
+    })
+    await vi.waitFor(() => expect(FakeSocket.instances[0]?.sent.length).toBeGreaterThan(0))
+    socket.respondHandoffWait(42, "wait")
+    socket.reconnect()
+    await vi.waitFor(() => expect(FakeSocket.instances[1]?.sent.length).toBeGreaterThan(0))
+    expect(
+      parsed(FakeSocket.instances[1]).filter((frame) => frame.type === "handoff_wait_response"),
+    ).toEqual([{ v: 1, type: "handoff_wait_response", prompt_id: 42, choice: "wait" }])
+    FakeSocket.instances[1]?.onmessage?.({
+      data: JSON.stringify({ type: "handoff_wait_accepted" }),
+    } as MessageEvent)
+    socket.reconnect()
+    await vi.waitFor(() => expect(FakeSocket.instances[2]?.sent.length).toBeGreaterThan(0))
+    expect(
+      parsed(FakeSocket.instances[2]).filter((frame) => frame.type === "handoff_wait_response"),
+    ).toEqual([])
+  })
 })

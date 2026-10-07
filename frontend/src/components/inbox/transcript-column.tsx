@@ -1,11 +1,12 @@
 "use client"
 
-import { ArrowLeftRight, CheckCircle2, LogOut, UserPlus } from "lucide-react"
+import { ArrowLeft, ArrowLeftRight, CheckCircle2, LogOut, UserPlus } from "lucide-react"
 import { motion } from "motion/react"
 import { useMemo } from "react"
 
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
+import { StateIcon } from "@/components/ui/state-icon"
 
 import { AgentComposer } from "./agent-composer"
 import { HandoffCard } from "./handoff-card"
@@ -15,6 +16,9 @@ import type { CannedReply } from "./types"
 import type { useInboxLive } from "./use-inbox-live"
 
 type TranscriptColumnProps = {
+  onBack?: () => void
+  onVisitorDetails?: () => void
+  detailsOpen?: boolean
   visitorName: string
   siteName: string
   closed: boolean
@@ -61,7 +65,7 @@ const TranscriptHeader = ({
   siteName,
   closed,
 }: Pick<TranscriptColumnProps, "visitorName" | "siteName" | "closed">) => (
-  <div className="flex min-w-0 items-center gap-3">
+  <div className="flex min-w-0 items-center gap-2.5">
     <span
       className={`${avatarClass} flex size-10 shrink-0 items-center justify-center rounded-full text-sm font-bold`}
     >
@@ -74,14 +78,14 @@ const TranscriptHeader = ({
       </div>
       <p className="text-mute mt-0.5 flex items-center gap-1.5 truncate text-xs">
         <span className="size-1.5 rounded-full bg-[#67B587]" />
-        {siteName}
+        <span className="truncate">{siteName}</span>
       </p>
     </div>
   </div>
 )
 
 const toolbarButtonBase =
-  "focus-visible:ring-steel inline-flex h-9 items-center gap-1.5 px-3.5 text-[13px] font-bold leading-none focus-visible:ring-2 focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-60"
+  "focus-visible:ring-steel inline-flex h-9 max-xl:min-h-11 items-center gap-1.5 px-3 text-xs sm:px-3.5 sm:text-[13px] font-bold leading-none focus-visible:ring-2 focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-60"
 
 const JoinButton = ({
   joinPending,
@@ -132,11 +136,13 @@ const MineActions = ({
         type="button"
         variant="ghost"
         onClick={onTransfer}
+        aria-label="Transfer to assistant"
         whileTap={TAP_SCALE}
         className={`${toolbarButtonBase} border-line text-ink hover:bg-ice-2 border`}
       >
         <ArrowLeftRight aria-hidden="true" className="size-3.5" strokeWidth={2.2} />
-        Transfer to assistant
+        <span className="sm:hidden">Transfer</span>
+        <span className="hidden sm:inline">Transfer to assistant</span>
       </MotionButton>
     ) : null}
     <MotionButton
@@ -169,7 +175,7 @@ const TranscriptActions = (
     | "onTransfer"
   >,
 ) => (
-  <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
+  <div className="flex w-full max-w-full shrink-0 flex-wrap items-center justify-end gap-2 empty:hidden xl:w-auto">
     <HotGapBadge key={props.conversationId} conversationId={props.conversationId} />
     {props.escalationReason ? (
       <HandoffCard
@@ -202,6 +208,43 @@ const JoinedByBanner = ({ joinedBy }: { joinedBy: string }) => (
   </motion.p>
 )
 
+const TranscriptToolbar = (props: TranscriptColumnProps) => (
+  <div className="border-line bg-paper flex min-h-16 shrink-0 flex-wrap items-center justify-between gap-x-3 gap-y-1.5 border-b px-3 py-2 lg:px-5">
+    <div className="flex min-w-0 flex-1 items-center gap-1 xl:flex-initial">
+      {props.onBack ? (
+        <Button
+          variant="ghost"
+          size="icon"
+          className="-ml-2 size-11 shrink-0"
+          aria-label="Back to conversations"
+          onClick={props.onBack}
+        >
+          <ArrowLeft aria-hidden="true" className="size-5" />
+        </Button>
+      ) : null}
+      <TranscriptHeader
+        visitorName={props.visitorName}
+        siteName={props.siteName}
+        closed={props.closed}
+      />
+    </div>
+    {props.onVisitorDetails ? (
+      <Button
+        variant="ghost"
+        size="icon"
+        className="-mr-1 size-11 shrink-0"
+        aria-label="Visitor details"
+        aria-haspopup="dialog"
+        aria-expanded={props.detailsOpen}
+        onClick={props.onVisitorDetails}
+      >
+        <StateIcon name="info" className="size-5" />
+      </Button>
+    ) : null}
+    <TranscriptActions {...props} />
+  </div>
+)
+
 export const TranscriptColumn = (props: TranscriptColumnProps) => {
   const {
     visitorName,
@@ -226,10 +269,7 @@ export const TranscriptColumn = (props: TranscriptColumnProps) => {
 
   return (
     <section className="bg-paper flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
-      <div className="border-line bg-paper flex h-16 shrink-0 items-center justify-between gap-3 border-b px-5">
-        <TranscriptHeader visitorName={visitorName} siteName={siteName} closed={closed} />
-        <TranscriptActions {...props} />
-      </div>
+      <TranscriptToolbar {...props} />
       {props.joinedBy ? <JoinedByBanner joinedBy={props.joinedBy} /> : null}
       {props.hasOlder ? (
         <div className="border-line bg-paper flex shrink-0 justify-center border-b px-4 py-2">

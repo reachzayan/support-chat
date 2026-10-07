@@ -40,7 +40,15 @@ class ConversationRepository:
             select(Conversation)
             .where(
                 Conversation.state.in_(("prechat", "bot", "queued", "human")),
-                Conversation.last_message_at <= cutoff,
+                or_(
+                    Conversation.state != "queued",
+                    Conversation.site_id.in_(select(Site.id).where(Site.human_enabled)),
+                ),
+                or_(
+                    Conversation.last_message_at <= cutoff,
+                    Conversation.handoff_wait_started_at <= cutoff,
+                ),
+                Conversation.handoff_wait_prompt_id.is_(None),
                 Conversation.active_generation_id.is_(None),
             )
             .order_by(Conversation.last_message_at, Conversation.id)
@@ -283,6 +291,7 @@ class ConversationRepository:
         offset: int,
         limit: int,
         site_id: UUID | None = None,
+        conversation_id: UUID | None = None,
         created_from: datetime | None = None,
         created_before: datetime | None = None,
     ) -> list[tuple[Conversation, Visitor, Site, User | None, str | None, UUID | None]]:
@@ -317,6 +326,8 @@ class ConversationRepository:
             .outerjoin(User, User.id == Conversation.assigned_agent_id)
             .where(Conversation.prechat_submission_id.is_not(None))
         )
+        if conversation_id is not None:
+            query = query.where(Conversation.id == conversation_id)
         if site_id is not None:
             query = query.where(Conversation.site_id == site_id)
         if created_from is not None:

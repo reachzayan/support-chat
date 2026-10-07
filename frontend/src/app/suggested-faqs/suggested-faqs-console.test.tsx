@@ -2,6 +2,7 @@ import { screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { beforeEach, describe, expect, test, vi } from "vitest"
 
+import { SelectionContext } from "@/components/search/workspace-route"
 import { setAccessToken } from "@/lib/auth-client"
 import { renderWithProviders } from "@/test/render"
 
@@ -191,4 +192,17 @@ describe("suggested FAQs answering", () => {
     expect(screen.getByRole("dialog", { name: "Answer this question" })).toBeInTheDocument()
     expect(screen.getAllByText(ENROLL).length).toBeGreaterThan(0)
   })
+})
+
+const SEARCH_SELECTION = { site: EASY_SITE, gap: ENROLL_GAP }
+test("search opens the exact FAQ on its website", async () => {
+  stubFetch([enrollGap, reportGap])
+  renderWithProviders(
+    <SelectionContext.Provider value={SEARCH_SELECTION}>
+      <SuggestedFaqsConsole />
+    </SelectionContext.Provider>,
+  )
+  const dialog = await screen.findByRole("dialog", { name: "Answer this question" })
+  expect(within(dialog).getByText(ENROLL)).toBeInTheDocument()
+  expect(screen.queryByText(REPORT)).not.toBeInTheDocument()
 })

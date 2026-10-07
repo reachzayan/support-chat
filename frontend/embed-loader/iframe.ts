@@ -113,6 +113,8 @@ export const acceptWidgetFrame = (
   state: PanelState,
   event: MessageEvent,
   handlers: {
+    onMessage?: (conversationId: string, messageId: number) => void
+    onSound?: (enabled: boolean) => void
     onReady: () => void
     onPainted: () => void
     onActivated: () => void
@@ -144,6 +146,8 @@ const dispatchWidgetFrame = (
   state: PanelState,
   frame: NonNullable<ReturnType<typeof parseWidgetToHost>>,
   handlers: {
+    onMessage?: (conversationId: string, messageId: number) => void
+    onSound?: (enabled: boolean) => void
     onReady: () => void
     onPainted: () => void
     onActivated: () => void
@@ -157,6 +161,12 @@ const dispatchWidgetFrame = (
   },
 ) => {
   switch (frame.type) {
+    case "widget.message":
+      handlers.onMessage?.(frame.conversation_id, frame.message_id)
+      return
+    case "widget.sound":
+      handlers.onSound?.(frame.enabled)
+      return
     case "widget.ready":
       handlers.onReady()
       return

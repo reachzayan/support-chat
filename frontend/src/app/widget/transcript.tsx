@@ -15,6 +15,7 @@ import {
   MessageScrollerItem,
   MessageScrollerProvider,
   MessageScrollerViewport,
+  useMessageScroller,
 } from "@/components/ui/message-scroller"
 import { Spinner } from "@/components/ui/spinner"
 
@@ -605,6 +606,18 @@ const TranscriptFeedItem = ({
 }
 
 const feedItemKey = (item: FeedItem) => (item.kind === "line" ? String(item.line.id) : item.id)
+const latestMessageId = (lines: TranscriptLine[]) => lines.at(-1)?.id
+
+const FollowLatestMessage = ({ enabled, latestId }: { enabled: boolean; latestId?: number }) => {
+  const { scrollToEnd } = useMessageScroller()
+  useEffect(() => {
+    if (!enabled || latestId === undefined) return
+    // Let the prebuilt scroller measure the committed rows before following the new message.
+    const frame = window.requestAnimationFrame(() => scrollToEnd({ behavior: "auto" }))
+    return () => window.cancelAnimationFrame(frame)
+  }, [enabled, latestId, scrollToEnd])
+  return null
+}
 
 export const Transcript = ({
   lines,
@@ -652,6 +665,7 @@ export const Transcript = ({
             />
           </MessageScrollerContent>
         </MessageScrollerViewport>
+        <FollowLatestMessage enabled={autoFollow} latestId={latestMessageId(lines)} />
         <MessageScrollerButton
           variant="outline"
           className="border-steel/15 bg-ice-2 text-navy hover:!text-navy shadow-[0_6px_16px_rgba(36,86,160,0.12)] hover:!bg-[#e6eefc]"

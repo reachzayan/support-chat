@@ -14,6 +14,20 @@ type HandoffCardProps = {
   isAdmin: boolean
 }
 
+const HandoffLabel = ({ reason, resolved }: { reason: string; resolved: boolean }) => (
+  <>
+    <Badge
+      className={`${REASON_STYLES[reason] ?? "bg-ice-2 text-ink"} pointer-events-none hidden sm:inline-flex`}
+    >
+      {reason}
+    </Badge>
+    <span className="sm:hidden">Handoff</span>
+    <span className="hidden sm:inline">
+      {resolved ? "Handoff outcome saved" : "Handoff context"}
+    </span>
+  </>
+)
+
 const HandoffCardInner = ({ conversationId, isAdmin }: HandoffCardProps) => {
   const [handoff, setHandoff] = useState<HandoffContextRecord | null>(null)
   const [loadError, setLoadError] = useState(false)
@@ -78,10 +92,10 @@ const HandoffCardInner = ({ conversationId, isAdmin }: HandoffCardProps) => {
         onClick={handleOpen}
         aria-haspopup="dialog"
         aria-expanded={open}
-        className="border-line bg-ice text-navy hover:bg-ice-2 focus-visible:ring-steel flex shrink-0 items-center gap-2 rounded-[8px] border px-3 py-2 text-xs font-bold focus-visible:ring-2 focus-visible:outline-none"
+        aria-label={resolved ? "Handoff outcome saved" : "Handoff context"}
+        className="border-line bg-ice text-navy hover:bg-ice-2 focus-visible:ring-steel flex min-h-11 shrink-0 items-center gap-2 rounded-lg border px-3 py-2 text-xs font-bold focus-visible:ring-2 focus-visible:outline-none xl:min-h-0"
       >
-        <Badge className={`${reasonClass} pointer-events-none`}>{handoff.escalation_reason}</Badge>
-        <span>{resolved ? "Handoff outcome saved" : "Handoff context"}</span>
+        <HandoffLabel reason={handoff.escalation_reason} resolved={resolved} />
       </Button>
       <HandoffCardDialog
         handoff={handoff}

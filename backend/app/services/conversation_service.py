@@ -2,7 +2,7 @@ import asyncio
 import time
 from datetime import UTC, datetime, timedelta
 from typing import Literal
-from uuid import UUID, uuid4
+from uuid import UUID, uuid4, uuid5
 
 import structlog
 from sqlalchemy.exc import IntegrityError
@@ -33,6 +33,7 @@ from app.models.user import User
 from app.models.visitor import Visitor
 from app.repositories.conversation_repo import ConversationRepository
 from app.repositories.message_repo import MessageRepository
+from app.repositories.notification_repo import NotificationRepository
 from app.repositories.origins import InvalidOrigin, canonicalize_origin, sanitize_visitor_url
 from app.repositories.site_repo import SiteRepository
 from app.repositories.user_repo import UserRepository
@@ -84,9 +85,10 @@ ASSISTANT_LINE = "You're now chatting with the assistant."
 CLOSED_BY_PREFIX = "This chat was closed by "
 IDLE_WARNING_LINE = "This chat will close in 1 minute. Send a message to keep active."
 IDLE_CLOSED_LINE = "This chat has been closed automatically."
+HANDOFF_WAIT_LINE = "Our agents are all currently busy right now. Would you like to wait?"
 IDLE_TTL = timedelta(minutes=5)
 IDLE_WARN = IDLE_TTL - timedelta(minutes=1)
-OPEN_IDLE_STATES = frozenset({"prechat", "bot", "queued", "human"})
+OPEN_IDLE_STATES = frozenset({"prechat", "bot", "human"})
 SENSITIVE_LINE = "Please do not share Social Security numbers or other personal identifiers."
 RESUMED_LINE = "This chat has been resumed."
 RESET_LINE = "This chat was reset by the visitor."
@@ -112,6 +114,7 @@ class ConversationService:
         self._visitors = VisitorRepository(session)
         self._conversations = ConversationRepository(session)
         self._messages = MessageRepository(session)
+        self._notifications = NotificationRepository(session)
         self._users = UserRepository(session)
         self._blocks = VisitorBlockRepository(session)
         self._bot_turn = BotTurnService(
@@ -524,6 +527,7 @@ class ConversationService:
             await self._enter_callback(conversation)
         elif clean["message"]:
             generation_id = await self._arm_bot_turn(conversation, site, clean["message"])
+        await self._notify_bot_conversation(conversation, f"prechat:{submission_id}")
         await self._commit_and_schedule()
         log.info(
             "prechat",
@@ -540,6 +544,10 @@ class ConversationService:
             submission_id=str(submission_id),
             generation_id=generation_id,
         )
+
+    async def _notify_bot_conversation(self, conversation: Conversation, event_key: str) -> None:
+        if conversation.state == "bot":
+            await self._notifications.emit(conversation, "bot", event_key)
 
     async def visitor_message(
         self,
@@ -577,6 +585,13 @@ class ConversationService:
         if site is None:
             raise CommandError("invalid")
         generation_id = await self._arm_bot_turn(conversation, site, text)
+        if conversation.state == "human":
+            await self._notifications.emit(
+                conversation,
+                "visitor_message",
+                f"message:{inserted.id}",
+                recipient_id=conversation.assigned_agent_id,
+            )
         await self._commit_and_schedule()
         log.info(
             "visitor_message",
@@ -644,8 +659,16 @@ class ConversationService:
         conversation.state = _transition(conversation.state, "join")
         conversation.assigned_agent_id = agent.id
         conversation.active_generation_id = None
+        conversation.handoff_wait_started_at = None
+        conversation.handoff_wait_prompt_id = None
         line = f"You're now chatting with {agent.display_name}."
         inserted = await self._insert_message(conversation, "system", line)
+        await self._notifications.emit(
+            conversation,
+            "live",
+            f"message:{inserted.id}",
+            exclude_user_id=agent.id,
+        )
         await self._session.commit()
         log.info(
             "join",
@@ -713,6 +736,12 @@ class ConversationService:
         conversation.active_generation_id = None
         line = f"{CLOSED_BY_PREFIX}{agent.display_name}."
         inserted = await self._insert_message(conversation, "system", line)
+        await self._notifications.emit(
+            conversation,
+            "closed",
+            f"message:{inserted.id}",
+            exclude_user_id=agent.id,
+        )
         await self._session.commit()
         log.info(
             "end",
@@ -759,6 +788,11 @@ class ConversationService:
     async def _apply_idle_tick(
         self, conversation: Conversation, site_key: str, moment: datetime
     ) -> CommandResult | None:
+        if conversation.state == "queued":
+            site = await self._sites.get_by_id(conversation.site_id)
+            if site is not None and site.human_enabled:
+                return await self._tick_handoff_wait(conversation, site_key, moment)
+            return None
         if not await self._idle_candidate(conversation):
             return None
         age = self._idle_age(conversation, moment)
@@ -780,6 +814,79 @@ class ConversationService:
             )
         return None
 
+    async def _tick_handoff_wait(
+        self, conversation: Conversation, site_key: str, moment: datetime
+    ) -> CommandResult | None:
+        if conversation.handoff_wait_prompt_id is not None:
+            return None
+        started = conversation.handoff_wait_started_at or conversation.last_message_at
+        if started is None:
+            return None
+        if started.tzinfo is None:
+            started = started.replace(tzinfo=UTC)
+        if moment - started < IDLE_TTL:
+            return None
+        inserted = await self._insert_message(
+            conversation,
+            "system",
+            HANDOFF_WAIT_LINE,
+            created_at=moment,
+            touch_last_message=False,
+        )
+        conversation.handoff_wait_started_at = started
+        conversation.handoff_wait_prompt_id = inserted.id
+        return CommandResult(
+            conversation=conversation, site_key=site_key, message=inserted, event="handoff_wait"
+        )
+
+    async def respond_handoff_wait(
+        self,
+        conversation_id: UUID,
+        visitor_id: UUID,
+        parent_origin: str,
+        prompt_id: int,
+        keep_waiting: bool,
+        *,
+        now: datetime | None = None,
+    ) -> CommandResult:
+        conversation, site_key = await self._lock_visitor_conversation(
+            conversation_id, visitor_id, parent_origin
+        )
+        answer_id = uuid5(conversation.id, f"wait:{prompt_id}")
+        answer_body = "Keep waiting" if keep_waiting else "End chat"
+        existing = await self._messages.get_by_client_id(conversation.id, answer_id)
+        if existing is not None:
+            if existing.body != answer_body:
+                raise CommandError("stale_wait_prompt")
+            await self._session.commit()
+            return CommandResult(conversation=conversation, site_key=site_key, duplicate=True)
+        if conversation.state != "queued" or conversation.handoff_wait_prompt_id != prompt_id:
+            raise CommandError("stale_wait_prompt")
+        moment = now or datetime.now(UTC)
+        conversation.handoff_wait_prompt_id = None
+        await self._insert_message(
+            conversation,
+            "visitor",
+            answer_body,
+            client_message_id=answer_id,
+            created_at=moment,
+            at=moment,
+        )
+        if keep_waiting:
+            conversation.handoff_wait_started_at = moment
+            body = "Thanks for waiting. You're still in the queue."
+        else:
+            self._apply_idle_close(conversation, moment)
+            conversation.attention_needed = False
+            conversation.handoff_wait_started_at = None
+            body = "This chat was closed at your request."
+            await self._notifications.retire_conversation(conversation.id)
+        inserted = await self._insert_message(
+            conversation, "system", body, created_at=moment, at=moment
+        )
+        await self._session.commit()
+        return CommandResult(conversation=conversation, site_key=site_key, message=inserted)
+
     async def _close_idle(
         self, conversation: Conversation, site_key: str, moment: datetime
     ) -> CommandResult:
@@ -796,6 +903,9 @@ class ConversationService:
             created_at=moment,
             touch_last_message=True,
             last_message_at=moment,
+        )
+        await self._notifications.emit(
+            conversation, "closed", f"idle:{conversation.id}:{moment.isoformat()}"
         )
         return CommandResult(
             conversation=conversation,
@@ -854,6 +964,8 @@ class ConversationService:
         conversation.state = _transition(conversation.state, "end")
         conversation.closed_at = moment
         conversation.active_generation_id = None
+        conversation.handoff_wait_started_at = None
+        conversation.handoff_wait_prompt_id = None
 
     async def transfer_to_bot(self, conversation_id: UUID, agent: User) -> CommandResult:
         conversation, site_key = await self._lock_staff_conversation(conversation_id)
@@ -895,6 +1007,12 @@ class ConversationService:
         conversation.state = _transition(conversation.state, "close_attention")
         conversation.closed_at = datetime.now(UTC)
         conversation.active_generation_id = None
+        await self._notifications.emit(
+            conversation,
+            "closed",
+            f"contacted:{conversation.id}:{conversation.closed_at.isoformat()}",
+            exclude_user_id=agent.id,
+        )
         await self._session.commit()
         return CommandResult(conversation=conversation, site_key=site_key, event="end")
 
@@ -1381,6 +1499,9 @@ class ConversationService:
             current.state = _transition(current.state, "end")
             current.closed_at = datetime.now(UTC)
             current.active_generation_id = None
+            current.handoff_wait_started_at = None
+            current.handoff_wait_prompt_id = None
+            await self._notifications.retire_conversation(current.id)
             if current.prechat_submission_id is not None:
                 await self._insert_message(current, "system", RESET_LINE)
                 self._bootstrap_wakeups.append(current)
@@ -1434,12 +1555,16 @@ class ConversationService:
             current.state = _transition(current.state, "end")
             current.closed_at = datetime.now(UTC)
             current.active_generation_id = None
+            current.handoff_wait_started_at = None
+            current.handoff_wait_prompt_id = None
+            await self._notifications.retire_conversation(current.id)
             if current.prechat_submission_id is not None:
                 await self._insert_message(current, "system", RESET_LINE)
                 self._bootstrap_wakeups.append(current)
             # Release the partial unique index before reopening the selected row.
             await self._session.flush()
 
+        await self._notifications.retire_conversation(target.id)
         target.state = _transition(target.state, "resume")
         target.assigned_agent_id = None
         target.active_generation_id = None
@@ -1447,10 +1572,14 @@ class ConversationService:
         target.fallback_count = 0
         target.attention_needed = False
         target.escalation_reason = None
-        await self._insert_message(target, "system", RESUMED_LINE)
+        target.handoff_wait_started_at = None
+        target.handoff_wait_prompt_id = None
+        resumed = await self._insert_message(target, "system", RESUMED_LINE)
         self._bootstrap_wakeups.append(target)
         if not site.bot_enabled:
             await self._enter_callback(target)
+        else:
+            await self._notifications.emit(target, "bot", f"message:{resumed.id}")
         return target
 
     async def _open_or_create_conversation(self, site_id: UUID, visitor_id: UUID) -> Conversation:

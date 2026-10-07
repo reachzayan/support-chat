@@ -1,12 +1,19 @@
 "use client"
 
-import { Moon, Sun } from "lucide-react"
+import { cn } from "cn"
 import { useCallback, useRef } from "react"
 
 import { usePreferences } from "@/components/preferences-context"
 import { Button } from "@/components/ui/button"
+import { StateIcon } from "@/components/ui/state-icon"
 
-export const ThemeToggle = ({ compact = false }: { compact?: boolean }) => {
+export const ThemeToggle = ({
+  compact = false,
+  className,
+}: {
+  compact?: boolean
+  className?: string
+}) => {
   const { dark, toggleTheme } = usePreferences()
   const transitionTimeout = useRef<number | null>(null)
 
@@ -30,9 +37,9 @@ export const ThemeToggle = ({ compact = false }: { compact?: boolean }) => {
       aria-label={dark ? "Switch to light mode" : "Switch to dark mode"}
       title={dark ? "Switch to light mode" : "Switch to dark mode"}
       onClick={handleToggle}
-      className={compact ? "text-white/85 hover:bg-white/10 hover:text-white" : "text-mute"}
+      className={cn(compact ? "text-white/85 hover:text-white" : "text-mute", className)}
     >
-      {dark ? <Sun aria-hidden="true" /> : <Moon aria-hidden="true" />}
+      {dark ? <StateIcon name="sun" /> : <StateIcon name="moon" />}
     </Button>
   )
 }

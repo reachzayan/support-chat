@@ -11,6 +11,7 @@ export type ChatView = {
   lastEventId: number
   hasOlder: boolean
   typing: boolean
+  waitPromptId?: number | null
 }
 
 export const emptyChat = (): ChatView => ({
@@ -107,7 +108,15 @@ const applyState = (view: ChatView, frame: Record<string, unknown>): ChatView =>
   if (frame.assigned_agent === null) {
     assignedName = null
   }
-  return { ...view, conversationId, conversation: frame.state as ConversationState, assignedName }
+  const waitPromptId =
+    typeof frame.handoff_wait_prompt_id === "number" ? frame.handoff_wait_prompt_id : null
+  return {
+    ...view,
+    conversationId,
+    conversation: frame.state as ConversationState,
+    assignedName,
+    waitPromptId,
+  }
 }
 
 const applyMessage = (view: ChatView, frame: Record<string, unknown>): ChatView => {
@@ -182,7 +191,7 @@ export const isPrechatAccepted = (frame: unknown): boolean => {
 }
 
 export const isAck = (frame: unknown): boolean => {
-  return isRecord(frame) && frame.type === "ack"
+  return isRecord(frame) && (frame.type === "ack" || frame.type === "handoff_wait_accepted")
 }
 
 export const isErrorFrame = (frame: unknown): boolean => {

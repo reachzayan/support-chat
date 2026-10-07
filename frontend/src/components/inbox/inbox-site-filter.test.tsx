@@ -197,23 +197,12 @@ describe("inbox elsewhere queued signal", () => {
     expect(trigger.className).toMatch(/\bbg-paper\b/)
   })
 
-  test("search and inbox picker share the compact status filter track without stretching", async () => {
+  test("keeps inbox and state filters while shell owns search", async () => {
     renderWithProviders(<InboxConsole user={ALEX} />)
     await waitFor(() => expect(inboxValue()).toHaveTextContent(/^All 2$/))
-    const search = screen.getByRole("searchbox", { name: "Search chats" })
-    const trigger = inboxPicker()
-    const filters = screen.getByRole("navigation", { name: "Inbox filters" })
-    const track = filters.parentElement
-    expect(track).not.toBeNull()
-    expect(track?.contains(search)).toBe(true)
-    expect(track?.contains(trigger)).toBe(true)
-    expect(track?.className).toMatch(/\bw-fit\b/)
-    expect(track?.className).toMatch(/inline-flex/)
-    expect(track?.className).toMatch(/\bself-start\b/)
-    expect(search.className.split(/\s+/)).toContain("w-full")
-    expect(search.className.split(/\s+/)).toContain("min-w-0")
-    expect(trigger.className.split(/\s+/)).toContain("w-full")
-    expect(filters.className.split(/\s+/)).toContain("w-fit")
+    expect(inboxPicker()).toBeInTheDocument()
+    expect(screen.getByRole("navigation", { name: "Inbox filters" })).toBeInTheDocument()
+    expect(screen.queryByRole("searchbox")).not.toBeInTheDocument()
   })
 })
 
