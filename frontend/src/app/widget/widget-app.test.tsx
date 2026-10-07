@@ -595,3 +595,142 @@ describe("widget human routing", () => {
     expect(screen.queryByRole("button", { name: "Talk to a person" })).not.toBeInTheDocument()
   })
 })
+
+test("only fresh bot and agent replies notify the host; snapshots, history and duplicates stay silent", async () => {
+  FakeSocket.instances = []
+  vi.stubGlobal("WebSocket", FakeSocket)
+  const posted = vi.spyOn(window.parent, "postMessage")
+  const chatId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+  renderWithProviders(<WidgetApp />)
+  dispatchBootstrap({
+    id: chatId,
+    state: "bot",
+    assigned_agent: null,
+    messages: [{ type: "message", id: 10, role: "bot", body: "Old reply" }],
+  })
+  await screen.findByText("Old reply")
+  const socket = FakeSocket.instances[0]
+  emit(socket, { type: "message", id: 11, role: "visitor", body: "My message" })
+  await screen.findByText("My message")
+  emit(socket, {
+    type: "history_page",
+    has_older: false,
+    messages: [{ type: "message", id: 8, role: "agent", body: "Historical reply" }],
+  })
+  await screen.findByText("Historical reply")
+  emit(socket, { type: "message", id: 12, role: "bot", body: "New bot reply" })
+  await screen.findByText("New bot reply")
+  emit(socket, { type: "message", id: 12, role: "bot", body: "New bot reply" })
+  emit(socket, { type: "message", id: 13, role: "agent", body: "New agent reply" })
+  await screen.findByText("New agent reply")
+  expect(
+    posted.mock.calls.filter(([frame]) => frame.type === "widget.message").map(([frame]) => frame),
+  ).toEqual([
+    { type: "widget.message", conversation_id: chatId, message_id: 12 },
+    { type: "widget.message", conversation_id: chatId, message_id: 13 },
+  ])
+  posted.mockRestore()
+})
+
+test("handoff and busy messages appear in the transcript and announce new widget activity", async () => {
+  FakeSocket.instances = []
+  vi.stubGlobal("WebSocket", FakeSocket)
+  const posted = vi.spyOn(window.parent, "postMessage")
+  const chatId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+  renderWithProviders(<WidgetApp />)
+  dispatchBootstrap({
+    id: chatId,
+    state: "bot",
+    assigned_agent: null,
+    messages: [{ type: "message", id: 10, role: "visitor", body: "I need a person" }],
+  })
+  await screen.findByText("I need a person")
+  const socket = FakeSocket.instances[0]
+  emit(socket, {
+    type: "message",
+    id: 11,
+    role: "system",
+    system_reason: "visitor_request",
+    body: "A specialist will join this chat shortly.",
+  })
+  emit(socket, { type: "state", state: "queued", assigned_agent: null })
+  emit(socket, {
+    type: "message",
+    id: 12,
+    role: "system",
+    body: "Our agents are all currently busy right now. Would you like to wait?",
+  })
+  emit(socket, { type: "state", state: "queued", assigned_agent: null, handoff_wait_prompt_id: 12 })
+  const transcript = await screen.findByRole("log")
+  expect(transcript).toHaveTextContent("A specialist will join this chat shortly.")
+  expect(transcript).toHaveTextContent(
+    "Our agents are all currently busy right now. Would you like to wait?",
+  )
+  expect(await screen.findByRole("button", { name: "Keep waiting" })).toBeEnabled()
+  emit(socket, {
+    type: "message",
+    id: 12,
+    role: "system",
+    body: "Our agents are all currently busy right now. Would you like to wait?",
+  })
+  emit(socket, {
+    type: "message",
+    id: 13,
+    role: "system",
+    body: "You're now chatting with Alex Morgan.",
+  })
+  expect(
+    posted.mock.calls.filter(([frame]) => frame.type === "widget.message").map(([frame]) => frame),
+  ).toEqual([
+    { type: "widget.message", conversation_id: chatId, message_id: 11 },
+    { type: "widget.message", conversation_id: chatId, message_id: 12 },
+  ])
+})
+
+test.each([
+  ["Keep waiting", "wait"],
+  ["End chat", "end"],
+])("handoff offers %s using the current server prompt", async (label, choice) => {
+  FakeSocket.instances = []
+  vi.stubGlobal("WebSocket", FakeSocket)
+  const user = userEvent.setup()
+  renderWithProviders(<WidgetApp />)
+  dispatchBootstrap({
+    id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+    state: "queued",
+    assigned_agent: null,
+    messages: [
+      {
+        type: "message",
+        id: 10,
+        role: "system",
+        body: "A specialist will join this chat shortly.",
+      },
+    ],
+  })
+  await waitFor(() => expect(FakeSocket.instances.length).toBe(1))
+  const socket = FakeSocket.instances[0]
+  emit(socket, {
+    type: "message",
+    id: 11,
+    role: "system",
+    body: "Our agents are all currently busy right now. Would you like to wait?",
+  })
+  emit(socket, { type: "state", state: "queued", assigned_agent: null, handoff_wait_prompt_id: 11 })
+  await user.click(await screen.findByRole("button", { name: label }))
+  expect(
+    socket.sent
+      .map((raw) => JSON.parse(raw))
+      .filter((frame) => frame.type === "handoff_wait_response"),
+  ).toEqual([{ v: 1, type: "handoff_wait_response", prompt_id: 11, choice }])
+  emit(socket, {
+    type: "state",
+    state: "human",
+    assigned_agent: { id: "alex", display_name: "Alex" },
+    handoff_wait_prompt_id: null,
+  })
+  await waitFor(() =>
+    expect(screen.queryByRole("button", { name: "Keep waiting" })).not.toBeInTheDocument(),
+  )
+  expect(screen.queryByRole("button", { name: "End chat" })).not.toBeInTheDocument()
+})

@@ -2,12 +2,12 @@
 
 "use client"
 
-import { ArrowUp } from "lucide-react"
 import { motion, useReducedMotion } from "motion/react"
 import { useCallback, useState, type ChangeEvent, type FormEvent } from "react"
 
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { StateIcon } from "@/components/ui/state-icon"
 
 type ComposerProps = {
   disabled: boolean
@@ -64,9 +64,9 @@ export const Composer = ({ disabled, sending, onSend }: ComposerProps) => {
           type="submit"
           aria-label="Send"
           disabled={!canSend}
-          className="widget-send-button border-steel/15 bg-ice-2 text-navy hover:!text-navy focus-visible:ring-steel/30 flex size-10 shrink-0 rounded-full border hover:!bg-[#e6eefc] focus-visible:ring-4 disabled:opacity-45"
+          className="widget-send-button border-steel/15 bg-ice-2 text-navy hover:!text-navy focus-visible:ring-steel/30 hover:bg-ice-2! flex size-10 shrink-0 rounded-full border focus-visible:ring-4 disabled:opacity-45"
         >
-          <ArrowUp aria-hidden="true" className="size-5" strokeWidth={2.4} />
+          <StateIcon name="arrow-up" className="size-5" />
           <span className="sr-only">Send</span>
         </Button>
       </motion.div>

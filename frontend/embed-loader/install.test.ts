@@ -122,3 +122,66 @@ describe("supportchat loader", () => {
 
 const screenLauncher = () =>
   document.querySelector('[aria-label="Open chat"]') as HTMLButtonElement | null
+
+const CHAT_ID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+
+test("closed chat counts fresh replies once, plays the shared message tone, and clears on opening", async () => {
+  document.body.innerHTML = ""
+  window.__supportchatInstalled = false
+  window.__supportchat = { siteKey: DEMO_KEY, publicKey: PUBLIC }
+  window.localStorage.clear()
+  const played: string[] = []
+  vi.stubGlobal("Notification", { permission: "denied" })
+  vi.stubGlobal(
+    "Audio",
+    class {
+      currentTime = 0
+      preload = ""
+      constructor(private readonly src: string) {}
+      load() {}
+      pause() {}
+      async play() {
+        played.push(this.src)
+      }
+    },
+  )
+  vi.stubGlobal("fetch", bootstrapOk("resume-1"))
+  installSupportChat(window, document, attachScript())
+  const launcher = document.querySelector<HTMLButtonElement>("[data-supportchat-launcher]")!
+  launcher.click()
+  await vi.waitFor(() => expect(document.querySelector("iframe")).not.toBeNull())
+  const iframe = document.querySelector("iframe")!
+  const send = (data: unknown, origin = WIDGET_ORIGIN, source?: Window | null) =>
+    window.dispatchEvent(
+      new MessageEvent("message", {
+        data,
+        origin,
+        source: source === undefined ? iframe.contentWindow : source,
+      }),
+    )
+  send({ type: "widget.painted" })
+  send({ type: "widget.message", conversation_id: CHAT_ID, message_id: 1 })
+  expect(launcher.getAttribute("aria-label")).toBe("Open chat")
+  send({ type: "widget.close" })
+  send({ type: "widget.message", conversation_id: CHAT_ID, message_id: 2 }, "https://evil.test")
+  send({ type: "widget.message", conversation_id: CHAT_ID, message_id: 2 }, WIDGET_ORIGIN, window)
+  send({ type: "widget.message", conversation_id: CHAT_ID, message_id: -1 })
+  expect(launcher.getAttribute("aria-label")).toBe("Open chat")
+  send({ type: "widget.message", conversation_id: CHAT_ID, message_id: 2 })
+  send({ type: "widget.message", conversation_id: CHAT_ID, message_id: 2 })
+  send({ type: "widget.message", conversation_id: CHAT_ID, message_id: 3 })
+  expect(launcher.getAttribute("aria-label")).toBe("Open chat, 2 unread messages")
+  expect(launcher.querySelector("[data-supportchat-unread]")?.textContent).toBe("2")
+  expect(played).toEqual([
+    "http://widget.localhost:3000/sounds/message.wav",
+    "http://widget.localhost:3000/sounds/message.wav",
+  ])
+  launcher.click()
+  expect(launcher.getAttribute("aria-label")).toBe("Open chat")
+  expect(launcher.querySelector("[data-supportchat-unread]")?.textContent).toBe("")
+  send({ type: "widget.close" })
+  send({ type: "widget.sound", enabled: false })
+  send({ type: "widget.message", conversation_id: CHAT_ID, message_id: 4 })
+  expect(launcher.getAttribute("aria-label")).toBe("Open chat, 1 unread message")
+  expect(played).toHaveLength(2)
+})

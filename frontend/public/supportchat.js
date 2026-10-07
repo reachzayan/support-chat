@@ -1,5 +1,64 @@
 "use strict";
 (() => {
+  // src/lib/message-tone.ts
+  var MESSAGE_TONE_URL = "/sounds/message.wav";
+  var createMessageTone = (source = MESSAGE_TONE_URL) => {
+    let audio;
+    const prepare = () => {
+      try {
+        if (!audio) {
+          audio = new Audio(source);
+          audio.preload = "auto";
+          audio.load();
+        }
+      } catch (e) {
+        audio = void 0;
+      }
+    };
+    const play = async () => {
+      try {
+        prepare();
+        if (!audio) return false;
+        audio.currentTime = 0;
+        await audio.play();
+        return true;
+      } catch (e) {
+        return false;
+      }
+    };
+    const stop = () => audio == null ? void 0 : audio.pause();
+    return { prepare, play, stop };
+  };
+
+  // src/lib/system-notification.ts
+  var notificationPermission = () => {
+    var _a, _b;
+    return (_b = (_a = globalThis.Notification) == null ? void 0 : _a.permission) != null ? _b : "unavailable";
+  };
+  var preferNativeSound = () => {
+    const macChromium = /Macintosh|Mac OS X/.test(navigator.userAgent) && /(?:Chrome|Chromium|Edg|OPR)\//.test(navigator.userAgent);
+    return notificationPermission() === "granted" && !macChromium;
+  };
+  var alertSequence = 0;
+  var showSystemNotification = (title, body, tag, onOpen) => {
+    try {
+      if (notificationPermission() !== "granted") return false;
+      const notification = new Notification(title, {
+        body,
+        tag: `${tag}-${Date.now()}-${++alertSequence}`,
+        silent: false
+      });
+      notification.addEventListener("click", () => {
+        notification.close();
+        window.focus();
+        onOpen == null ? void 0 : onOpen();
+      });
+      return true;
+    } catch (e) {
+      return false;
+    }
+  };
+
   // src/lib/postmessage.ts
   var WIDGET_RESIZE_MIN = 320;
   var WIDGET_RESIZE_MAX = 720;
@@ -53,7 +112,8 @@
       ...typeof value.id === "string" && UUID_PATTERN.test(value.id) ? { id: value.id } : {},
       state: value.state,
       assigned_agent: assigned,
-      messages: value.messages.filter(isRecord)
+      messages: value.messages.filter(isRecord),
+      has_older: value.has_older === true
     };
   };
   var parseIdentity = (value) => {
@@ -142,6 +202,9 @@
     if (!isRecord(value) || typeof value.type !== "string") {
       return null;
     }
+    if (value.type === "host.sound") {
+      return typeof value.enabled === "boolean" ? { type: "host.sound", enabled: value.enabled } : null;
+    }
     if (value.type === "host.bootstrap") {
       return parseBootstrap(value);
     }
@@ -203,6 +266,18 @@
   var parseWidgetToHost = (value) => {
     if (!isRecord(value) || typeof value.type !== "string") {
       return null;
+    }
+    if (value.type === "widget.sound") {
+      return typeof value.enabled === "boolean" ? { type: "widget.sound", enabled: value.enabled } : null;
+    }
+    if (value.type === "widget.message") {
+      if (typeof value.conversation_id !== "string" || !UUID_PATTERN.test(value.conversation_id) || typeof value.message_id !== "number" || !Number.isSafeInteger(value.message_id) || value.message_id <= 0)
+        return null;
+      return {
+        type: "widget.message",
+        conversation_id: value.conversation_id,
+        message_id: value.message_id
+      };
     }
     const simple = parseSimpleWidget(value.type);
     if (simple !== null) {
@@ -467,7 +542,14 @@
     dispatchWidgetFrame(state, frame, handlers);
   };
   var dispatchWidgetFrame = (state, frame, handlers) => {
+    var _a, _b;
     switch (frame.type) {
+      case "widget.message":
+        (_a = handlers.onMessage) == null ? void 0 : _a.call(handlers, frame.conversation_id, frame.message_id);
+        return;
+      case "widget.sound":
+        (_b = handlers.onSound) == null ? void 0 : _b.call(handlers, frame.enabled);
+        return;
       case "widget.ready":
         handlers.onReady();
         return;
@@ -568,14 +650,14 @@
       "padding:0",
       "border:0",
       "border-radius:50%",
-      "background:#0B0B0B",
+      "background:#0B2347",
       "cursor:pointer",
       "z-index:2147483646",
       "touch-action:manipulation",
       "display:flex",
       "align-items:center",
       "justify-content:center",
-      "overflow:hidden",
+      "overflow:visible",
       "box-shadow:0 8px 24px rgba(11,35,71,0.28)"
     ].join(";");
     const icon = doc.createElement("span");
@@ -628,6 +710,22 @@
     if (existing instanceof HTMLElement) {
       existing.hidden = true;
     }
+  };
+  var setLauncherUnread = (button, count) => {
+    let badge = button.querySelector("[data-supportchat-unread]");
+    if (!badge) {
+      badge = button.ownerDocument.createElement("span");
+      badge.setAttribute("data-supportchat-unread", "");
+      badge.setAttribute("aria-hidden", "true");
+      badge.style.cssText = "position:absolute;top:-3px;right:-3px;min-width:22px;height:22px;padding:0 5px;box-sizing:border-box;border-radius:999px;background:#C45516;color:#fff;border:2px solid #fff;font:bold 11px/18px system-ui,sans-serif;text-align:center;font-variant-numeric:tabular-nums;pointer-events:none";
+      button.appendChild(badge);
+    }
+    badge.style.display = count > 0 ? "block" : "none";
+    badge.textContent = count > 0 ? count > 99 ? "99+" : String(count) : "";
+    button.setAttribute(
+      "aria-label",
+      count > 0 ? `Open chat, ${count} unread ${count === 1 ? "message" : "messages"}` : "Open chat"
+    );
   };
 
   // embed-loader/navigation.ts
@@ -765,6 +863,8 @@
     runtime.launcher.focus();
   };
   var showPanel = (runtime) => {
+    runtime.unread = 0;
+    setLauncherUnread(runtime.launcher, 0);
     clearHideTimer(runtime);
     setLauncherBusy(runtime, false);
     if (runtime.iframe !== null) {
@@ -835,9 +935,38 @@
   };
   var handleHostMessage = (runtime, event) => {
     acceptWidgetFrame(panelState(runtime), event, {
-      onReady: () => sendBootstrapWithRetry(runtime),
+      onReady: () => {
+        postToWidget(panelState(runtime), { type: "host.sound", enabled: runtime.soundEnabled });
+        sendBootstrapWithRetry(runtime);
+      },
+      onMessage: (_chatId, messageId) => {
+        if (messageId <= runtime.lastMessageId) return;
+        runtime.lastMessageId = messageId;
+        if (!runtime.panelPainted || runtime.launcher.hidden) return;
+        runtime.unread += 1;
+        setLauncherUnread(runtime.launcher, runtime.unread);
+        if (runtime.soundEnabled) {
+          const native = preferNativeSound() && showSystemNotification(
+            "New chat message",
+            "Open chat to read your reply.",
+            `supportchat-widget-${runtime.config.siteKey}`,
+            () => showPanel(runtime)
+          );
+          if (!native) void runtime.tone.play();
+        }
+      },
+      onSound: (enabled) => {
+        runtime.soundEnabled = enabled;
+        if (!enabled) runtime.tone.stop();
+        try {
+          runtime.win.localStorage.setItem(`supportchat.sound.${runtime.config.siteKey}`, String(enabled));
+        } catch (e) {
+        }
+        postToWidget(panelState(runtime), { type: "host.sound", enabled });
+      },
       onPainted: () => {
         runtime.panelPainted = true;
+        postToWidget(panelState(runtime), { type: "host.sound", enabled: runtime.soundEnabled });
         showPanel(runtime);
       },
       onActivated: () => persistActivated(runtime),
@@ -893,6 +1022,7 @@
     sendBootstrapWithRetry(runtime);
   };
   var handleOpen = (runtime) => {
+    if (runtime.soundEnabled) runtime.tone.prepare();
     hideHostError(runtime.doc);
     if (runtime.iframe !== null && runtime.panelPainted) {
       showPanel(runtime);
@@ -923,7 +1053,16 @@
     }
     win.__supportchatInstalled = true;
     preconnectWidget(doc, widgetOrigin);
+    let soundEnabled = true;
+    try {
+      soundEnabled = win.localStorage.getItem(`supportchat.sound.${config.siteKey}`) !== "false";
+    } catch (e) {
+    }
     const runtime = {
+      unread: 0,
+      lastMessageId: 0,
+      soundEnabled,
+      tone: createMessageTone(new URL(MESSAGE_TONE_URL, widgetOrigin).href),
       win,
       doc,
       widgetOrigin,

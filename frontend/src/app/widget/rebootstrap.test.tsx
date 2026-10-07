@@ -1,4 +1,4 @@
-import { waitFor } from "@testing-library/react"
+import { screen, waitFor } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest"
 
 import { renderWithProviders } from "@/test/render"
@@ -158,5 +158,51 @@ describe("widget socket expiry", () => {
       expect(frames.find((frame) => frame.type === "auth")?.bootstrap_token).toBe("boot-2")
       expect(frames.find((frame) => frame.type === "auth")?.last_event_id).toBe(12)
     })
+  })
+
+  test("an older bootstrap cannot erase live handoff messages or waiting choices", async () => {
+    const snapshot = {
+      id: "10000000-0000-4000-8000-000000000011",
+      state: "bot",
+      assigned_agent: null,
+      messages: [{ type: "message", id: 11, role: "visitor", body: "I need a person" }],
+    }
+    renderWithProviders(<WidgetApp />)
+    dispatchBootstrap("boot-1", snapshot)
+    await waitFor(() => expect(FakeSocket.instances.length).toBe(1))
+    emitJson(FakeSocket.instances[0], {
+      type: "message",
+      id: 12,
+      role: "system",
+      system_reason: "visitor_request",
+      body: "A specialist will join this chat shortly.",
+    })
+    emitJson(FakeSocket.instances[0], { type: "state", state: "queued", assigned_agent: null })
+    await waitFor(() =>
+      expect(screen.getByRole("log")).toHaveTextContent(
+        "A specialist will join this chat shortly.",
+      ),
+    )
+    emitJson(FakeSocket.instances[0], {
+      type: "message",
+      id: 13,
+      role: "system",
+      body: "Our agents are all currently busy right now. Would you like to wait?",
+    })
+    emitJson(FakeSocket.instances[0], {
+      type: "state",
+      state: "queued",
+      assigned_agent: null,
+      handoff_wait_prompt_id: 13,
+    })
+    await screen.findByRole("button", { name: "Keep waiting" })
+    dispatchBootstrap("boot-2", snapshot)
+    await waitFor(() => expect(FakeSocket.instances.length).toBe(2))
+    expect(screen.getByRole("log")).toHaveTextContent("A specialist will join this chat shortly.")
+    expect(screen.getByRole("log")).toHaveTextContent(
+      "Our agents are all currently busy right now. Would you like to wait?",
+    )
+    expect(screen.getByRole("button", { name: "Keep waiting" })).toBeEnabled()
+    expect(screen.queryByRole("textbox", { name: "Message" })).not.toBeInTheDocument()
   })
 })

@@ -3,6 +3,7 @@
 import { useCallback } from "react"
 
 import { Button } from "@/components/ui/button"
+import { StateIcon } from "@/components/ui/state-icon"
 import type { PublicWidgetConfig } from "@/lib/postmessage"
 
 import { ChatStatus } from "./chat-status"
@@ -22,6 +23,7 @@ type WidgetBodyProps = {
   onPrechat: (fields: PrechatFields) => void
   onRestart: () => void
   onSend: (body: string) => boolean
+  onWaitChoice: (promptId: number, choice: "wait" | "end") => void
   onLoadOlder: () => void
   onDismissPrivacy: () => void
 }
@@ -118,11 +120,12 @@ const PrivacyBanner = ({
       <Button
         type="button"
         variant="ghost"
+        size="icon"
         aria-label="Dismiss privacy notice"
         onClick={onDismiss}
-        className="text-mute text-ink focus-visible:ring-steel flex size-8 shrink-0 items-center justify-center rounded-full hover:bg-white focus-visible:ring-2 focus-visible:outline-none"
+        className="text-mute text-ink focus-visible:ring-steel flex size-8 shrink-0 items-center justify-center rounded-full focus-visible:ring-2 focus-visible:outline-none"
       >
-        <span aria-hidden="true">×</span>
+        <StateIcon name="x" />
       </Button>
     </div>
   )
@@ -143,6 +146,53 @@ const OlderMessagesButton = ({
     </Button>
   ) : null
 
+const WaitChoices = ({
+  view,
+  available,
+  sending,
+  reconnecting,
+  onChoice,
+}: {
+  view: ChatView
+  available: boolean
+  sending: boolean
+  reconnecting: boolean
+  onChoice: WidgetBodyProps["onWaitChoice"]
+}) => {
+  const promptId = view.waitPromptId
+  const keepWaiting = useCallback(() => {
+    if (promptId) onChoice(promptId, "wait")
+  }, [promptId, onChoice])
+  const endChat = useCallback(() => {
+    if (promptId) onChoice(promptId, "end")
+  }, [promptId, onChoice])
+  if (!available || view.conversation !== "queued" || !promptId) return null
+  const disabled = sending || reconnecting
+  return (
+    <section
+      aria-label="Continue waiting for a specialist"
+      className="border-line/70 mx-3 mb-3 rounded-2xl border bg-white/80 p-3"
+    >
+      <p className="text-mute mb-3 text-xs leading-5">
+        Keep your place in the queue, or end this chat.
+      </p>
+      <div className="flex flex-wrap gap-2">
+        <Button className="min-h-11 flex-1" disabled={disabled} onClick={keepWaiting}>
+          Keep waiting
+        </Button>
+        <Button
+          variant="secondary"
+          className="min-h-11 flex-1"
+          disabled={disabled}
+          onClick={endChat}
+        >
+          End chat
+        </Button>
+      </div>
+    </section>
+  )
+}
+
 const ActiveChat = ({
   config,
   view,
@@ -153,6 +203,7 @@ const ActiveChat = ({
   state,
   onRestart,
   onSend,
+  onWaitChoice,
   onLoadOlder,
   onDismissPrivacy,
 }: WidgetBodyProps & { state: Exclude<ChatView["conversation"], null | "prechat"> }) => {
@@ -178,6 +229,13 @@ const ActiveChat = ({
         conversationState={state}
         agentName={view.assignedName}
         companyName={config.name}
+      />
+      <WaitChoices
+        view={view}
+        available={config.human_enabled}
+        sending={sending}
+        reconnecting={reconnecting}
+        onChoice={onWaitChoice}
       />
       {visitorClosed ? (
         <ClosedFooter contactInfo={config.contact_info} onRestart={onRestart} />

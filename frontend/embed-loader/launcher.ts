@@ -32,7 +32,7 @@ export const mountLauncher = (
     "display:flex",
     "align-items:center",
     "justify-content:center",
-    "overflow:hidden",
+    "overflow:visible",
     "box-shadow:0 8px 24px rgba(11,35,71,0.28)",
   ].join(";")
   const icon = doc.createElement("span")
@@ -88,4 +88,22 @@ export const hideHostError = (doc: Document) => {
   if (existing instanceof HTMLElement) {
     existing.hidden = true
   }
+}
+
+export const setLauncherUnread = (button: HTMLButtonElement, count: number) => {
+  let badge = button.querySelector<HTMLSpanElement>("[data-supportchat-unread]")
+  if (!badge) {
+    badge = button.ownerDocument.createElement("span")
+    badge.setAttribute("data-supportchat-unread", "")
+    badge.setAttribute("aria-hidden", "true")
+    badge.style.cssText =
+      "position:absolute;top:-3px;right:-3px;min-width:22px;height:22px;padding:0 5px;box-sizing:border-box;border-radius:999px;background:#C45516;color:#fff;border:2px solid #fff;font:bold 11px/18px system-ui,sans-serif;text-align:center;font-variant-numeric:tabular-nums;pointer-events:none"
+    button.appendChild(badge)
+  }
+  badge.style.display = count > 0 ? "block" : "none"
+  badge.textContent = count > 0 ? (count > 99 ? "99+" : String(count)) : ""
+  button.setAttribute(
+    "aria-label",
+    count > 0 ? `Open chat, ${count} unread ${count === 1 ? "message" : "messages"}` : "Open chat",
+  )
 }
