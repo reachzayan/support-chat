@@ -9,6 +9,7 @@ import {
 } from "react"
 
 import { staffRead, staffWrite, type SiteRecord } from "@/components/admin/staff-api"
+import { useSearchTarget, useOpenSearchTarget } from "@/components/search/workspace-route"
 import { matchesSearchQuery } from "@/lib/search"
 
 import {
@@ -162,6 +163,7 @@ export const useCannedResponsesState = () => {
       if (merged.assistant === "all") params.delete("assistant")
       else params.set("assistant", merged.assistant)
       params.delete("page")
+      params.delete("response")
       const suffix = params.toString()
       window.history.replaceState(null, "", `/admin/canned-responses${suffix ? `?${suffix}` : ""}`)
     },
@@ -384,6 +386,9 @@ export const useCannedResponsesState = () => {
       setDeleting(false)
     }
   }, [deleteTarget, deleting])
+  const target = useSearchTarget()
+  useOpenSearchTarget(target.response, records, openEdit)
+
   return {
     records,
     sites,

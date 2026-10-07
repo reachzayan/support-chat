@@ -280,6 +280,13 @@ export const emit = (socket: FakeSocket | undefined, payload: unknown) => {
 }
 
 export const resetInboxHarness = () => {
+  vi.stubGlobal("innerWidth", 1440)
+  vi.stubGlobal("matchMedia", (query: string) => ({
+    matches: query.includes("max-width") && window.innerWidth < 1280,
+    media: query,
+    addEventListener: vi.fn<() => void>(),
+    removeEventListener: vi.fn<() => void>(),
+  }))
   FakeSocket.instances = []
   setAccessToken("jwt-alex")
   setListItems([adaQueued, bgQueued])

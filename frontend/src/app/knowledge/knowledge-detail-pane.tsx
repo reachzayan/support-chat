@@ -1,15 +1,17 @@
 import { cn } from "cn"
-import { ExternalLink, Pencil } from "lucide-react"
+import { ExternalLink } from "lucide-react"
 import { AnimatePresence, motion, useReducedMotion } from "motion/react"
-import { useCallback, useState, type ChangeEvent } from "react"
+import { useCallback, useEffect, useRef, useState, type ChangeEvent } from "react"
 
-/* oxlint-disable react-perf/jsx-no-new-function-as-prop, react-perf/jsx-no-new-object-as-prop -- Answer controls close over chunk records; motion props use inline objects. */
 import { RetryError } from "@/components/admin/retry-error"
 import type { KbPageDetail, KbPageRecord } from "@/components/admin/staff-api"
+/* oxlint-disable react-perf/jsx-no-new-function-as-prop, react-perf/jsx-no-new-object-as-prop -- Answer controls close over chunk records; motion props use inline objects. */
+import { useSearchTarget } from "@/components/search/workspace-route"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { LinkButton } from "@/components/ui/link-button"
 import { ScrollArea } from "@/components/ui/scroll-area"
+import { StateIcon } from "@/components/ui/state-icon"
 import { Switch } from "@/components/ui/switch"
 import { Textarea } from "@/components/ui/textarea"
 import { safeHttpUrl } from "@/lib/ua"
@@ -284,7 +286,7 @@ const AnswerHeader = ({
           disabled={saveLocked}
           onClick={onEdit}
         >
-          <Pencil aria-hidden="true" />
+          <StateIcon name="pencil-simple" />
         </Button>
       ) : null}
     </div>
@@ -298,6 +300,16 @@ const AnswerHeader = ({
   </div>
 )
 
+const useSearchHighlight = (chunkId: string) => {
+  const target = useSearchTarget()
+  const ref = useRef<HTMLElement>(null)
+  useEffect(() => {
+    if (target.chunk === chunkId) ref.current?.scrollIntoView?.({ block: "nearest" })
+  }, [target.chunk, chunkId])
+  return { ref, selected: target.chunk === chunkId }
+}
+
+// oxlint-disable-next-line eslint/max-lines-per-function -- Compose one answer's display, editor, toggles, and search highlight.
 const AnswerUnit = ({
   pageId,
   pages,
@@ -336,8 +348,17 @@ const AnswerUnit = ({
       setDraft(null)
     }
   }, [chunk, draft, onSave, pageId, pending])
+  const { ref, selected } = useSearchHighlight(chunk.id)
   return (
-    <article className={cn("py-4 transition-opacity duration-150", !chunk.enabled && "opacity-60")}>
+    <article
+      ref={ref}
+      aria-label={selected ? "Selected search result" : undefined}
+      className={cn(
+        "py-4 transition-opacity duration-150",
+        !chunk.enabled && "opacity-60",
+        selected && "rounded-lg bg-ice-2 px-3 ring-1 ring-steel/20",
+      )}
+    >
       <AnswerHeader
         heading={chunk.heading}
         kind={chunk.kind}

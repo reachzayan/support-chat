@@ -1,9 +1,9 @@
 "use client"
 
-import { Power } from "lucide-react"
 import { useCallback, useState } from "react"
 
 import { Button } from "@/components/ui/button"
+import { StateIcon } from "@/components/ui/state-icon"
 import { logout, redirectToLogin } from "@/lib/auth-client"
 
 export const SignOutButton = ({
@@ -30,7 +30,7 @@ export const SignOutButton = ({
       className={className}
     >
       {iconOnly ? (
-        <Power aria-hidden="true" className="size-4" strokeWidth={1.8} />
+        <StateIcon name="power" className="size-4" />
       ) : pending ? (
         "Signing out…"
       ) : (

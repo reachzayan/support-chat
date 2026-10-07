@@ -14,6 +14,7 @@ import type { ConversationDetail } from "./types"
 
 type VisitorRailProps = {
   detail: ConversationDetail
+  showHeader?: boolean
 }
 
 const CHEVRON_SPRING = { type: "spring", stiffness: 420, damping: 28, mass: 0.55 } as const
@@ -101,27 +102,32 @@ const VisitorRailHeader = ({
   name,
   siteName,
   closed,
+  visible,
 }: {
   name: string
   siteName: string
   closed: boolean
-}) => (
-  <div className="border-line bg-paper flex h-16 shrink-0 items-center gap-3 border-b px-5">
-    <span className="bg-ice-2 text-steel flex size-10 shrink-0 items-center justify-center rounded-full text-sm font-bold">
-      {name.slice(0, 1).toUpperCase()}
-    </span>
-    <div className="min-w-0">
-      <div className="flex min-w-0 items-center gap-2">
-        <p className="text-navy heading truncate text-sm">{name}</p>
-        {closed ? <span className={`${META_PILL} tracking-[0.08em] uppercase`}>Closed</span> : null}
+  visible: boolean
+}) =>
+  visible ? (
+    <div className="border-line bg-paper flex h-16 shrink-0 items-center gap-3 border-b px-5">
+      <span className="bg-ice-2 text-steel flex size-10 shrink-0 items-center justify-center rounded-full text-sm font-bold">
+        {name.slice(0, 1).toUpperCase()}
+      </span>
+      <div className="min-w-0">
+        <div className="flex min-w-0 items-center gap-2">
+          <p className="text-navy heading truncate text-sm">{name}</p>
+          {closed ? (
+            <span className={`${META_PILL} tracking-[0.08em] uppercase`}>Closed</span>
+          ) : null}
+        </div>
+        <p className="text-mute mt-0.5 flex items-center gap-1.5 truncate text-xs">
+          <span className="size-1.5 rounded-full bg-[#67B587]" />
+          {siteName}
+        </p>
       </div>
-      <p className="text-mute mt-0.5 flex items-center gap-1.5 truncate text-xs">
-        <span className="size-1.5 rounded-full bg-[#67B587]" />
-        {siteName}
-      </p>
     </div>
-  </div>
-)
+  ) : null
 
 const ContactSection = ({
   detail,
@@ -229,7 +235,7 @@ const TechnicalSection = ({ browser, os }: { browser: string; os: string }) => (
 )
 
 // oxlint-disable-next-line eslint/max-lines-per-function -- Block overlay, unblock, and dialog stay with the rail.
-export const VisitorRail = ({ detail }: VisitorRailProps) => {
+export const VisitorRail = ({ detail, showHeader = true }: VisitorRailProps) => {
   const device = parseUserAgent(detail.visitor.user_agent)
   const assigned = detail.assigned_agent?.display_name ?? "Unassigned"
   const name = detail.visitor.name ?? "Unknown visitor"
@@ -284,6 +290,7 @@ export const VisitorRail = ({ detail }: VisitorRailProps) => {
       className="border-line bg-paper flex min-h-0 w-full flex-col overflow-hidden border-l lg:w-[320px] lg:shrink-0"
     >
       <VisitorRailHeader
+        visible={showHeader}
         name={name}
         siteName={detail.site_name}
         closed={detail.state === "closed"}

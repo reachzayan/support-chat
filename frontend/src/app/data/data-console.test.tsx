@@ -2,11 +2,14 @@ import { screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { beforeEach, describe, expect, test, vi } from "vitest"
 
+import { SelectionContext } from "@/components/search/workspace-route"
 import { renderWithProviders } from "@/test/render"
 
 import { DataConsole } from "./data-console"
 import { DataConsoleBody } from "./data-console-body"
 import type { SubmissionRow } from "./data-shared"
+
+const SEARCH_TARGET = { q: "alex@samplesite" }
 
 const DEFAULT_VISITOR = {
   ip: "203.0.113.4",
@@ -229,13 +232,14 @@ describe("data console filters", () => {
     expect(within(table).queryByText("Blair Diaz")).not.toBeInTheDocument()
   })
 
-  test("search by email substring keeps Alex", async () => {
+  test("a retained search URL filters submissions by email", async () => {
     stubSubmissions(MIXED_ROWS)
-    renderWithProviders(<DataConsole />)
+    renderWithProviders(
+      <SelectionContext.Provider value={SEARCH_TARGET}>
+        <DataConsole />
+      </SelectionContext.Provider>,
+    )
     const table = await screen.findByRole("table", { name: "Form submissions" })
-    await userEvent
-      .setup()
-      .type(screen.getByRole("searchbox", { name: "Search submissions" }), "alex@samplesite")
 
     expect(within(table).getByText("Alex Chen")).toBeInTheDocument()
     expect(within(table).queryByText("Blair Diaz")).not.toBeInTheDocument()

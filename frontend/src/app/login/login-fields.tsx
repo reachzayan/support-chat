@@ -1,11 +1,11 @@
 "use client"
 
-import { Eye, EyeOff } from "lucide-react"
 import type { ChangeEvent } from "react"
 
 import { Button } from "@/components/ui/button"
 import { FieldError } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
+import { StateIcon } from "@/components/ui/state-icon"
 
 const FIELD =
   "border-line bg-ice text-ink focus:border-steel focus:ring-steel h-12 rounded-lg border px-4 text-base font-normal shadow-none outline-none transition-[border-color,box-shadow] duration-200 ease-out focus:ring-2 dark:bg-ice-2"
@@ -117,7 +117,7 @@ const PasswordField = ({
         aria-pressed={showPassword}
         className="text-mute hover:text-ink absolute top-1/2 right-1.5 -translate-y-1/2 rounded-xl"
       >
-        {showPassword ? <EyeOff aria-hidden="true" /> : <Eye aria-hidden="true" />}
+        {showPassword ? <StateIcon name="eye-slash" /> : <StateIcon name="eye" />}
       </Button>
     </div>
     <FieldError id="login-password-error">{error}</FieldError>

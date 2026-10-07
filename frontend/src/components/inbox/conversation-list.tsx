@@ -3,14 +3,16 @@
 /* oxlint-disable react-perf/jsx-no-jsx-as-prop, react-perf/jsx-no-new-object-as-prop -- Row and filter items are short, per-item motion props that a shared component would not simplify. */
 
 import { cn } from "cn"
-import { Inbox as InboxIcon, Search } from "lucide-react"
+import { Inbox as InboxIcon } from "lucide-react"
 import { AnimatePresence, LayoutGroup, motion, useReducedMotion } from "motion/react"
-import { useCallback, useDeferredValue, useMemo, useState, type ChangeEvent } from "react"
+import { useCallback, useDeferredValue, useMemo } from "react"
 
 import { ResizableListPane } from "@/components/admin/pane-resize-handle"
 import { RetryError } from "@/components/admin/retry-error"
+import { useUnreadConversations } from "@/components/notifications/notifications-context"
+import { UnreadBadge } from "@/components/notifications/unread-badge"
+import { useSearchTarget } from "@/components/search/workspace-route"
 import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
 import { linkUnderlineClass } from "@/components/ui/link-button"
 import {
   Select,
@@ -167,7 +169,31 @@ const SiteChip = ({ name, reducedMotion }: { name: string; reducedMotion: boolea
   </motion.span>
 )
 
-const ConversationRow = ({ item, selected, showSite, onSelect }: RowProps) => {
+const rowBackground = (selected: boolean, unread: number) => {
+  if (selected) return "bg-ice-2"
+  return unread > 0 ? "bg-steel/8 hover:bg-steel/12" : "hover:bg-ice-2/70"
+}
+
+const ConversationUnreadIndicator = ({ count }: { count: number }) =>
+  count > 0 ? (
+    <span className="inline-flex shrink-0 items-center gap-1">
+      <span className="sr-only">{count} unread notifications</span>
+      <UnreadBadge count={count} />
+    </span>
+  ) : null
+
+const ConversationRow = (props: RowProps) => {
+  const unread = useUnreadConversations()?.[props.item.id] ?? 0
+  return <ConversationRowContent {...props} unread={unread} />
+}
+
+const ConversationRowContent = ({
+  item,
+  selected,
+  showSite,
+  onSelect,
+  unread,
+}: RowProps & { unread: number }) => {
   const handleSelect = useCallback(() => onSelect(item.id), [item.id, onSelect])
   const reducedMotion = Boolean(useReducedMotion())
   return (
@@ -185,9 +211,10 @@ const ConversationRow = ({ item, selected, showSite, onSelect }: RowProps) => {
         onClick={handleSelect}
         aria-current={selected ? "true" : undefined}
         whileTap={{ scale: 0.99 }}
-        className={`relative flex h-auto w-full items-start gap-3 rounded-lg px-3 py-3 text-left transition-colors duration-150 ease-out ${
-          selected ? "bg-ice-2" : "hover:bg-ice-2/70"
-        }`}
+        className={`relative flex h-auto w-full items-start gap-3 rounded-lg px-3 py-3 text-left transition-colors duration-150 ease-out ${rowBackground(
+          selected,
+          unread,
+        )}`}
       >
         {selected ? (
           <motion.span
@@ -206,6 +233,7 @@ const ConversationRow = ({ item, selected, showSite, onSelect }: RowProps) => {
         <span className="min-w-0 flex-1">
           <span className="flex items-baseline justify-between gap-2">
             <span className="text-ink truncate text-sm font-semibold">{item.visitor_display}</span>
+            <ConversationUnreadIndicator count={unread} />
             <time
               dateTime={item.last_message_at}
               className="text-mute shrink-0 font-mono text-[10px]"
@@ -218,7 +246,11 @@ const ConversationRow = ({ item, selected, showSite, onSelect }: RowProps) => {
               <SiteChip key="site-chip" name={item.site_name} reducedMotion={reducedMotion} />
             ) : null}
           </AnimatePresence>
-          <span className="text-ink line-clamp-2 text-xs leading-5">{item.preview}</span>
+          <span
+            className={`text-ink line-clamp-2 text-xs leading-5 ${unread > 0 ? "font-semibold" : ""}`}
+          >
+            {item.preview}
+          </span>
           <span aria-hidden="true" className={stateChipClass(item.state)}>
             <span className={`size-1.5 rounded-full ${stateDotClass(item.state)}`} />
             {stateLabel(item.state)}
@@ -244,7 +276,7 @@ export const ConversationList = ({
   onLoadMore,
   onRetryLoad,
 }: ConversationListProps) => {
-  const [query, setQuery] = useState("")
+  const query = useSearchTarget().q ?? ""
   const deferredQuery = useDeferredValue(query)
   const pane = usePaneWidth(INBOX_LIST_WIDTH_KEY, INBOX_LIST_DEFAULT_WIDTH)
   const handleLoadMoreClick = useCallback(() => {
@@ -252,9 +284,6 @@ export const ConversationList = ({
       onLoadMore(nextCursor)
     }
   }, [nextCursor, onLoadMore])
-  const handleSearch = useCallback((event: ChangeEvent<HTMLInputElement>) => {
-    setQuery(event.target.value)
-  }, [])
   const visibleItems = useMemo(() => {
     return items.filter((item) =>
       matchesSearchQuery(
@@ -270,7 +299,7 @@ export const ConversationList = ({
       dragging={pane.dragging}
       min={MIN_PANE_WIDTH}
       max={MAX_PANE_WIDTH}
-      className="border-line bg-paper flex min-h-0 w-full min-w-0 flex-col overflow-hidden border-r"
+      className="border-line bg-paper flex min-h-0 w-full min-w-0 flex-col overflow-hidden border-r max-xl:!w-full max-xl:flex-1 xl:max-w-[34%] max-xl:[&_.pane-resize]:hidden"
       onResizeStart={pane.handleResizeStart}
       onResizeKeyDown={pane.handleResizeKeyDown}
       onResizeReset={pane.handleResizeReset}
@@ -288,7 +317,6 @@ export const ConversationList = ({
         onFilter={onFilter}
         onSite={onSite}
         onSelect={onSelect}
-        onSearch={handleSearch}
         onLoadMore={handleLoadMoreClick}
         onRetryLoad={onRetryLoad}
       />
@@ -309,7 +337,6 @@ const ConversationListBody = ({
   onFilter,
   onSite,
   onSelect,
-  onSearch,
   onLoadMore,
   onRetryLoad,
 }: {
@@ -325,7 +352,6 @@ const ConversationListBody = ({
   onFilter: (filter: InboxFilter) => void
   onSite: (siteId: string | null) => void
   onSelect: (id: string) => void
-  onSearch: (event: ChangeEvent<HTMLInputElement>) => void
   onLoadMore: () => void
   onRetryLoad: () => void
 }) => {
@@ -335,22 +361,6 @@ const ConversationListBody = ({
         <h2 className="text-navy heading text-sm">Conversations</h2>
       </div>
       <div className="mx-4 mt-4 mb-3 inline-flex w-fit max-w-full flex-col gap-3 self-start">
-        <label htmlFor="conversation-search" className="relative block w-full min-w-0">
-          <span className="sr-only">Search chats</span>
-          <Search aria-hidden="true" className="text-mute absolute top-2.5 left-3 size-4" />
-          <Input
-            id="conversation-search"
-            name="query"
-            autoComplete="off"
-            spellCheck={false}
-            type="search"
-            size={1}
-            value={query}
-            onChange={onSearch}
-            placeholder="Search conversations"
-            className="border-line bg-ice-2/60 text-ink placeholder:text-mute focus-visible:ring-steel dark:bg-ice-2/60 h-10 w-full min-w-0 rounded-lg border pr-3 pl-9 text-sm outline-none focus-visible:ring-2"
-          />
-        </label>
         <InboxSiteNav sites={sites} siteId={siteId} onSite={onSite} />
         <InboxFilterNav filter={filter} counts={counts} onFilter={onFilter} />
       </div>
@@ -495,7 +505,7 @@ const InboxFilterButton = ({
       aria-label={item.label}
       aria-pressed={active}
       onClick={handleClick}
-      className={`relative flex h-8 shrink-0 items-center justify-center gap-1 rounded-full px-2 text-center text-[11px] leading-none font-bold whitespace-nowrap transition-colors duration-200 ease-out ${
+      className={`relative flex h-8 shrink-0 items-center justify-center gap-1 rounded-full px-2 text-center text-[11px] leading-none font-bold whitespace-nowrap transition-colors duration-200 ease-out max-xl:min-h-11 ${
         active ? "text-navy" : "text-mute hover:text-ink"
       }`}
     >
@@ -531,7 +541,7 @@ const InboxFilterNav = ({
     <LayoutGroup id="inbox-filters">
       <nav
         aria-label="Inbox filters"
-        className="border-line bg-ice-2/70 flex h-10 w-fit max-w-full [scrollbar-width:none] flex-nowrap items-center gap-0.5 overflow-x-auto rounded-full border p-1"
+        className="border-line bg-ice-2/70 flex h-10 w-fit max-w-full [scrollbar-width:none] flex-nowrap items-center gap-0.5 overflow-x-auto rounded-full border p-1 max-xl:h-13"
       >
         {INBOX_FILTERS.map((item) => (
           <InboxFilterButton

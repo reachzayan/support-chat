@@ -2,6 +2,7 @@
 
 import { useCallback, type Dispatch, type SetStateAction } from "react"
 
+import { updateInboxLink } from "./inbox-link"
 import { emptyLive, type InboxLive } from "./inbox-session"
 import type { SocketApi } from "./inbox-socket"
 import type { InboxFilter } from "./types"
@@ -17,6 +18,7 @@ export const useInboxActions = (
 ) => {
   const handleSelect = useCallback(
     (id: string) => {
+      updateInboxLink(id)
       if (refs.selectedRef.current === id && refs.liveRef.current.detail?.id === id) {
         return
       }
@@ -69,7 +71,11 @@ export const useInboxActions = (
     },
     [refs.filterRef, reloadList],
   )
+  const handleRetryDetail = useCallback(() => {
+    if (refs.selectedRef.current) reloadDetail(refs.selectedRef.current)
+  }, [refs.selectedRef, reloadDetail])
   return {
+    handleRetryDetail,
     handleSelect,
     handleJoin,
     handleMarkContacted,

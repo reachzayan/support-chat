@@ -4,12 +4,12 @@
 
 import { Dialog as DialogPrimitive } from "@base-ui/react/dialog"
 import { cn } from "cn"
-import { XIcon } from "lucide-react"
 import { motion, useReducedMotion, type HTMLMotionProps } from "motion/react"
 import * as React from "react"
 import { useLayoutEffect, useRef, useState } from "react"
 
 import { Button } from "@/components/ui/button"
+import { StateIcon } from "@/components/ui/state-icon"
 
 const DIALOG_RESIZE_TRANSITION = { duration: 0.2, ease: [0.23, 1, 0.32, 1] } as const
 const REDUCED_MOTION_TRANSITION = { duration: 0 } as const
@@ -71,7 +71,7 @@ const DialogContent = ({
                 />
               }
             >
-              <XIcon aria-hidden="true" />
+              <StateIcon name="x" />
             </DialogPrimitive.Close>
           ) : null}
         </DialogPrimitive.Popup>

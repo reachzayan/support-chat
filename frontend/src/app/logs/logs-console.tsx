@@ -5,6 +5,7 @@ import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react
 import { LogTableSkeleton } from "@/components/admin/loading-skeleton"
 import { staffRead } from "@/components/admin/staff-api"
 import { StaffHeader } from "@/components/admin/staff-nav"
+import { useSearchTarget } from "@/components/search/workspace-route"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
 
@@ -128,6 +129,7 @@ const LogsBody = ({
 )
 
 export const LogsConsole = ({ isAdmin, displayName }: LogsConsoleProps) => {
+  const target = useSearchTarget()
   const [items, setItems] = useState<AppLogRow[]>([])
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
@@ -138,13 +140,15 @@ export const LogsConsole = ({ isAdmin, displayName }: LogsConsoleProps) => {
     const load = async () => {
       setLoading(true)
       setError(null)
-      const response = await staffRead("/api/logs")
+      const response = await staffRead(
+        target.log ? `/api/logs/${encodeURIComponent(target.log)}` : "/api/logs",
+      ).catch(() => null)
       if (cancelled) {
         return
       }
-      if (!response.ok) {
+      if (!response?.ok) {
         setError(
-          response.status === 403
+          response?.status === 403
             ? "Only admins can view application logs."
             : "Could not load application logs.",
         )
@@ -152,15 +156,15 @@ export const LogsConsole = ({ isAdmin, displayName }: LogsConsoleProps) => {
         setLoading(false)
         return
       }
-      const body = (await response.json()) as { items: AppLogRow[] }
-      setItems(body.items)
+      const body = (await response.json()) as { items: AppLogRow[] } | AppLogRow
+      setItems("items" in body ? body.items : [body])
       setLoading(false)
     }
     void load()
     return () => {
       cancelled = true
     }
-  }, [])
+  }, [target.log])
 
   const handleDump = useCallback(() => {
     setDumping(true)

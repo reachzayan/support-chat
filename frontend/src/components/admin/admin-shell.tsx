@@ -3,24 +3,13 @@
 "use client"
 
 import { cn } from "cn"
-import {
-  Activity,
-  Ban,
-  BookOpen,
-  ChevronDown,
-  Globe2,
-  Inbox,
-  Lightbulb,
-  MessageSquareText,
-  ScrollText,
-  Table2,
-  type LucideIcon,
-} from "lucide-react"
+import { ChevronDown } from "lucide-react"
 import { motion } from "motion/react"
 import Link from "next/link"
 import { usePathname } from "next/navigation"
 import {
   createContext,
+  useCallback,
   useContext,
   useEffect,
   useState,
@@ -32,7 +21,14 @@ import { ClientErrorReporter } from "@/components/admin/client-error-reporter"
 import { StaffPageSkeleton } from "@/components/admin/loading-skeleton"
 import { SignOutButton } from "@/components/admin/sign-out-button"
 import { BrandMark } from "@/components/brand-mark"
+import { NotificationBell } from "@/components/notifications/notification-bell"
+import {
+  NotificationsProvider,
+  useNotificationState,
+} from "@/components/notifications/notifications-context"
+import { UnreadBadge } from "@/components/notifications/unread-badge"
 import { usePreferences } from "@/components/preferences-context"
+import { WorkspaceSearch } from "@/components/search/workspace-search"
 import { ThemeToggle } from "@/components/theme-toggle"
 import { Button } from "@/components/ui/button"
 import {
@@ -50,6 +46,7 @@ import {
   SidebarTrigger,
   useSidebar,
 } from "@/components/ui/sidebar"
+import { StateIcon, type StateIconName } from "@/components/ui/state-icon"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import {
   redirectToLogin,
@@ -75,19 +72,38 @@ export const useOptionalAdminUser = () => useContext(AdminUserContext)
 type AdminLink = {
   href: string
   label: string
-  icon: LucideIcon
+  icon: StateIconName
 }
 
-const workspaceLinks: AdminLink[] = [
-  { href: "/admin/inbox", label: "Inbox", icon: Inbox },
-  { href: "/admin/data", label: "Data", icon: Table2 },
-  { href: "/admin/knowledge", label: "Knowledge base", icon: BookOpen },
-  { href: "/admin/canned-responses", label: "Canned responses", icon: MessageSquareText },
-  { href: "/admin/suggested-faqs", label: "Suggested FAQs", icon: Lightbulb },
-  { href: "/admin/blocked", label: "Blocked", icon: Ban },
-  { href: "/admin/sites", label: "Sites", icon: Globe2 },
-  { href: "/admin/status", label: "Status", icon: Activity },
-  { href: "/admin/logs", label: "Logs", icon: ScrollText },
+const navigationGroups: { label: string; links: AdminLink[] }[] = [
+  {
+    label: "Conversations",
+    links: [
+      { href: "/admin/inbox", label: "Inbox", icon: "tray" },
+      { href: "/admin/data", label: "Data", icon: "table" },
+      { href: "/admin/blocked", label: "Blocked", icon: "prohibit" },
+    ],
+  },
+  {
+    label: "Knowledge",
+    links: [
+      { href: "/admin/knowledge", label: "Knowledge base", icon: "book-open" },
+      { href: "/admin/canned-responses", label: "Canned responses", icon: "chat-text" },
+      { href: "/admin/suggested-faqs", label: "Suggested FAQs", icon: "lightbulb" },
+    ],
+  },
+  {
+    label: "Administration",
+    links: [
+      { href: "/admin/sites", label: "Sites", icon: "globe" },
+      { href: "/admin/status", label: "Status", icon: "pulse" },
+      { href: "/admin/logs", label: "Logs", icon: "scroll" },
+    ],
+  },
+  {
+    label: "Preferences",
+    links: [{ href: "/admin/notifications", label: "Notification settings", icon: "bell" }],
+  },
 ]
 
 const initialsFor = (displayName: string) =>
@@ -118,65 +134,81 @@ const AvatarMark = ({ initials }: { initials: string }) => (
   </span>
 )
 
+const useInboxNav = (href: string, label: string) => {
+  const { feed } = useNotificationState()
+  const count = href === "/admin/inbox" ? (feed?.unread_count ?? 0) : 0
+  return { count, accessibleLabel: count > 0 ? `${label}, ${count} unread` : label }
+}
+
 const AdminSidebarLink = ({
   href,
   label,
-  icon: Icon,
+  icon,
   active,
   collapsed,
-}: AdminLink & { active: boolean; collapsed: boolean }) => (
-  <SidebarMenuItem className={cn("flex w-full", collapsed && "justify-center")}>
-    <SidebarMenuButton
-      isActive={active}
-      tooltip={label}
-      render={
-        <MotionLink
-          href={href}
-          aria-label={label}
-          whileTap={{ scale: 0.96 }}
-          className="cursor-pointer no-underline"
+}: AdminLink & { active: boolean; collapsed: boolean }) => {
+  const { count, accessibleLabel } = useInboxNav(href, label)
+  return (
+    <SidebarMenuItem className={cn("flex w-full", collapsed && "justify-center")}>
+      <SidebarMenuButton
+        isActive={active}
+        tooltip={label}
+        render={
+          <MotionLink
+            href={href}
+            aria-label={accessibleLabel}
+            aria-current={active ? "page" : undefined}
+            whileTap={{ scale: 0.96 }}
+            className="cursor-pointer no-underline"
+          />
+        }
+        className={cn(
+          "text-sidebar-foreground/60 data-active:text-sidebar-foreground relative isolate h-11 overflow-visible rounded-lg px-3 text-sm font-semibold no-underline transition-[width,height,padding,colors] duration-300 ease-[cubic-bezier(0.32,0.72,0,1)] hover:bg-white/4.5 hover:text-sidebar-foreground/90 data-active:hover:bg-transparent",
+          collapsed && "size-8! justify-center gap-0 p-0! hover:bg-transparent!",
+        )}
+      >
+        {active ? (
+          <motion.span
+            layoutId="admin-nav-active"
+            transition={NAV_SPRING}
+            aria-hidden="true"
+            className={cn(
+              "absolute inset-0 -z-10 rounded-lg",
+              collapsed
+                ? "bg-ember/15"
+                : "from-ember/20 via-ember/8 bg-linear-to-r to-transparent ring-1 ring-white/5",
+            )}
+          />
+        ) : null}
+        {active && !collapsed ? (
+          <span
+            aria-hidden="true"
+            className="bg-ember absolute top-2 bottom-2 left-0 -z-10 w-0.5 rounded-full"
+          />
+        ) : null}
+        <StateIcon name={icon} className="size-4.5" />
+        {!collapsed ? <span className="min-w-0 truncate">{label}</span> : null}
+        <UnreadBadge
+          count={count}
+          className={collapsed ? "ring-sidebar absolute -top-1 -right-1 ring-2" : "ml-auto"}
         />
-      }
-      className={cn(
-        "text-sidebar-foreground/60 data-active:text-sidebar-foreground relative isolate h-11 rounded-lg px-3 text-sm font-semibold no-underline transition-[width,height,padding,colors] duration-300 ease-[cubic-bezier(0.32,0.72,0,1)] hover:bg-white/4.5 hover:text-sidebar-foreground/90 data-active:hover:bg-transparent",
-        collapsed && "size-8! justify-center gap-0 p-0!",
-      )}
-    >
-      {active ? (
-        <motion.span
-          layoutId="admin-nav-active"
-          transition={NAV_SPRING}
-          aria-hidden="true"
-          className={cn(
-            "absolute inset-0 -z-10 rounded-lg",
-            collapsed
-              ? "bg-ember/15"
-              : "from-ember/20 via-ember/8 bg-linear-to-r to-transparent ring-1 ring-white/5",
-          )}
-        />
-      ) : null}
-      {active && !collapsed ? (
-        <span
-          aria-hidden="true"
-          className="bg-ember absolute top-2 bottom-2 left-0 -z-10 w-0.5 rounded-full"
-        />
-      ) : null}
-      <Icon aria-hidden="true" className="size-4.5 shrink-0" strokeWidth={1.8} />
-      {!collapsed ? <span className="min-w-0 truncate">{label}</span> : null}
-    </SidebarMenuButton>
-  </SidebarMenuItem>
-)
+      </SidebarMenuButton>
+    </SidebarMenuItem>
+  )
+}
 
 const AdminSidebarLinks = ({
   links,
   pathname,
   collapsed,
+  category,
 }: {
   links: AdminLink[]
   pathname: string
   collapsed: boolean
+  category: string
 }) => (
-  <SidebarMenu className={cn("w-full gap-1", collapsed && "items-center")}>
+  <SidebarMenu aria-label={category} className={cn("w-full gap-1", collapsed && "items-center")}>
     {links.map((link) => (
       <AdminSidebarLink
         key={link.href}
@@ -212,9 +244,10 @@ const AdminSidebarAccount = ({
               <Link
                 href="/admin/settings"
                 aria-label={accountLabel}
+                aria-current={active ? "page" : undefined}
                 data-active={active || undefined}
                 className={cn(
-                  "flex size-8 items-center justify-center rounded-lg no-underline outline-none transition-colors hover:bg-white/5 focus-visible:ring-2 focus-visible:ring-steel",
+                  "flex size-8 items-center justify-center rounded-lg no-underline outline-none transition-colors hover:text-white focus-visible:ring-2 focus-visible:ring-steel",
                   active && "bg-ember/15",
                 )}
               />
@@ -236,7 +269,13 @@ const AdminSidebarAccount = ({
         size="lg"
         tooltip={displayName}
         isActive={active}
-        render={<Link href="/admin/settings" aria-label={accountLabel} />}
+        render={
+          <Link
+            href="/admin/settings"
+            aria-label={accountLabel}
+            aria-current={active ? "page" : undefined}
+          />
+        }
         className="text-sidebar-foreground rounded-lg px-2 no-underline hover:bg-white/5"
       >
         <AvatarMark initials={initials} />
@@ -264,7 +303,7 @@ const adminSidebarStyle = {
 const AdminSidebarBrand = ({ collapsed }: { collapsed: boolean }) => (
   <SidebarHeader
     className={cn(
-      "flex h-14 shrink-0 flex-col justify-center px-3",
+      "flex h-(--workspace-toolbar-height) shrink-0 flex-col justify-center px-3",
       collapsed && "items-center px-0 py-2",
     )}
   >
@@ -276,7 +315,7 @@ const AdminSidebarBrand = ({ collapsed }: { collapsed: boolean }) => (
         collapsed ? "size-8 justify-center gap-0" : "w-full",
       )}
     >
-      <BrandMark size={28} className="size-7" />
+      <BrandMark size={32} className="size-8" />
       {!collapsed ? (
         <span className="heading min-w-0 truncate text-sm text-white">SupportChat</span>
       ) : null}
@@ -296,19 +335,13 @@ const AdminSidebarFooter = ({
   pathname: string
 }) => (
   <SidebarFooter className={cn("gap-2 p-3", collapsed && "items-center px-0 py-2")}>
-    <div
-      className={cn(
-        "flex items-center gap-1",
-        collapsed ? "flex-col" : "w-full justify-between px-0.5",
-      )}
-    >
-      <ThemeToggle compact />
-      <SidebarTrigger className="text-white/70 hover:bg-white/10 hover:text-white" />
+    <div className={cn("flex items-center", collapsed ? "justify-center" : "w-full px-0.5")}>
+      <ThemeToggle compact className="size-11 md:size-7" />
     </div>
     <SignOutButton
       iconOnly={collapsed}
       className={cn(
-        "text-white/70 hover:bg-white/10 hover:text-white",
+        "text-white/70 hover:text-white",
         collapsed ? "size-8 justify-center" : "w-full justify-start",
       )}
     />
@@ -325,8 +358,16 @@ const AdminSidebarFooter = ({
 
 const AdminSidebar = ({ displayName, isAdmin }: { displayName: string; isAdmin: boolean }) => {
   const pathname = usePathname()
-  const { state } = useSidebar()
-  const collapsed = state === "collapsed"
+  const { state, isMobile, setOpenMobile } = useSidebar()
+  const collapsed = !isMobile && state === "collapsed"
+  const closeOnNavigate = useCallback(
+    (event: React.MouseEvent<HTMLDivElement>) => {
+      if (isMobile && event.target instanceof Element && event.target.closest("a[href]")) {
+        setOpenMobile(false)
+      }
+    },
+    [isMobile, setOpenMobile],
+  )
 
   return (
     <Sidebar
@@ -334,14 +375,34 @@ const AdminSidebar = ({ displayName, isAdmin }: { displayName: string; isAdmin: 
       collapsible="icon"
       className="bg-sidebar border-r-0! border-transparent"
       style={adminSidebarStyle}
+      onClickCapture={closeOnNavigate}
     >
       <AdminSidebarBrand collapsed={collapsed} />
       <SidebarContent>
-        <SidebarGroup className={cn("px-3 pt-4 pb-2", collapsed && "items-center p-0 py-2")}>
-          <SidebarGroupContent className={cn(collapsed && "flex justify-center")}>
-            <AdminSidebarLinks links={workspaceLinks} pathname={pathname} collapsed={collapsed} />
-          </SidebarGroupContent>
-        </SidebarGroup>
+        {navigationGroups.map((group) => (
+          <SidebarGroup
+            key={group.label}
+            className={cn("px-3 pt-4 pb-1", collapsed && "items-center px-0 pt-3 pb-1")}
+          >
+            <span
+              aria-hidden="true"
+              className={cn(
+                "mb-1.5 px-3 text-[10px] font-medium tracking-wider text-sidebar-foreground/50",
+                collapsed && "sr-only",
+              )}
+            >
+              {group.label}
+            </span>
+            <SidebarGroupContent className={cn(collapsed && "flex justify-center")}>
+              <AdminSidebarLinks
+                links={group.links}
+                pathname={pathname}
+                collapsed={collapsed}
+                category={group.label}
+              />
+            </SidebarGroupContent>
+          </SidebarGroup>
+        ))}
       </SidebarContent>
       <AdminSidebarFooter
         collapsed={collapsed}
@@ -445,19 +506,65 @@ export const AdminShell = ({ children }: { children: ReactNode }) => {
           } as CSSProperties
         }
       >
-        <AdminSidebar
-          displayName={user?.display_name ?? "Loading workspace"}
-          isAdmin={user?.is_admin ?? false}
-        />
-        <SidebarInset className="flex h-svh min-h-0 min-w-0 flex-col overflow-hidden overscroll-none bg-[#14161b] p-2">
-          <AdminUserContext.Provider value={user}>
-            <div className="bg-ice flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden overscroll-none rounded-lg">
-              {checkingSession ? <StaffPageSkeleton /> : frame}
-            </div>
-          </AdminUserContext.Provider>
-        </SidebarInset>
+        <AuthenticatedNotifications user={user}>
+          <AdminSidebar
+            displayName={user?.display_name ?? "Loading workspace"}
+            isAdmin={user?.is_admin ?? false}
+          />
+          <SidebarInset className="flex h-dvh min-h-0 min-w-0 flex-col overflow-hidden overscroll-none bg-[#14161b] p-0 md:px-2 md:pb-2">
+            <AdminUserContext.Provider value={user}>
+              <WorkspaceToolbar userId={user?.id} />
+              <div className="bg-ice flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden overscroll-none md:rounded-lg">
+                {checkingSession ? <StaffPageSkeleton /> : frame}
+              </div>
+            </AdminUserContext.Provider>
+          </SidebarInset>
+        </AuthenticatedNotifications>
       </SidebarProvider>
     </>
+  )
+}
+
+const AuthenticatedNotifications = ({
+  user,
+  children,
+}: {
+  user: StaffUser | null
+  children: ReactNode
+}) => (
+  <NotificationsProvider key={user?.id ?? "signed-out"} enabled={user !== null}>
+    {children}
+  </NotificationsProvider>
+)
+
+const WorkspaceToolbar = ({ userId }: { userId: string | undefined }) => {
+  const { isMobile, openMobile, toggleSidebar } = useSidebar()
+  const user = useOptionalAdminUser()
+  return (
+    <header className="grid h-(--workspace-toolbar-height) shrink-0 grid-cols-[2.75rem_minmax(0,1fr)_2.75rem] items-center gap-2 text-white">
+      {isMobile ? (
+        <Button
+          variant="ghost"
+          size="icon"
+          aria-label="Open navigation"
+          aria-expanded={openMobile}
+          className="size-11 text-white hover:text-white aria-expanded:text-white"
+          onClick={toggleSidebar}
+        >
+          <StateIcon name="list" className="size-5" />
+        </Button>
+      ) : (
+        <SidebarTrigger className="size-11 text-white/85 hover:text-white aria-expanded:text-white" />
+      )}
+      {userId ? (
+        <div className="w-full max-w-2xl min-w-0 justify-self-center">
+          <WorkspaceSearch isAdmin={user?.is_admin ?? false} />
+        </div>
+      ) : (
+        <span className="heading flex-1 px-2 text-sm">SupportChat</span>
+      )}
+      {userId ? <NotificationBell key={userId} /> : null}
+    </header>
   )
 }
 
