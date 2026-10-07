@@ -2,6 +2,7 @@ from datetime import datetime
 from uuid import UUID, uuid4
 
 from sqlalchemy import (
+    BigInteger,
     Boolean,
     CheckConstraint,
     DateTime,
@@ -115,6 +116,8 @@ class Conversation(Base):
     assigned_agent_id: Mapped[UUID | None] = mapped_column(ForeignKey("users.id"), nullable=True)
     attention_needed: Mapped[bool] = mapped_column(Boolean, server_default=text("false"))
     escalation_reason: Mapped[str | None] = mapped_column(String, nullable=True)
+    handoff_wait_started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    handoff_wait_prompt_id: Mapped[int | None] = mapped_column(BigInteger)
     last_message_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )

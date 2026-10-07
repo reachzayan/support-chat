@@ -3,7 +3,7 @@ from functools import lru_cache
 from ipaddress import ip_network
 from urllib.parse import urlsplit
 
-from pydantic import field_validator, model_validator
+from pydantic import SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -89,6 +89,8 @@ class Settings(BaseSettings):
     app_env: AppEnvironment = AppEnvironment.LOCAL
     internal_eval_enabled: bool = False
     enable_background_workers: bool = True
+    push_vapid_private_key: SecretStr = SecretStr("")
+    push_vapid_subject: str = "mailto:notifications@supportchat.local"
     status_api_probe_url: str = "http://127.0.0.1:8000/health"
     chat_retention_days: int = 30
     rate_bootstrap: int = 60

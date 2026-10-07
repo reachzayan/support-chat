@@ -16,6 +16,8 @@ from app.models.kb_source import KbSource
 from app.models.knowledge_gap import KnowledgeGap, KnowledgeGapHit
 from app.models.message import Message
 from app.models.message_citation import MessageCitation
+from app.models.notification import Notification, NotificationPreference, NotificationPushPreference
+from app.models.push_subscription import PushDelivery, PushSubscription
 from app.models.refresh_token import RefreshToken
 from app.models.site import Site
 from app.models.status_sample import StatusSample
@@ -44,6 +46,11 @@ __all__ = [
     "KnowledgeGapHit",
     "Message",
     "MessageCitation",
+    "Notification",
+    "NotificationPreference",
+    "NotificationPushPreference",
+    "PushDelivery",
+    "PushSubscription",
     "RefreshToken",
     "Site",
     "StatusSample",

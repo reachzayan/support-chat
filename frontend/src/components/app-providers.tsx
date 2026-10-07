@@ -9,12 +9,18 @@ export const AppProviders = ({
   children,
   initialTheme,
   initialSidebarOpen,
+  initialNotificationSound,
 }: {
   children: ReactNode
   initialTheme?: Theme
   initialSidebarOpen?: boolean
+  initialNotificationSound?: boolean
 }) => (
-  <PreferencesProvider initialTheme={initialTheme} initialSidebarOpen={initialSidebarOpen}>
+  <PreferencesProvider
+    initialTheme={initialTheme}
+    initialSidebarOpen={initialSidebarOpen}
+    initialNotificationSound={initialNotificationSound}
+  >
     <Toaster>{children}</Toaster>
   </PreferencesProvider>
 )

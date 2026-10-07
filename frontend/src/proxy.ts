@@ -48,6 +48,8 @@ const clientIp = (request: NextRequest) => {
 }
 
 export const STAFF_PREFIXES = [
+  "/staff-push-sw.js",
+  "/manifest.webmanifest",
   "/admin",
   "/inbox",
   "/login",
@@ -56,6 +58,7 @@ export const STAFF_PREFIXES = [
   "/settings",
   "/auth",
   "/api/conversations",
+  "/api/notifications",
   "/api/sites",
   "/api/articles",
   "/api/canned-replies",
@@ -63,6 +66,7 @@ export const STAFF_PREFIXES = [
   "/api/kb-pages",
   "/api/kb-chunks",
   "/api/handoffs",
+  "/api/search",
   "/api/logs",
   "/api/status",
   "/api/knowledge-gaps",
@@ -102,6 +106,7 @@ export const staffDocumentCsp = (nonce: string, api = apiOrigin()) => {
     "default-src 'self'",
     `script-src 'self' 'nonce-${nonce}' 'strict-dynamic'`,
     "style-src 'self' 'unsafe-inline'",
+    "worker-src 'self'",
     "object-src 'none'",
     "base-uri 'self'",
     "form-action 'self'",

@@ -23,6 +23,7 @@ dependencies = [
     "tiktoken>=0.8.0",
     "crawl4ai==0.9.3",
     "defusedxml>=0.7.1",
+    "cryptography>=50.0.1",
 ]
 
 [dependency-groups]

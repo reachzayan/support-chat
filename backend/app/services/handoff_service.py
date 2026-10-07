@@ -18,6 +18,7 @@ from app.models.handoff_outcome import HANDOFF_OUTCOMES
 from app.repositories.conversation_repo import ConversationRepository
 from app.repositories.handoff_repo import HandoffRepository
 from app.repositories.message_repo import MessageRepository
+from app.repositories.notification_repo import NotificationRepository
 from app.repositories.site_repo import SiteRepository
 from app.services import handoff_summary
 from app.services.bot_trace import record_trace
@@ -92,9 +93,13 @@ class HandoffService:
         if site.human_enabled:
             route = "live_queue"
             conversation.attention_needed = True
+            conversation.handoff_wait_started_at = datetime.now(UTC)
+            conversation.handoff_wait_prompt_id = None
         else:
             route = "callback"
             conversation.attention_needed = True
+            conversation.handoff_wait_started_at = None
+            conversation.handoff_wait_prompt_id = None
             promised = datetime.now(UTC) + timedelta(hours=window)
 
         conversation.escalation_reason = trigger.reason
@@ -131,6 +136,12 @@ class HandoffService:
         )
         conversation.last_message_at = datetime.now(UTC)
         await self._session.flush()
+
+        await NotificationRepository(self._session).emit(
+            conversation,
+            "needs_attention",
+            f"handoff:{row.id}",
+        )
 
         log.info(
             "handoff_created",

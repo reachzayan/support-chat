@@ -114,6 +114,12 @@ export const refreshSession = async (): Promise<RefreshSessionResult> => {
 
 export const logout = async () => {
   try {
+    const { disablePush } = await import("./staff-push")
+    await disablePush()
+  } catch {
+    /* Signing out must complete even if device cleanup fails. */
+  }
+  try {
     await fetch("/auth/logout", {
       method: "POST",
       credentials: "include",

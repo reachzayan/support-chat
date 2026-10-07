@@ -280,7 +280,7 @@ async def _handle_visitor_frame(
     if frame_type == "older":
         await _handle_visitor_older(websocket, connection, frame)
         return
-    if frame_type in {"hello", "prechat", "message", "escalate"}:
+    if frame_type in {"hello", "prechat", "message", "escalate", "handoff_wait_response"}:
         await _run_visitor_command(websocket, connection, frame_type, frame)
         return
     await connection_manager.send_error(websocket, "unknown_type")
@@ -335,6 +335,8 @@ async def _deliver_visitor_result(
         )
     elif kind == "message" and result.message is not None and result.client_message_id:
         await connection_manager.send_ack(websocket, result.client_message_id, result.message.id)
+    elif kind == "handoff_wait_response":
+        await websocket.send_json({"v": 1, "type": "handoff_wait_accepted"})
     if result.generation_id is not None:
         task = asyncio.create_task(_shielded_bot_generation(websocket, result))
         _bot_generation_tasks.add(task)
@@ -462,4 +464,16 @@ async def _dispatch_visitor(
         )
     if kind == "escalate":
         return await service.escalate(conversation_id, visitor_id, parent_origin)
+    if kind == "handoff_wait_response":
+        prompt_id = frame.get("prompt_id")
+        choice = frame.get("choice")
+        if (
+            type(prompt_id) is not int
+            or not 1 <= prompt_id <= MAX_MESSAGE_ID
+            or choice not in ("wait", "end")
+        ):
+            raise CommandError("invalid")
+        return await service.respond_handoff_wait(
+            conversation_id, visitor_id, parent_origin, prompt_id, choice == "wait"
+        )
     raise ValueError(kind)

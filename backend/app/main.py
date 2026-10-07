@@ -14,6 +14,8 @@ from app.api.internal_dev import router as internal_dev_router
 from app.api.kb_sources import router as kb_sources_router
 from app.api.knowledge_gaps import router as knowledge_gaps_router
 from app.api.logs import router as logs_router
+from app.api.notifications import router as notifications_router
+from app.api.push_notifications import router as push_notifications_router
 from app.api.sites import router as sites_router
 from app.api.status import router as status_router
 from app.api.visitor_blocks import router as visitor_blocks_router
@@ -96,6 +98,8 @@ def create_app() -> FastAPI:
     application.include_router(kb_sources_router)
     application.include_router(knowledge_gaps_router)
     application.include_router(logs_router)
+    application.include_router(notifications_router)
+    application.include_router(push_notifications_router)
     application.include_router(status_router)
     application.include_router(visitor_ws_router)
     application.include_router(agent_ws_router)

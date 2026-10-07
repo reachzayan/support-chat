@@ -68,7 +68,9 @@ async def test_chat_stays_open_until_five_minutes_then_closes(migrated_db) -> No
         assert loaded.closed_at == START + FIVE_MIN
 
 
-async def test_queued_and_human_chats_close_on_the_same_ttl(migrated_db) -> None:
+async def test_handoff_waits_while_prechat_and_human_chats_close_on_the_idle_ttl(
+    migrated_db,
+) -> None:
     async with session_maker()() as session:
         easy, _bg, _timing, _fcra = await seed_brand_articles(session)
         queued_id = await _open_chat(session, easy, state="queued")
@@ -88,7 +90,13 @@ async def test_queued_and_human_chats_close_on_the_same_ttl(migrated_db) -> None
         await service.tick_idle(prechat_id, now=START + FIVE_MIN)
         await service.tick_idle(human_id, now=START + FIVE_MIN)
 
-    assert conversation_state(queued_id) == "closed"
+    assert conversation_state(queued_id) == "queued"
+    assert (
+        message_count(
+            queued_id, body="Our agents are all currently busy right now. Would you like to wait?"
+        )
+        == 1
+    )
     assert conversation_state(prechat_id) == "closed"
     assert conversation_state(human_id) == "closed"
 
@@ -303,13 +311,20 @@ async def test_expired_sweep_warns_at_four_minutes_without_closing(migrated_db) 
     assert message_count(conversation_id, body=IDLE_CLOSED) == 0
 
 
-async def test_queued_idle_close_persists_the_same_pills(migrated_db) -> None:
-    """Catches queued TTL closing without the visitor-visible warning and automatic-close lines."""
+async def test_queued_handoff_prompts_instead_of_persisting_idle_close_pills(migrated_db) -> None:
+    """A waiting visitor must choose to end their handoff."""
     async with session_maker()() as session:
         easy, _bg, _timing, _fcra = await seed_brand_articles(session)
         conversation_id = await _open_chat(session, easy, state="queued")
         await ConversationService(session).tick_idle(conversation_id, now=START + FIVE_MIN)
 
-    assert conversation_state(conversation_id) == "closed"
-    assert message_count(conversation_id, body=IDLE_WARNING) == 1
-    assert message_count(conversation_id, body=IDLE_CLOSED) == 1
+    assert conversation_state(conversation_id) == "queued"
+    assert message_count(conversation_id, body=IDLE_WARNING) == 0
+    assert message_count(conversation_id, body=IDLE_CLOSED) == 0
+    assert (
+        message_count(
+            conversation_id,
+            body="Our agents are all currently busy right now. Would you like to wait?",
+        )
+        == 1
+    )
