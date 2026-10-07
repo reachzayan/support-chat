@@ -6,7 +6,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Annotated, Any, Literal
 from uuid import UUID
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -96,6 +96,14 @@ async def dump_logs(session: SessionDep, _admin: CurrentAdmin) -> PlainTextRespo
         media_type="text/plain; charset=utf-8",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
+
+
+@router.get("/api/logs/{log_id}", response_model=AppLogOut)
+async def get_log(log_id: UUID, session: SessionDep, _admin: CurrentAdmin) -> AppLogOut:
+    row = await AppLogRepository(session).get(log_id)
+    if row is None or row.created_at < datetime.now(UTC) - timedelta(days=DEFAULT_RETENTION_DAYS):
+        raise HTTPException(status_code=404, detail="Not found")
+    return _to_out(row)
 
 
 @router.post("/api/logs/client", response_model=AppLogOut, status_code=201)
