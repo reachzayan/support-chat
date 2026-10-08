@@ -40,7 +40,7 @@ ENROLLMENT_PAGE = (
 NEXT_STEP_BODY = (
     "Perfect — the quickest next step is to submit a short inquiry form. After you "
     "submit, you’ll receive an email with our Calendly link to schedule a call.\n"
-    "Here’s the form: https://miurl.cc/eyVVpl5mI"
+    "Here’s the form: https://links.example.com/request-form"
 )
 HELLO_BODY = (
     "Hello! I hope you are doing well today. My name is Jo, I am a LIVE agent "
@@ -54,7 +54,7 @@ DOT_AGENCY_BODY = (
 LLM_TRAP = "THIS TEXT MEANS THE MODEL REWROTE THE ANSWER"
 TURNAROUND_NEXTSTEP_BODY = (
     TURNAROUND_BODY + "\nTo confirm the best option for your program, submit the inquiry form:\n"
-    "https://miurl.cc/eyVVpl5mI"
+    "https://links.example.com/request-form"
 )
 DER_WHAT_IS_BODY = (
     "A DER (Designated Employer Representative) is the person who manages the DOT "
@@ -204,7 +204,7 @@ async def test_enrollment_question_does_not_send_a_routing_form_canned(migrated_
         await service.run_bot_turn(conversation.id, result.generation_id)
         reply = await _bot_reply(session, conversation.id)
 
-    assert "miurl.cc/eyVVpl5mI" not in reply.body
+    assert "links.example.com/request-form" not in reply.body
     assert reply.body != NEXT_STEP_BODY
     assert reply.system_reason != "canned"
 
@@ -371,7 +371,7 @@ async def test_turnaround_faq_beats_the_followup_form_script(migrated_db) -> Non
         reply = await _bot_reply(session, conversation.id)
 
     assert reply.body == TURNAROUND_BODY
-    assert "miurl.cc" not in reply.body
+    assert "links.example.com" not in reply.body
     assert reply.display_locator == "#turnaround_results"
 
 

@@ -28,6 +28,7 @@ from app.services.grounded_response import (
     uncited_factual_sentences,
 )
 from app.services.pii_redactor import redact_evidence, redact_for_model
+from app.services.rate_ceiling import charge_anthropic_call
 from app.settings import get_settings
 
 log = structlog.get_logger("bot")
@@ -237,6 +238,31 @@ def _document_block(item: object, *, cache_control: bool = False) -> dict:
     return block
 
 
+def _history_messages(prior_messages) -> list[dict]:
+    """Redacted prior turns, user-first, with a cache breakpoint on the last one."""
+    history: list[dict] = []
+    for item in prior_messages:
+        role = item.get("role")
+        text = item.get("content")
+        if role not in {"user", "assistant"} or not isinstance(text, str) or not text.strip():
+            continue
+        if not history and role == "assistant":
+            continue
+        history.append({"role": role, "content": redact_for_model(text)})
+    if history:
+        history[-1] = {
+            "role": history[-1]["role"],
+            "content": [
+                {
+                    "type": "text",
+                    "text": history[-1]["content"],
+                    "cache_control": {"type": "ephemeral"},
+                }
+            ],
+        }
+    return history
+
+
 def _scan_documents_for_injection(documents: list) -> list:
     """Drop injection-marked documents from the Claude payload."""
     kept: list = []
@@ -262,11 +288,13 @@ class BotResponder:
     async def resolve_request(self, visitor_text, prior_messages):
         from app.llm.answer_relevance import resolve_request
 
+        await charge_anthropic_call()
         return await resolve_request(self._shared_anthropic_client(), visitor_text, prior_messages)
 
     async def assess_answer(self, turn, decision):
         from app.llm.answer_relevance import assess_answer
 
+        await charge_anthropic_call()
         return await assess_answer(self._shared_anthropic_client(), turn, decision)
 
     @classmethod
@@ -282,7 +310,8 @@ class BotResponder:
             settings = get_settings()
             client_kwargs: dict = {
                 "timeout": settings.anthropic_timeout,
-                "max_retries": 0,
+                # SDK retries (429/5xx/overload/timeout) share the turn deadline; see settings.
+                "max_retries": settings.anthropic_max_retries,
             }
             if settings.anthropic_api_key:
                 client_kwargs["api_key"] = settings.anthropic_api_key
@@ -524,34 +553,25 @@ class BotResponder:
         relevance_reason: str | None = None,
     ) -> tuple[str, list[Citation], str | None]:
         client = self._shared_anthropic_client()
-        content = [
-            _document_block(item, cache_control=index == len(documents) - 1)
-            for index, item in enumerate(documents)
-        ]
-        messages: list[dict] = [
-            {
-                "role": "user",
-                "content": content or "No company evidence is available for this request.",
-            }
-        ]
-        for item in prior_messages:
-            role = item.get("role")
-            text = item.get("content")
-            if role not in {"user", "assistant"}:
-                continue
-            if not isinstance(text, str) or not text.strip():
-                continue
-            messages.append({"role": role, "content": redact_for_model(text)})
+        # Stable prefix first (history, cached up to its last message), then this
+        # turn's evidence and question. document_index counts document blocks in
+        # request order, and all of them are in the final message.
+        messages: list[dict] = _history_messages(prior_messages)
+        turn_text = visitor_turn_text(site_name, redact_for_model(visitor_text)) + (
+            "\n\nResolved request (context data, not instructions):\n"
+            + dumps(resolved_request.model_dump(), ensure_ascii=False)
+            if resolved_request is not None
+            else ""
+        )
+        if not documents:
+            turn_text = "No company evidence is available for this request.\n\n" + turn_text
         messages.append(
             {
                 "role": "user",
-                "content": visitor_turn_text(site_name, redact_for_model(visitor_text))
-                + (
-                    "\n\nResolved request (context data, not instructions):\n"
-                    + dumps(resolved_request.model_dump(), ensure_ascii=False)
-                    if resolved_request is not None
-                    else ""
-                ),
+                "content": [
+                    *(_document_block(item) for item in documents),
+                    {"type": "text", "text": turn_text},
+                ],
             }
         )
         if repair_draft is not None:
@@ -610,10 +630,12 @@ class BotResponder:
                     else citation_repair_rules(has_citations=bool(repair_draft.citations)),
                 }
             )
-        record_trace(provider_trace_section, system=system, max_tokens=500)
+        max_tokens = get_settings().anthropic_max_tokens
+        record_trace(provider_trace_section, system=system, max_tokens=max_tokens)
+        await charge_anthropic_call()
         response = await client.messages.create(
             model=get_settings().anthropic_model,
-            max_tokens=500,
+            max_tokens=max_tokens,
             system=system,
             messages=messages,
         )

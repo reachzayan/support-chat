@@ -252,7 +252,7 @@ export const CannedScrollPane = ({
 }
 
 export const CannedResponsesSkeleton = () => (
-  <main className="flex flex-col gap-4 px-5 py-6 lg:px-8 lg:py-8">
+  <main className="flex flex-col gap-4 px-4 py-4 sm:px-5 sm:py-6 lg:px-8 lg:py-8">
     <Skeleton className="h-28 w-full rounded-xl" />
     <Skeleton className="h-56 w-full rounded-xl" />
   </main>

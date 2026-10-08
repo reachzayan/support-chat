@@ -2,7 +2,18 @@ import { createMessageTone, MESSAGE_TONE_URL } from "../src/lib/message-tone"
 import type { HostToWidget } from "../src/lib/postmessage"
 import { preferNativeSound, showSystemNotification } from "../src/lib/system-notification"
 import { requestBootstrap, type BootstrapAction, type BootstrapResult } from "./bootstrap"
-import { acceptWidgetFrame, createPanel, postToWidget, sendBootstrap, sendContext } from "./iframe"
+import {
+  acceptWidgetFrame,
+  createPanel,
+  createPlaceholder,
+  isSheetLayout,
+  postToWidget,
+  sendBootstrap,
+  sendContext,
+  SHEET_QUERY,
+  setHostScrollLock,
+  syncSheetViewport,
+} from "./iframe"
 import { hideHostError, mountLauncher, setLauncherUnread, showHostError } from "./launcher"
 import { watchNavigation } from "./navigation"
 import { originFromHref, originFromScript } from "./sanitize"
@@ -29,11 +40,14 @@ type Runtime = {
   bootstrapAcked: boolean
   retryTimer: ReturnType<typeof setTimeout> | null
   hideTimer: ReturnType<typeof setTimeout> | null
+  placeholder: HTMLElement | null
+  placeholderTimer: ReturnType<typeof setTimeout> | null
 }
 
 const BOOTSTRAP_RETRY_COUNT = 5
 const BOOTSTRAP_RETRY_MS = 100
 const PANEL_MOTION_MS = 300
+const PLACEHOLDER_TIMEOUT_MS = 20000
 
 const reducedMotionDelay = (win: Window) => {
   try {
@@ -63,6 +77,32 @@ const clearHideTimer = (runtime: Runtime) => {
 
 const setLauncherBusy = (runtime: Runtime, busy: boolean) => {
   runtime.launcher.setAttribute("aria-busy", busy ? "true" : "false")
+}
+
+const hidePlaceholder = (runtime: Runtime) => {
+  if (runtime.placeholderTimer !== null) {
+    clearTimeout(runtime.placeholderTimer)
+    runtime.placeholderTimer = null
+  }
+  if (runtime.placeholder !== null) {
+    runtime.placeholder.hidden = true
+  }
+}
+
+// Shows the skeleton immediately; falls back to the launcher if the widget never paints.
+const showPlaceholder = (runtime: Runtime) => {
+  if (runtime.placeholder === null) {
+    runtime.placeholder = createPlaceholder(runtime.doc)
+  }
+  hidePlaceholder(runtime)
+  runtime.placeholder.hidden = false
+  setHostScrollLock(runtime.doc, isSheetLayout(runtime.win))
+  runtime.placeholderTimer = setTimeout(() => abortPlaceholder(runtime), PLACEHOLDER_TIMEOUT_MS)
+}
+
+const abortPlaceholder = (runtime: Runtime) => {
+  hidePlaceholder(runtime)
+  setHostScrollLock(runtime.doc, false)
 }
 
 const bootstrapFrame = (runtime: Runtime) => {
@@ -108,8 +148,16 @@ const sendBootstrapWithRetry = (runtime: Runtime) => {
   tick()
 }
 
+const sendLayout = (runtime: Runtime) => {
+  postToWidget(panelState(runtime), {
+    type: "host.layout",
+    fullscreen: isSheetLayout(runtime.win),
+  })
+}
+
 const hidePanel = (runtime: Runtime) => {
   clearHideTimer(runtime)
+  setHostScrollLock(runtime.doc, false)
   setLauncherBusy(runtime, false)
   if (runtime.iframe !== null) {
     runtime.iframe.style.opacity = "0"
@@ -132,7 +180,10 @@ const showPanel = (runtime: Runtime) => {
   setLauncherUnread(runtime.launcher, 0)
   clearHideTimer(runtime)
   setLauncherBusy(runtime, false)
+  setHostScrollLock(runtime.doc, isSheetLayout(runtime.win))
+  hidePlaceholder(runtime)
   if (runtime.iframe !== null) {
+    syncSheetViewport(runtime.win, runtime.iframe)
     runtime.iframe.hidden = false
     runtime.iframe.style.pointerEvents = "auto"
     runtime.win.requestAnimationFrame(() => {
@@ -210,6 +261,7 @@ const handleHostMessage = (runtime: Runtime, event: MessageEvent) => {
   acceptWidgetFrame(panelState(runtime), event, {
     onReady: () => {
       postToWidget(panelState(runtime), { type: "host.sound", enabled: runtime.soundEnabled })
+      sendLayout(runtime)
       sendBootstrapWithRetry(runtime)
     },
     onMessage: (_chatId, messageId) => {
@@ -283,6 +335,7 @@ const runBootstrap = async (runtime: Runtime, options: BootstrapAction = {}) => 
   runtime.opening = false
   if (result === null) {
     setLauncherBusy(runtime, false)
+    abortPlaceholder(runtime)
     showHostError(runtime.doc, () => {
       void runBootstrap(runtime)
     })
@@ -308,6 +361,7 @@ const handleOpen = (runtime: Runtime) => {
     return
   }
   setLauncherBusy(runtime, true)
+  showPlaceholder(runtime)
   warmPanel(runtime)
   void runBootstrap(runtime)
 }
@@ -320,6 +374,28 @@ const preconnectWidget = (doc: Document, widgetOrigin: string) => {
   link.rel = "preconnect"
   link.setAttribute("href", widgetOrigin)
   doc.head.appendChild(link)
+}
+
+const watchSheetLayout = (runtime: Runtime) => {
+  const { win } = runtime
+  const relayout = () => {
+    syncSheetViewport(win, runtime.iframe)
+    if (runtime.iframe !== null && !runtime.iframe.hidden) {
+      setHostScrollLock(runtime.doc, isSheetLayout(win))
+    }
+    sendLayout(runtime)
+  }
+  try {
+    win.matchMedia(SHEET_QUERY).addEventListener("change", relayout)
+  } catch {
+    /* matchMedia is optional; the stylesheet still applies the layout. */
+  }
+  const viewport = win.visualViewport
+  if (viewport !== null && viewport !== undefined) {
+    const follow = () => syncSheetViewport(win, runtime.iframe)
+    viewport.addEventListener("resize", follow)
+    viewport.addEventListener("scroll", follow)
+  }
 }
 
 export const installSupportChat = (win: Window, doc: Document, script: HTMLScriptElement | null) => {
@@ -364,11 +440,14 @@ export const installSupportChat = (win: Window, doc: Document, script: HTMLScrip
     bootstrapAcked: false,
     retryTimer: null,
     hideTimer: null,
+    placeholder: null,
+    placeholderTimer: null,
   }
   runtime.launcher = mountLauncher(doc, () => handleOpen(runtime), widgetOrigin)
   runtime.launcher.addEventListener("pointerenter", () => warmPanel(runtime))
   runtime.launcher.addEventListener("focus", () => warmPanel(runtime))
   win.addEventListener("message", (event: MessageEvent) => handleHostMessage(runtime, event))
+  watchSheetLayout(runtime)
   watchNavigation(win, () => {
     sendContext(panelState(runtime), win, doc)
   })

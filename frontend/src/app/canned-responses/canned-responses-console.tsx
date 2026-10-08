@@ -105,7 +105,7 @@ export const CannedResponsesConsole = () => {
       />
       <main
         id="main-content"
-        className="flex min-h-0 min-w-0 flex-1 flex-col gap-4 overflow-hidden px-5 py-6 lg:px-8 lg:py-8"
+        className="flex min-h-0 min-w-0 flex-1 flex-col gap-4 overflow-hidden px-4 py-4 sm:px-5 sm:py-6 lg:px-8 lg:py-8"
       >
         <section className="border-line bg-paper shrink-0 rounded-xl border p-4 sm:p-5">
           <div className="grid gap-3 lg:grid-cols-[minmax(15rem,1fr)_10rem_11rem]">

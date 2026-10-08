@@ -1,5 +1,7 @@
 "use client"
 
+/* oxlint-disable react-perf/jsx-no-jsx-as-prop, react-perf/jsx-no-new-array-as-prop -- Card fields and actions are built per record. */
+
 import { ArrowDown, ArrowUp } from "lucide-react"
 import {
   useCallback,
@@ -19,6 +21,7 @@ import { staffWrite } from "@/components/admin/staff-api"
 import { useSearchTarget } from "@/components/search/workspace-route"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import { RecordCard, RecordCardList, type RecordField } from "@/components/ui/record-cards"
 import { Spinner } from "@/components/ui/spinner"
 import {
   Table,
@@ -28,6 +31,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
+import { useIsMobile } from "@/hooks/use-mobile"
 import { cn } from "@/lib/utils"
 
 import { useDataColumnWidths } from "./data-column-widths"
@@ -50,6 +54,8 @@ import {
   type ColumnLabel,
   type SubmissionRow,
 } from "./data-shared"
+
+const STICKY_COLUMN: ColumnLabel = "Name"
 
 type BlockState = { blocked: boolean; blockId: string | null }
 
@@ -103,7 +109,10 @@ const DataColumnHeader = ({
     <TableHead
       scope="col"
       aria-sort={sortable ? ariaSort : undefined}
-      className="text-ink bg-ice-2 sticky top-0 z-10 px-4 py-3 text-[10px] font-semibold tracking-[0.12em] uppercase"
+      className={cn(
+        "text-ink bg-ice-2 sticky top-0 z-10 px-3 py-2 text-[10px] font-semibold tracking-[0.12em] uppercase",
+        label === STICKY_COLUMN && "left-0 z-20 shadow-[1px_0_0_var(--line)]",
+      )}
     >
       {sortable ? (
         <Button
@@ -160,6 +169,110 @@ const SortIndicator = ({
   </span>
 )
 
+const cardFields = (row: SubmissionRow): RecordField[] => {
+  const fields: RecordField[] = [
+    { label: "Email", value: blank(row.visitor.email), wide: true },
+    { label: "Phone", value: blank(row.visitor.phone) },
+    { label: "Assigned", value: blank(row.assigned_agent?.display_name) },
+    { label: "Inquiry", value: blank(row.inquiry_type) },
+    { label: "Intent", value: blank(row.intent) },
+    { label: "Opening message", value: blank(row.opening_message), wide: true },
+    { label: "Last message", value: formatWhen(row.last_message_at), wide: true },
+  ]
+  if (row.attention_needed) {
+    fields.unshift({ label: "Attention", value: "Needs attention", wide: true })
+  }
+  return fields
+}
+
+const SubmissionCard = ({
+  row,
+  unblocking,
+  onTranscript,
+  onBlock,
+  onUnblock,
+}: {
+  row: SubmissionRow
+  unblocking: boolean
+  onTranscript: (id: string) => void
+  onBlock: (row: SubmissionRow) => void
+  onUnblock: (row: SubmissionRow) => void
+}) => {
+  const handleClick = useCallback(() => onTranscript(row.id), [onTranscript, row.id])
+  const handleAction = useCallback(() => {
+    if (row.blocked) {
+      void onUnblock(row)
+      return
+    }
+    onBlock(row)
+  }, [onBlock, onUnblock, row])
+  const visitorName = blank(row.visitor.name)
+  return (
+    <RecordCard
+      eyebrow={row.site_name}
+      title={visitorName}
+      badge={<Badge className={stateClass(row.state)}>{STATE_LABEL[row.state] ?? row.state}</Badge>}
+      fields={cardFields(row)}
+      actions={
+        <>
+          <Button
+            type="button"
+            variant="outline"
+            onClick={handleClick}
+            aria-label={`Transcript for ${visitorName}`}
+          >
+            Transcript
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            onClick={handleAction}
+            disabled={unblocking}
+            aria-label={row.blocked ? `Unblock ${visitorName}` : `Block ${visitorName}`}
+          >
+            {unblocking ? <Spinner data-icon="inline-start" /> : null}
+            {row.blocked ? "Unblock" : "Block"}
+          </Button>
+        </>
+      }
+    />
+  )
+}
+
+const SubmissionCards = ({
+  empty,
+  emptyMessage,
+  rows,
+  pendingUnblockId,
+  onTranscript,
+  onBlock,
+  onUnblock,
+}: {
+  empty: boolean
+  emptyMessage: string
+  rows: SubmissionRow[]
+  pendingUnblockId: string | null
+  onTranscript: (id: string) => void
+  onBlock: (row: SubmissionRow) => void
+  onUnblock: (row: SubmissionRow) => Promise<void>
+}) =>
+  empty ? (
+    <p className="text-mute px-4 py-10 text-center text-sm">{emptyMessage}</p>
+  ) : (
+    <RecordCardList label="Form submissions">
+      {rows.map((row) => (
+        <SubmissionCard
+          key={row.id}
+          row={row}
+          unblocking={pendingUnblockId === row.id}
+          onTranscript={onTranscript}
+          onBlock={onBlock}
+          onUnblock={onUnblock}
+        />
+      ))}
+    </RecordCardList>
+  )
+
 const SubmissionRowView = ({
   row,
   unblocking,
@@ -184,14 +297,18 @@ const SubmissionRowView = ({
   const visitorName = blank(row.visitor.name)
   const actionLabel = row.blocked ? `Unblock ${visitorName}` : `Block ${visitorName}`
   return (
-    <TableRow className="odd:bg-paper even:bg-ice-2/60">
-      <Cell>{blank(row.visitor.name)}</Cell>
+    <TableRow className="odd:bg-paper even:bg-ice-2">
+      <Cell sticky strong>
+        {blank(row.visitor.name)}
+      </Cell>
       <Cell>{blank(row.visitor.email)}</Cell>
       <Cell>{blank(row.visitor.phone)}</Cell>
       <Cell>{blank(row.inquiry_type)}</Cell>
       <Cell>{blank(row.intent)}</Cell>
-      <TableCell className="px-4 py-3">
-        <Badge className={stateClass(row.state)}>{STATE_LABEL[row.state] ?? row.state}</Badge>
+      <TableCell className="px-3 py-2">
+        <Badge className={`${stateClass(row.state)} whitespace-nowrap`}>
+          {STATE_LABEL[row.state] ?? row.state}
+        </Badge>
       </TableCell>
       <Cell>{row.site_name}</Cell>
       <Cell mono>{row.site_key}</Cell>
@@ -210,25 +327,25 @@ const SubmissionRowView = ({
       <Cell>{formatWhen(row.created_at)}</Cell>
       <Cell>{formatWhen(row.last_message_at)}</Cell>
       <Cell>{formatWhen(row.closed_at)}</Cell>
-      <TableCell className="px-4 py-3">
+      <TableCell className="px-3 py-1.5">
         <Button
           type="button"
           variant="ghost"
           onClick={handleClick}
           aria-label={`Transcript for ${visitorName}`}
-          className="border-line text-navy hover:bg-ice focus-visible:ring-steel cursor-pointer border px-3 py-1.5 text-xs font-bold focus-visible:ring-2 focus-visible:outline-none"
+          className={ROW_BUTTON}
         >
           Transcript
         </Button>
       </TableCell>
-      <TableCell className="px-4 py-3">
+      <TableCell className="px-3 py-1.5">
         <Button
           type="button"
           variant="ghost"
           onClick={handleAction}
           disabled={unblocking}
           aria-label={actionLabel}
-          className="border-line text-navy hover:bg-ice focus-visible:ring-steel cursor-pointer border px-3 py-1.5 text-xs font-bold focus-visible:ring-2 focus-visible:outline-none"
+          className={ROW_BUTTON}
         >
           {unblocking ? <Spinner data-icon="inline-start" /> : null}
           {row.blocked ? "Unblock" : "Block"}
@@ -238,10 +355,28 @@ const SubmissionRowView = ({
   )
 }
 
-const Cell = ({ children, mono = false }: { children: string; mono?: boolean }) => (
+const ROW_BUTTON =
+  "border-line text-navy hover:bg-ice focus-visible:ring-steel h-7 cursor-pointer border px-2.5 text-xs font-bold focus-visible:ring-2 focus-visible:outline-none"
+
+const Cell = ({
+  children,
+  mono = false,
+  sticky = false,
+  strong = false,
+}: {
+  children: string
+  mono?: boolean
+  sticky?: boolean
+  strong?: boolean
+}) => (
   <TableCell
     title={children === "—" ? undefined : children}
-    className={`text-ink overflow-hidden px-4 py-3 text-xs wrap-break-word ${mono ? "font-mono" : ""}`}
+    className={cn(
+      "text-ink overflow-hidden px-3 py-2 text-xs text-ellipsis whitespace-nowrap",
+      mono && "font-mono",
+      strong && "text-navy font-semibold",
+      sticky && "sticky left-0 z-[1] bg-inherit shadow-[1px_0_0_var(--line)]",
+    )}
   >
     {children}
   </TableCell>
@@ -359,11 +494,12 @@ export const SubmissionsTable = ({
       aria-label="Form submissions"
       className="border-line bg-paper flex min-h-0 flex-1 flex-col overflow-hidden rounded-lg border"
     >
-      <div className="border-line flex shrink-0 flex-col gap-4 border-b px-5 py-4">
+      <div className="border-line flex shrink-0 flex-col gap-3 border-b px-4 py-3 sm:px-5 sm:py-4">
         <div className="flex items-baseline justify-between gap-3">
           <h2 className="text-navy heading text-sm">Submissions</h2>
           <p className="text-mute text-xs">
             {visibleAll.length} of {rows.length} loaded
+            <span className="hidden md:inline"> · scroll sideways for more columns</span>
           </p>
         </div>
         <DataFilterBar rows={rows} filters={filters} onFilters={handleFilters} />
@@ -420,24 +556,12 @@ type SubmissionsTableGridProps = {
   pendingUnblockId: string | null
 }
 
-const SubmissionsTableGrid = ({
-  tableStyle,
-  colStyles,
-  widthsApi,
-  visibleRows,
-  empty,
-  emptyMessage,
-  sort,
+const useLoadMoreObserver = ({
   hasMore,
   loadMoreError,
   loadingMore,
-  onSort,
   onLoadMore,
-  onTranscript,
-  onBlock,
-  onUnblock,
-  pendingUnblockId,
-}: SubmissionsTableGridProps) => {
+}: Pick<SubmissionsTableGridProps, "hasMore" | "loadMoreError" | "loadingMore" | "onLoadMore">) => {
   const scrollRef = useRef<HTMLDivElement>(null)
   const loadTriggerRef = useRef<HTMLDivElement>(null)
 
@@ -465,21 +589,93 @@ const SubmissionsTableGrid = ({
     observer.observe(trigger)
     return () => observer.disconnect()
   }, [hasMore, loadMoreError, loadingMore, onLoadMore])
+  return { scrollRef, loadTriggerRef }
+}
+
+const SubmissionsDesktopTable = ({
+  tableStyle,
+  colStyles,
+  widthsApi,
+  visibleRows,
+  empty,
+  emptyMessage,
+  sort,
+  onSort,
+  onTranscript,
+  onBlock,
+  onUnblock,
+  pendingUnblockId,
+}: Pick<
+  SubmissionsTableGridProps,
+  | "tableStyle"
+  | "colStyles"
+  | "widthsApi"
+  | "visibleRows"
+  | "empty"
+  | "emptyMessage"
+  | "sort"
+  | "onSort"
+  | "onTranscript"
+  | "onBlock"
+  | "onUnblock"
+  | "pendingUnblockId"
+>) => (
+  <Table
+    aria-label="Form submissions"
+    className="table-fixed border-collapse text-left"
+    style={tableStyle}
+  >
+    <colgroup>
+      {colStyles.map((col) => (
+        <col key={col.key} style={col.style} />
+      ))}
+    </colgroup>
+    <SubmissionTableHeader sort={sort} widthsApi={widthsApi} onSort={onSort} />
+    <SubmissionTableBody
+      empty={empty}
+      emptyMessage={emptyMessage}
+      rows={visibleRows}
+      pendingUnblockId={pendingUnblockId}
+      onTranscript={onTranscript}
+      onBlock={onBlock}
+      onUnblock={onUnblock}
+    />
+  </Table>
+)
+
+const SubmissionsTableGrid = ({
+  tableStyle,
+  colStyles,
+  widthsApi,
+  visibleRows,
+  empty,
+  emptyMessage,
+  sort,
+  hasMore,
+  loadMoreError,
+  loadingMore,
+  onSort,
+  onLoadMore,
+  onTranscript,
+  onBlock,
+  onUnblock,
+  pendingUnblockId,
+}: SubmissionsTableGridProps) => {
+  const isMobile = useIsMobile()
+  const { scrollRef, loadTriggerRef } = useLoadMoreObserver({
+    hasMore,
+    loadMoreError,
+    loadingMore,
+    onLoadMore,
+  })
 
   return (
-    <div ref={scrollRef} className="min-h-0 flex-1 overflow-x-scroll overflow-y-auto">
-      <Table
-        aria-label="Form submissions"
-        className="table-fixed border-collapse text-left"
-        style={tableStyle}
-      >
-        <colgroup>
-          {colStyles.map((col) => (
-            <col key={col.key} style={col.style} />
-          ))}
-        </colgroup>
-        <SubmissionTableHeader sort={sort} widthsApi={widthsApi} onSort={onSort} />
-        <SubmissionTableBody
+    <div
+      ref={scrollRef}
+      className={cn("min-h-0 flex-1 overflow-y-auto", !isMobile && "overflow-x-scroll")}
+    >
+      {isMobile ? (
+        <SubmissionCards
           empty={empty}
           emptyMessage={emptyMessage}
           rows={visibleRows}
@@ -488,7 +684,22 @@ const SubmissionsTableGrid = ({
           onBlock={onBlock}
           onUnblock={onUnblock}
         />
-      </Table>
+      ) : (
+        <SubmissionsDesktopTable
+          tableStyle={tableStyle}
+          colStyles={colStyles}
+          widthsApi={widthsApi}
+          visibleRows={visibleRows}
+          empty={empty}
+          emptyMessage={emptyMessage}
+          sort={sort}
+          onSort={onSort}
+          onTranscript={onTranscript}
+          onBlock={onBlock}
+          onUnblock={onUnblock}
+          pendingUnblockId={pendingUnblockId}
+        />
+      )}
       <InfiniteLoadStatus
         triggerRef={loadTriggerRef}
         hasMore={hasMore}

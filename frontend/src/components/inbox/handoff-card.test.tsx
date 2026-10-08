@@ -47,6 +47,17 @@ beforeEach(() => {
 })
 
 describe("handoff card density", () => {
+  test("shows a human label instead of the raw reason code", async () => {
+    staffFetch.mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ ...openHandoff, escalation_reason: "visitor_request" }),
+    })
+    renderWithProviders(<HandoffCard conversationId={CONVO_ID} isAdmin={false} />)
+    expect(await screen.findByText("Visitor asked for a specialist")).toBeInTheDocument()
+    expect(screen.queryByText("visitor_request")).not.toBeInTheDocument()
+  })
+
   test("keeps stage timings collapsed so the transcript column stays usable", async () => {
     const user = userEvent.setup()
     staffFetch.mockResolvedValue({

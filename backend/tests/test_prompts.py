@@ -19,7 +19,7 @@ def test_system_rules_redirect_off_topic_using_site_scope() -> None:
     assert PRODUCTS_CLARIFY not in easy
     assert PRODUCTS_CLARIFY in other
     assert SCREENING_CLARIFY not in other
-    assert "use the name that appears in the evidence" in other.casefold()
+    assert "name used in the evidence" in other.casefold()
     assert "contact details" in other.casefold()
 
 
@@ -36,3 +36,23 @@ def test_samplesite_keeps_its_real_brand_in_the_prompt() -> None:
     rules = system_rules_for("SampleSite")
     assert "speaking for SampleSite" in rules
     assert "Brand: SampleSite" in visitor_turn_text("SampleSite", "How fast are results?")
+
+
+def test_prompts_keep_limitation_openers_and_staff_marker() -> None:
+    from app.llm.answer_relevance import ASSESS_RULES, RESOLVE_RULES
+    from app.services.full_context import STAFF_MARKER
+
+    rules = system_rules_for("SampleSite")
+    for opener in (
+        "I cannot confirm",
+        "I cannot guarantee",
+        "A specialist needs to confirm",
+        "No puedo confirmar",
+        "No puedo garantizar",
+        "Un especialista debe confirmar",
+        "I have not booked an appointment",
+        "No he reservado ninguna cita",
+    ):
+        assert opener in rules
+    for text in (rules, RESOLVE_RULES, ASSESS_RULES):
+        assert STAFF_MARKER in text

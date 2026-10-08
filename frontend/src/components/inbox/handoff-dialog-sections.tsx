@@ -5,7 +5,7 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 
-import { formatHandoffWhen } from "./handoff-utils"
+import { formatHandoffWhen, handoffReasonLabel } from "./handoff-utils"
 
 export const HandoffDialogMeta = ({
   handoff,
@@ -17,8 +17,11 @@ export const HandoffDialogMeta = ({
   routeLabel: string
 }) => (
   <div className="mt-2 flex flex-wrap items-center gap-2">
-    <Badge className={reasonClass} aria-label={`Escalation reason: ${handoff.escalation_reason}`}>
-      {handoff.escalation_reason}
+    <Badge
+      className={`${reasonClass} tracking-normal normal-case`}
+      aria-label={`Escalation reason: ${handoffReasonLabel(handoff.escalation_reason)}`}
+    >
+      {handoffReasonLabel(handoff.escalation_reason)}
     </Badge>
     <Badge className="bg-ice-2 text-navy tracking-normal normal-case">{routeLabel}</Badge>
     <span className="text-mute text-xs">{formatHandoffWhen(handoff.created_at)}</span>

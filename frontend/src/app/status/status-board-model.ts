@@ -66,6 +66,9 @@ export type StatusSnapshot = {
   incidents: StatusIncident[]
 }
 
+export type Health = "ok" | "degraded" | "down"
+export type MonitorHealth = { health: Health; label: string; note: string }
+
 export const SERVICE_ORDER = ["api", "postgres", "redis", "worker"] as const
 
 export const serviceLabel = (key: (typeof SERVICE_ORDER)[number]) => {
@@ -304,4 +307,31 @@ export const latencySparkPath = (hours: (number | null)[]) => {
   const points = sparkCoords(series)
   const line = sparkLine(points)
   return { line, area: sparkArea(line, points) }
+}
+
+const RECENT_DAYS = 1
+
+const degradedRecently = (monitor: StatusMonitor) =>
+  monitor.availability_30d.slice(-RECENT_DAYS).includes("degraded")
+
+/** Current health plus a short note when the 30-day tape shows trouble. */
+export const monitorHealth = (monitor: StatusMonitor): MonitorHealth => {
+  if (monitor.state === "down") {
+    return { health: "down", label: "Down", note: "" }
+  }
+  if (monitor.state === "silent") {
+    return { health: "degraded", label: "No signal", note: "" }
+  }
+  const degradedDays = monitor.availability_30d.filter((day) => day === "degraded").length
+  if (degradedRecently(monitor)) {
+    return { health: "degraded", label: "Degraded", note: "" }
+  }
+  return {
+    health: "ok",
+    label: "Operational",
+    note:
+      degradedDays > 0
+        ? `${degradedDays} degraded ${degradedDays === 1 ? "day" : "days"} in 30d`
+        : "",
+  }
 }

@@ -13,6 +13,26 @@ export const REASON_STYLES: Record<string, string> = {
   individual_case: "bg-steel/15 text-steel",
 }
 
+const REASON_LABELS: Record<string, string> = {
+  visitor_request: "Visitor asked for a specialist",
+  sensitive: "Sensitive topic",
+  individual_case: "Individual case",
+  retrieval_miss: "No matching answer found",
+  sufficiency_fail: "Answer not sufficient",
+  provider_timeout: "Assistant timed out",
+  repeated_miss: "Repeated unanswered questions",
+  policy_boundary: "Outside policy boundary",
+  rate_ceiling: "Usage limit reached",
+  off_topic: "Off topic",
+}
+
+export const handoffReasonLabel = (reason: string) => {
+  const known = REASON_LABELS[reason]
+  if (known) return known
+  const words = reason.trim().replace(/[_-]+/g, " ").toLowerCase()
+  return words ? words.charAt(0).toUpperCase() + words.slice(1) : "Unknown reason"
+}
+
 export const formatHandoffWhen = (value: string | null) => {
   if (!value) {
     return null

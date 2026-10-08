@@ -15,6 +15,7 @@ import structlog
 
 from app.chat.outcome_copy import (
     TECH_FAIL_HUMAN,
+    TECH_FAIL_SOLO,
     abuse_boundary_line,
     clarify_scope_line,
     injection_boundary_line,
@@ -55,12 +56,15 @@ log = structlog.get_logger("grounded_response")
 
 _FRUSTRATION_RE = re.compile(r"\b(dumb|useless|stupid|idiot|not helpful|waste of time)\b", re.I)
 _SOURCE_FOLLOWUP_RE = re.compile(
-    r"which page|what page|which source|"
+    r"which (?:page|url|source|link) (?:is|was|did) (?:that|this|it)\b|"
+    r"which (?:page|url|source|link) (?:is )?(?:that|this) (?:from|on)\b|"
+    r"what(?:'s| is| was) (?:the|your) (?:source|url)\b|"
+    r"what (?:page|url|source|link) (?:is|was) (?:that|this|it)\b|"
     r"where did (?:that|this) come from|"
-    r"where did you get (?:that|this|those)|"
-    r"quote (?:the source|the exact sentence|that sentence|the sentence)|cite (?:your|the) source|"
-    r"cite the url|"
-    r"list (?:every|all) pages?|which url|what url",
+    r"where did you (?:get|find|read) (?:that|this|those|it)|"
+    r"quote (?:the source|the exact sentence|that sentence|the sentence)|"
+    r"cite (?:your|the) (?:sources?|url)|"
+    r"list (?:every|all) (?:the )?(?:pages?|sources?) (?:you|used|that)",
     re.I,
 )
 _SUBSTANTIVE_REQUEST_RE = re.compile(
@@ -81,12 +85,17 @@ def _eligible(units: list[EvidenceUnit]) -> list[EvidenceUnit]:
     ]
 
 
-def _safe_sensitive_handoff() -> ResponseDecision:
+def _safe_sensitive_handoff(*, human_enabled: bool = True) -> ResponseDecision:
+    body = (
+        "For privacy and compliance, a specialist needs to help with that question."
+        if human_enabled
+        else "For privacy and compliance, I can't help with that question in chat."
+    )
     return ResponseDecision(
         ResponseOutcome.BOUNDARY,
         "policy_sensitive",
-        "For privacy and compliance, a specialist needs to help with that question.",
-        offer_handoff=True,
+        body,
+        offer_handoff=human_enabled,
     )
 
 
@@ -115,7 +124,8 @@ def history_recap_decision(
 ) -> ResponseDecision | None:
     request = " ".join((visitor_text or "").casefold().split())
     if not re.search(
-        r"(?:remind me|what did i (?:say|tell you)|what .*i originally (?:said|described))",
+        r"(?:remind me (?:of )?what i\b|what did i (?:say|tell you|originally)|"
+        r"what .*\bi originally (?:said|described)|what i (?:said|told you|described))",
         request,
     ):
         return None
@@ -172,7 +182,9 @@ def source_followup_decision(citations: list[Citation]) -> ResponseDecision:
     )
 
 
-def _safe_no_evidence(prior_miss_count: int, site_name: str = "") -> ResponseDecision:
+def _safe_no_evidence(
+    prior_miss_count: int, site_name: str = "", *, human_enabled: bool = True
+) -> ResponseDecision:
     if prior_miss_count <= 0:
         # Without any qualifying passage we cannot establish business scope.
         # Do not assert a product knowledge gap for an unrelated question.
@@ -184,27 +196,27 @@ def _safe_no_evidence(prior_miss_count: int, site_name: str = "") -> ResponseDec
     return ResponseDecision(
         ResponseOutcome.KNOWLEDGE_GAP,
         "repeated_miss",
-        transfer_offer_line(human_enabled=True),
+        transfer_offer_line(human_enabled=human_enabled),
         offer_handoff=True,
     )
 
 
 def _safe_technical_failure(
-    reason: str = "tech_fail", *, request_id: str | None = None
+    reason: str = "tech_fail", *, request_id: str | None = None, human_enabled: bool = True
 ) -> ResponseDecision:
     log.info("grounded_tech_fail", reason=reason)
     return ResponseDecision(
         ResponseOutcome.KNOWLEDGE_GAP,
         "tech_fail",
-        TECH_FAIL_HUMAN,
-        offer_handoff=True,
+        TECH_FAIL_HUMAN if human_enabled else TECH_FAIL_SOLO,
+        offer_handoff=human_enabled,
         provider_status=ProviderStatus.TECH_FAIL,
         request_id=request_id,
     )
 
 
 def _safe_grounding_reject(
-    *, prior_miss_count: int = 0, request_id: str | None = None
+    *, prior_miss_count: int = 0, request_id: str | None = None, human_enabled: bool = True
 ) -> ResponseDecision:
     """Visitor-safe copy when the provider succeeded but draft validation failed.
 
@@ -214,7 +226,8 @@ def _safe_grounding_reject(
         return ResponseDecision(
             ResponseOutcome.KNOWLEDGE_GAP,
             "grounding_reject",
-            "I couldn't verify an accurate answer to that question. A specialist can help.",
+            "I couldn't verify an accurate answer to that question."
+            + (" A specialist can help." if human_enabled else ""),
             offer_handoff=False,
             provider_status=ProviderStatus.OK,
             request_id=request_id,
@@ -222,7 +235,7 @@ def _safe_grounding_reject(
     return ResponseDecision(
         ResponseOutcome.KNOWLEDGE_GAP,
         "repeated_miss",
-        transfer_offer_line(human_enabled=True),
+        transfer_offer_line(human_enabled=human_enabled),
         offer_handoff=True,
         provider_status=ProviderStatus.OK,
         request_id=request_id,
@@ -244,7 +257,7 @@ class GroundedResponseEngine:
         """Hard-control cases decided before any answer, canned or generated, is considered."""
         question = (turn.visitor_text or "").strip()
         if turn.sensitive:
-            return _safe_sensitive_handoff()
+            return _safe_sensitive_handoff(human_enabled=turn.human_enabled)
         if turn.explicit_human_request:
             return _direct_handoff()
         if contains_injection_marker(question) or is_disengage_request(question):
@@ -255,7 +268,9 @@ class GroundedResponseEngine:
             if set(tokenize(question)) & ABUSE_TOKENS:
                 return self._boundary("abuse", turn.site_name)
             if _FRUSTRATION_RE.search(question):
-                return self._boundary("frustration", turn.site_name)
+                return self._boundary(
+                    "frustration", turn.site_name, human_enabled=turn.human_enabled
+                )
         if _UNRELATED_TASK_RE.search(question):
             return ResponseDecision(
                 ResponseOutcome.BOUNDARY, "off_topic", clarify_scope_line(turn.site_name)
@@ -273,16 +288,24 @@ class GroundedResponseEngine:
             return boundary
         evidence = _eligible(turn.evidence)
         if not evidence and turn.resolved_request is None:
-            return _safe_no_evidence(_same_kind_miss_count(turn, "no_evidence"), turn.site_name)
+            return _safe_no_evidence(
+                _same_kind_miss_count(turn, "no_evidence"),
+                turn.site_name,
+                human_enabled=turn.human_enabled,
+            )
 
         if self._complete is None:
-            return _safe_technical_failure(reason="provider_unavailable")
+            return _safe_technical_failure(
+                reason="provider_unavailable", human_enabled=turn.human_enabled
+            )
         try:
             draft = await self._complete(turn, evidence)
         except Exception:
-            return _safe_technical_failure(reason="provider_exception")
+            return _safe_technical_failure(
+                reason="provider_exception", human_enabled=turn.human_enabled
+            )
         if draft is None or not draft.body.strip():
-            return _safe_technical_failure(reason="empty_draft")
+            return _safe_technical_failure(reason="empty_draft", human_enabled=turn.human_enabled)
         if turn.resolved_request is not None:
             original_count = len(draft.citations)
             focused = focus_unknown_contact(draft, evidence)
@@ -342,6 +365,7 @@ class GroundedResponseEngine:
             return _safe_grounding_reject(
                 prior_miss_count=_same_kind_miss_count(turn, "grounding_reject"),
                 request_id=draft.request_id,
+                human_enabled=turn.human_enabled,
             )
         if _is_canned_clarify(validation.draft.body, turn.site_name):
             return ResponseDecision(
@@ -389,9 +413,9 @@ class GroundedResponseEngine:
             body = validation.draft.body
             asked_transfer = bool(re.search(r"would you like (?:me to )?connect you\b", body, re.I))
             repeated = _same_kind_miss_count(turn, "needs_confirmation") > 0
-            offer = asked_transfer or repeated
+            offer = repeated or (asked_transfer and turn.human_enabled)
             if repeated and not asked_transfer:
-                body += "\n\n" + transfer_offer_line(human_enabled=True)
+                body += "\n\n" + transfer_offer_line(human_enabled=turn.human_enabled)
             return ResponseDecision(
                 ResponseOutcome.PARTIAL_ANSWER
                 if validation.draft.citations
@@ -419,12 +443,12 @@ class GroundedResponseEngine:
         )
 
     @staticmethod
-    def _boundary(reason: str, site_name: str = "") -> ResponseDecision:
+    def _boundary(
+        reason: str, site_name: str = "", *, human_enabled: bool = True
+    ) -> ResponseDecision:
         if reason == "frustration":
-            body = (
-                "I’m sorry—that wasn’t helpful. Tell me what you need confirmed, "
-                "or I can connect you with a specialist."
-            )
+            body = "I’m sorry—that wasn’t helpful. Tell me what you need confirmed"
+            body += ", or I can connect you with a specialist." if human_enabled else "."
         elif reason == "abuse":
             body = abuse_boundary_line(site_name)
         elif reason == "prompt_injection":
@@ -435,5 +459,5 @@ class GroundedResponseEngine:
             ResponseOutcome.BOUNDARY,
             reason,
             body,
-            offer_handoff=reason == "frustration",
+            offer_handoff=reason == "frustration" and human_enabled,
         )

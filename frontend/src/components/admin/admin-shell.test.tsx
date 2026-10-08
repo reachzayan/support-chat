@@ -313,6 +313,29 @@ describe("mobile admin navigation", () => {
       Object.defineProperty(window, "innerWidth", { configurable: true, value: originalWidth })
     }
   })
+  test("the navigation toggle names its state and the drawer labels the theme switch", async () => {
+    const originalWidth = window.innerWidth
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: 390 })
+    try {
+      const user = userEvent.setup()
+      renderWithProviders(
+        <AdminShell>
+          <div>Inbox view</div>
+        </AdminShell>,
+      )
+      await screen.findByText("Inbox view")
+      const toggle = screen.getByRole("button", { name: "Open navigation" })
+      expect(toggle).toHaveAttribute("aria-expanded", "false")
+      await user.click(toggle)
+      const drawer = await screen.findByRole("dialog")
+      const closeToggle = screen.getByRole("button", { name: "Close navigation", hidden: true })
+      expect(closeToggle).toHaveAttribute("aria-expanded", "true")
+      const theme = within(drawer).getByRole("button", { name: "Switch to dark mode" })
+      expect(theme).toHaveTextContent("Switch to dark mode")
+    } finally {
+      Object.defineProperty(window, "innerWidth", { configurable: true, value: originalWidth })
+    }
+  })
   test("mobile navigation opens outside the drawer and closes after choosing a page", async () => {
     const originalWidth = window.innerWidth
     Object.defineProperty(window, "innerWidth", { configurable: true, value: 390 })

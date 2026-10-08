@@ -35,6 +35,16 @@ const API_REWRITES = [
   "/api/visitor-blocks",
   "/api/visitor-blocks/:path*",
 ].map(toApi)
+// Short console paths that redirect to /admin/* the same way /inbox and /knowledge do.
+const LEGACY_CONSOLE_PATHS = [
+  "data",
+  "status",
+  "logs",
+  "blocked",
+  "canned-responses",
+  "suggested-faqs",
+  "notifications",
+]
 // Staff CSP (nonce + strict-dynamic) is applied per-request in src/proxy.ts.
 
 const nextConfig: NextConfig = {
@@ -69,6 +79,10 @@ const nextConfig: NextConfig = {
       { source: "/knowledge/:path*", destination: "/admin/knowledge/:path*", permanent: true },
       { source: "/settings", destination: "/admin/settings", permanent: true },
       { source: "/settings/:path*", destination: "/admin/settings/:path*", permanent: true },
+      ...LEGACY_CONSOLE_PATHS.flatMap((segment) => [
+        { source: `/${segment}`, destination: `/admin/${segment}`, permanent: true },
+        { source: `/${segment}/:path*`, destination: `/admin/${segment}/:path*`, permanent: true },
+      ]),
     ]
   },
   async rewrites() {

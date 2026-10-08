@@ -66,7 +66,7 @@ export const SourceHoverCard = ({
           <Button
             type="button"
             variant="outline"
-            className="border-line bg-paper text-ink hover:bg-ice-2 focus-visible:outline-steel h-auto min-h-0 w-full min-w-0 flex-col items-start justify-start gap-0.5 rounded-xl px-3 py-2.5 text-left leading-5 font-normal whitespace-normal"
+            className="border-line bg-paper text-ink hover:bg-ice-2 focus-visible:outline-steel h-auto min-h-11 w-full min-w-0 flex-col items-start justify-start gap-0.5 rounded-xl px-3 py-2.5 text-left leading-5 font-normal whitespace-normal"
             aria-describedby={describedBy}
             aria-label={`${label}: ${title}`}
             onClick={handleOpen}

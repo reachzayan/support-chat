@@ -94,9 +94,7 @@ export const DetailPane = ({
         />
       ) : (
         <p className="text-mute px-5 py-8 text-sm">
-          {hasSource
-            ? "Select a page to inspect retrieved answers."
-            : "Add a source to get started."}
+          {hasSource ? "Select a page to inspect retrieved answers." : ""}
         </p>
       )}
     </ScrollArea>

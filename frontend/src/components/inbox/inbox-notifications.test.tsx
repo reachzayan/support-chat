@@ -108,7 +108,7 @@ test("filter unread counts follow the website selection without reading other we
   renderInbox()
   await screen.findByRole("button", { name: "Needs Attention, 3 unread" })
   await user.click(screen.getByRole("combobox", { name: "Inbox" }))
-  await user.click(screen.getByRole("option", { name: "SampleSite 1" }))
+  await user.click(await screen.findByRole("option", { name: "SampleSite 1" }))
   expect(screen.getByRole("button", { name: "Needs Attention, 2 unread" })).toBeInTheDocument()
   expect(screen.getByRole("button", { name: "Notifications, 3 unread" })).toBeInTheDocument()
 })

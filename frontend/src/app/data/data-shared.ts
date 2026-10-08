@@ -80,14 +80,14 @@ export const EXPORT_COLUMNS = COLUMNS.filter(
 
 export const DEFAULT_WIDTHS: Record<ColumnLabel, number> = {
   Name: 148,
-  Email: 188,
+  Email: 240,
   Phone: 120,
   Inquiry: 104,
   Intent: 104,
-  State: 100,
+  State: 144,
   Site: 140,
   "Site key": 112,
-  "Opening message": 220,
+  "Opening message": 260,
   "Page title": 160,
   "Page URL": 220,
   Referrer: 180,

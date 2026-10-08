@@ -195,13 +195,8 @@ async def test_grounded_draft_redacts_visitor_text_before_provider(
         )
 
     messages = captured.get("messages") or []
-    assert [message["role"] for message in messages] == [
-        "user",
-        "user",
-        "assistant",
-        "user",
-    ]
-    assert isinstance(messages[0]["content"], list)
+    assert [message["role"] for message in messages] == ["user", "assistant", "user"]
+    assert isinstance(messages[-1]["content"], list)
     serialized = str(messages)
     assert PRIOR_VISITOR_LINE not in serialized
     assert "ada@example.com" not in serialized

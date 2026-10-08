@@ -85,12 +85,13 @@ const TranscriptHeader = ({
 )
 
 const toolbarButtonBase =
-  "focus-visible:ring-steel inline-flex h-9 max-xl:min-h-11 items-center gap-1.5 px-3 text-xs sm:px-3.5 sm:text-[13px] font-bold leading-none focus-visible:ring-2 focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-60"
+  "focus-visible:ring-steel inline-flex shrink-0 h-9 max-xl:min-h-11 items-center gap-1.5 px-3 text-xs sm:px-3.5 sm:text-[13px] font-bold leading-none focus-visible:ring-2 focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-60"
 
 const JoinButton = ({
   joinPending,
   onJoin,
-}: Pick<TranscriptColumnProps, "joinPending" | "onJoin">) => (
+  block = false,
+}: Pick<TranscriptColumnProps, "joinPending" | "onJoin"> & { block?: boolean }) => (
   <MotionButton
     type="button"
     variant="default"
@@ -99,7 +100,7 @@ const JoinButton = ({
     disabled={joinPending}
     onClick={onJoin}
     whileTap={TAP_SCALE}
-    className={`${toolbarButtonBase} shadow-[0_2px_8px_rgba(196,85,22,0.25)]`}
+    className={`${toolbarButtonBase} shadow-[0_2px_8px_rgba(196,85,22,0.25)] ${block ? "min-h-11 w-full justify-center text-sm" : ""}`}
   >
     {joinPending ? (
       <Spinner data-icon="inline-start" />
@@ -173,9 +174,15 @@ const TranscriptActions = (
     | "onMarkContacted"
     | "onEnd"
     | "onTransfer"
-  >,
+  > & { compact: boolean },
 ) => (
-  <div className="flex w-full max-w-full shrink-0 flex-wrap items-center justify-end gap-2 empty:hidden xl:w-auto">
+  <div
+    className={`flex w-full max-w-full shrink-0 items-center gap-2 empty:hidden xl:w-auto xl:flex-wrap xl:justify-end ${
+      props.compact
+        ? "[scrollbar-width:none] flex-nowrap justify-start overflow-x-auto overscroll-x-contain"
+        : "flex-wrap justify-end"
+    }`}
+  >
     <HotGapBadge key={props.conversationId} conversationId={props.conversationId} />
     {props.escalationReason ? (
       <HandoffCard
@@ -184,7 +191,9 @@ const TranscriptActions = (
         isAdmin={props.isAdmin}
       />
     ) : null}
-    {props.showJoin ? <JoinButton joinPending={props.joinPending} onJoin={props.onJoin} /> : null}
+    {props.showJoin && !props.compact ? (
+      <JoinButton joinPending={props.joinPending} onJoin={props.onJoin} />
+    ) : null}
     {props.showMarkContacted ? (
       <MarkContactedButton onMarkContacted={props.onMarkContacted} />
     ) : null}
@@ -241,7 +250,7 @@ const TranscriptToolbar = (props: TranscriptColumnProps) => (
         <StateIcon name="info" className="size-5" />
       </Button>
     ) : null}
-    <TranscriptActions {...props} />
+    <TranscriptActions {...props} compact={Boolean(props.onBack)} />
   </div>
 )
 
@@ -299,6 +308,11 @@ export const TranscriptColumn = (props: TranscriptColumnProps) => {
         <p className="text-mute shrink-0 px-4 pt-2 text-xs">
           Callback. Mark contacted when you have reached this visitor.
         </p>
+      ) : null}
+      {props.showJoin && props.onBack ? (
+        <div className="border-line bg-paper shrink-0 border-t px-3 pt-3">
+          <JoinButton block joinPending={props.joinPending} onJoin={props.onJoin} />
+        </div>
       ) : null}
       <AgentComposer
         disabled={!composerEnabled || closed}

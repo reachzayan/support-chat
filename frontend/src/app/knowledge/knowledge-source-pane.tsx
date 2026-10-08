@@ -120,11 +120,7 @@ const SourcePaneBody = ({
       <span className="text-mute text-xs font-semibold">{sources.length} connected</span>
     </div>
     {sources.length === 0 ? (
-      <div className="flex flex-1 items-center justify-center px-6 py-12 text-center">
-        <p className="text-ink heading text-sm">
-          Add a website or trusted text this site should answer from.
-        </p>
-      </div>
+      <div className="flex-1" aria-hidden="true" />
     ) : (
       <>
         <ScrollArea className="min-h-0 flex-1">

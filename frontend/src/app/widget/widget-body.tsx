@@ -8,6 +8,7 @@ import type { PublicWidgetConfig } from "@/lib/postmessage"
 
 import { ChatStatus } from "./chat-status"
 import { Composer } from "./composer"
+import { CTA_BUTTON } from "./cta-button"
 import { openUrlOnHost } from "./host-bridge"
 import { PrechatForm, type PrechatFields } from "./prechat-form"
 import { isCenteredNotice, isClosedNotice, Transcript } from "./transcript"
@@ -53,6 +54,8 @@ const transcriptNotice = (
   return undefined
 }
 
+const isBotReplying = (state: string, view: ChatView) => state === "bot" && view.typing
+
 const ClosedFooter = ({
   contactInfo,
   onRestart,
@@ -79,13 +82,7 @@ const ClosedFooter = ({
         </div>
       ) : null}
     </section>
-    <Button
-      type="button"
-      variant="secondary"
-      size="lg"
-      onClick={onRestart}
-      className="border-steel/15 bg-ice-2 text-navy hover:!text-navy focus-visible:ring-steel/30 min-h-11 w-full border px-4 text-sm leading-none font-bold shadow-[0_8px_20px_rgba(36,86,160,0.12)] hover:!bg-[#e6eefc] focus-visible:ring-4"
-    >
+    <Button type="button" variant="default" size="lg" onClick={onRestart} className={CTA_BUTTON}>
       Start a new chat
     </Button>
   </div>
@@ -103,14 +100,14 @@ const PrivacyBanner = ({
   }, [privacyUrl])
 
   return (
-    <div className="widget-enter mx-3 mb-2 flex items-start gap-3 rounded-[20px] border border-white/80 bg-white/76 p-3.5 shadow-[0_10px_24px_rgba(13,31,58,0.10)] backdrop-blur-xl">
+    <div className="widget-enter mx-3 mb-2 flex items-start gap-2 rounded-[20px] border border-white/80 bg-white/76 p-3.5 shadow-[0_10px_24px_rgba(13,31,58,0.10)] backdrop-blur-xl">
       <p className="text-mute min-w-0 flex-1 text-xs leading-5">
         By chatting here, you agree that we and authorized partners may process and monitor this
         conversation in line with our{" "}
         <Button
           type="button"
           variant="link"
-          className="text-steel cursor-pointer font-bold"
+          className="text-steel inline h-auto min-h-0 cursor-pointer p-0 align-baseline font-bold underline-offset-2"
           onClick={handleOpenPrivacy}
         >
           Privacy notice
@@ -123,7 +120,7 @@ const PrivacyBanner = ({
         size="icon"
         aria-label="Dismiss privacy notice"
         onClick={onDismiss}
-        className="text-mute text-ink focus-visible:ring-steel flex size-8 shrink-0 items-center justify-center rounded-full focus-visible:ring-2 focus-visible:outline-none"
+        className="text-mute text-ink focus-visible:ring-steel flex size-11 shrink-0 items-center justify-center rounded-full focus-visible:ring-2 focus-visible:outline-none"
       >
         <StateIcon name="x" />
       </Button>
@@ -141,7 +138,14 @@ const OlderMessagesButton = ({
   onLoad: () => void
 }) =>
   visible ? (
-    <Button type="button" variant="ghost" size="sm" disabled={loading} onClick={onLoad}>
+    <Button
+      type="button"
+      variant="ghost"
+      size="sm"
+      disabled={loading}
+      onClick={onLoad}
+      className="min-h-11 text-xs"
+    >
       {loading ? "Loading older messages…" : "Load older messages"}
     </Button>
   ) : null
@@ -244,17 +248,34 @@ const ActiveChat = ({
           {privacyVisible ? (
             <PrivacyBanner privacyUrl={config.privacy_url} onDismiss={onDismissPrivacy} />
           ) : null}
-          <Composer disabled={false} sending={sending} onSend={onSend} />
+          <Composer
+            disabled={false}
+            sending={sending}
+            replying={isBotReplying(state, view)}
+            sendError={view.sendError}
+            onSend={onSend}
+          />
         </>
       )}
     </>
   )
 }
 
+const ConnectingState = () => (
+  <output aria-live="polite" className="flex min-h-0 flex-1 flex-col gap-3 px-5 py-4">
+    <p className="text-mute text-sm font-medium">Connecting…</p>
+    <div aria-hidden="true" className="flex flex-col gap-3">
+      <div className="skeleton-shimmer bg-ice-2 h-11 rounded-lg" />
+      <div className="skeleton-shimmer bg-ice-2 h-11 w-4/5 rounded-lg" />
+      <div className="skeleton-shimmer bg-ice-2 h-11 w-3/5 rounded-lg" />
+    </div>
+  </output>
+)
+
 export const WidgetBody = (props: WidgetBodyProps) => {
   const state = props.view.conversation
   if (state === null) {
-    return <p className="text-mute p-4 text-sm">Connecting…</p>
+    return <ConnectingState />
   }
   if (state === "prechat") {
     return (

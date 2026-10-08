@@ -71,8 +71,6 @@ CONTACT_PHRASES = (
     "reach you",
     "reach out to you",
     "call you",
-    "phone number",
-    "email address",
     "your email",
     "your phone",
     "your number",
@@ -96,32 +94,44 @@ INTENT_TERMS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("fcra", ("fcra",)),
     ("portal", ("portal",)),
 )
-SSN_RE = re.compile(r"\b\d{3}-\d{2}-\d{4}\b|\b\d{9}\b")
+SSN_RE = re.compile(r"\b\d{3}-\d{2}-\d{4}\b")
+NINE_DIGITS_RE = re.compile(r"\b\d{9}\b")
 _SSN_LEX = re.compile(r"\bssn\b|social\s+security")
+_SSN_SHARE_LEX = re.compile(
+    r"\b(?:my|his|her|their)\s+(?:ssn|social\s+security)\b|\bssn\s*(?:is|:|#)"
+)
 DL_RE = re.compile(r"\b[A-Z]\d{7,9}\b")
 ISO_DOB_RE = re.compile(r"\b(?:19|20)\d{2}-\d{2}-\d{2}\b")
 WORD_RE = re.compile(r"[a-z0-9]+")
 DIGITS_NEARBY_RE = re.compile(r"\d{2,}")
 MRN_DIGITS_RE = re.compile(r"\d{5,}")
 
-_DL_LEX = re.compile(r"driver'?s?\s+licen[cs]e\s+number")
+_DL_LEX = re.compile(r"driver'?s?\s+licen[cs]e(?:\s+number)?|\bdl\s+number")
+_VALUE_DIGITS_RE = re.compile(r"\d{5,}")
 _PLATE_LEX = re.compile(r"license\s+plate|plate\s+number")
 _DOB_LEX = re.compile(r"date\s+of\s+birth|\bdob\b")
 _MRN_LEX = re.compile(r"medical\s+record|\bmrn\b")
-_SPECIMEN_LEX = re.compile(r"specimen\s+id|specimen\s+number|test\s+id|case\s+number")
+_SPECIMEN_LEX = re.compile(r"specimen\s+id|specimen\s+number|test\s+id|case\s+(?:number|id)")
 _INDIVIDUAL_LEX = re.compile(
-    r"\bmy\s+(?:(?:drug|alcohol|lab|screen(?:ing)?|test)\s+){0,3}"
-    r"(?:result|report|status|screen|test)\b"
-    r"|\bcase\s+(?:number|id)\b"
+    r"\bmy\s+(?:(?:drug|alcohol|lab|screen(?:ing)?|test|background)\s+){0,3}results?\b"
+    r"|\b(?:did|will|can)\s+i\s+(?:pass|fail)\b"
 )
-_MEDICAL_LEX = re.compile(r"medication|prescription|diagnosis|condition")
+_HOW_TO_VIEW_LEX = re.compile(
+    r"\b(?:how|where)\b[^?]*\b(?:view|find|see|access|get|check|download)\b"
+)
+_MEDICAL_LEX = re.compile(r"medication|prescription|diagnosis|(?:medical|health)\s+condition")
+_TAKING_LEX = re.compile(
+    r"\bi(?:'m|\s+am)?\s+(?:take|taking|on|use|using)\b|medication|prescription"
+)
 _MEDICAL_ADVICE_LEX = re.compile(
     r"chest\s+pain|\ber\b|emergency\s+room|\bdiagnos(?:e|is)\b|\bsymptoms?\b"
 )
-_SHOW_UP_LEX = re.compile(r"show\s+up|test\s+positive|on\s+(?:my|the)\s+(?:panel|screen|test)")
+_SHOW_UP_LEX = re.compile(r"show\s+up|test\s+positive")
 _LEGAL_CASE_LEX = re.compile(
-    r"can\s+i\s+sue|is\s+this\s+legal|adverse\s+action|dispute\s+my\s+report|legal\s+advice"
+    r"can\s+i\s+sue|is\s+this\s+legal|adverse\s+action\s+(?:against|on|toward)\s+me"
+    r"|dispute\s+my\s+report|legal\s+advice"
 )
+_LOOKUP_LEX = re.compile(r"\b(?:look\s*up|pull|retrieve|access)\b")
 _FIRST_PERSON = re.compile(r"\b(?:my|i|i'm|im|me)\b")
 
 
@@ -142,7 +152,8 @@ def is_escalate_request(value: str) -> bool:
             rf"\b(?:i (?:want|need|would like)|i['\u2019]d like|"
             rf"connect(?: me)?(?: (?:to|with))?|transfer(?: me)?(?: (?:to|with))?|"
             rf"speak (?:to|with)|talk (?:to|with)|get me|give me)"
-            rf"\s+(?:(?:a|an|the|your|our|live|real)\s+){{0,2}}{target}\b",
+            rf"\s+(?:(?:a|an|the|your|our|live|real)\s+){{0,2}}{target}\b"
+            rf"(?!(?:'s)?\s+(?:e-?mail|phone|number|contact|extension|address)\b)",
             clause,
         )
         if request and not re.search(
@@ -211,9 +222,14 @@ def classify_sensitive(text: str) -> SensitiveCategory:  # noqa: C901
     lowered = normalize_text(raw)
     if not lowered:
         return SensitiveCategory.NONE
-    if SSN_RE.search(raw) or SSN_RE.search(lowered) or _SSN_LEX.search(lowered):
+    if (
+        SSN_RE.search(raw)
+        or SSN_RE.search(lowered)
+        or _SSN_SHARE_LEX.search(lowered)
+        or (_SSN_LEX.search(lowered) and NINE_DIGITS_RE.search(lowered))
+    ):
         return SensitiveCategory.SSN
-    if DL_RE.search(raw) or _DL_LEX.search(lowered):
+    if DL_RE.search(raw) or (_DL_LEX.search(lowered) and _VALUE_DIGITS_RE.search(lowered)):
         return SensitiveCategory.DL
     if _PLATE_LEX.search(lowered) and DIGITS_NEARBY_RE.search(lowered):
         return SensitiveCategory.PLATE
@@ -222,19 +238,24 @@ def classify_sensitive(text: str) -> SensitiveCategory:  # noqa: C901
     if _MRN_LEX.search(lowered):
         if MRN_DIGITS_RE.search(lowered):
             return SensitiveCategory.MRN
-        return SensitiveCategory.MEDICAL_DETAIL
-    if _SPECIMEN_LEX.search(lowered):
+        if _FIRST_PERSON.search(lowered) or _LOOKUP_LEX.search(lowered):
+            return SensitiveCategory.MEDICAL_DETAIL
+    if _SPECIMEN_LEX.search(lowered) and _VALUE_DIGITS_RE.search(lowered.replace("-", "")):
         return SensitiveCategory.SPECIMEN
-    if _INDIVIDUAL_LEX.search(lowered):
-        return SensitiveCategory.INDIVIDUAL_RESULT
-    if _FIRST_PERSON.search(lowered) and _SHOW_UP_LEX.search(lowered):
+    if (
+        _SHOW_UP_LEX.search(lowered)
+        and _FIRST_PERSON.search(lowered)
+        and _TAKING_LEX.search(lowered)
+    ):
         return SensitiveCategory.MEDICAL_DETAIL
+    if _LEGAL_CASE_LEX.search(lowered):
+        return SensitiveCategory.LEGAL_CASE
+    if _INDIVIDUAL_LEX.search(lowered) and not _HOW_TO_VIEW_LEX.search(lowered):
+        return SensitiveCategory.INDIVIDUAL_RESULT
     if _MEDICAL_ADVICE_LEX.search(lowered):
         return SensitiveCategory.MEDICAL_DETAIL
     if _MEDICAL_LEX.search(lowered) and _FIRST_PERSON.search(lowered):
         return SensitiveCategory.MEDICAL_DETAIL
-    if _LEGAL_CASE_LEX.search(lowered):
-        return SensitiveCategory.LEGAL_CASE
     return SensitiveCategory.NONE
 
 

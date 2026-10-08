@@ -17,6 +17,21 @@ describe("widget shell", () => {
     expect(screen.getByRole("dialog")).toHaveClass("widget-enter")
   })
 
+  test("can hide the generic disclaimer when the screen carries its own", () => {
+    renderWithProviders(
+      <WidgetShell
+        name="SupportChat"
+        hideDisclaimer
+        onClose={vi.fn()}
+        onResetCurrent={vi.fn()}
+        onDeleteAll={vi.fn()}
+      >
+        <p>Conversation content</p>
+      </WidgetShell>,
+    )
+    expect(screen.queryByText(/AI responses may be incorrect/)).not.toBeInTheDocument()
+  })
+
   test("puts reset and browser-history removal in an accessible overflow menu", async () => {
     const user = userEvent.setup()
     const onResetCurrent = vi.fn()

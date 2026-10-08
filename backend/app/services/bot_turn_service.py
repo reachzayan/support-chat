@@ -11,6 +11,7 @@ from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.chat.outcome_copy import handoff_copy
 from app.llm.answer_relevance import ResolvedRequest
 from app.llm.bot_responder import BotResponder
 from app.llm.intent import (
@@ -47,6 +48,8 @@ from app.services.grounded_response_validation import remove_draft_sentences, va
 from app.services.kb_embedder import default_embedder
 from app.services.kb_hybrid import HybridKbSearch
 from app.services.pii_redactor import redact_for_model
+from app.services.rate_ceiling import TurnBudget, bind_turn_budget
+from app.services.rate_limit import RateLimitExceeded
 from app.services.route_decision import live_snapshots_for_site
 from app.settings import get_settings
 
@@ -71,6 +74,33 @@ class BotTurnService:
         self._evidence_loader = evidence_loader or self.retrieve_evidence
 
     async def prepare(
+        self,
+        conversation: Conversation,
+        site: Site,
+        visitor_text: str,
+    ) -> PreparedBotReply:
+        """Run the turn with every Claude call counted against the conversation's ceiling."""
+        with bind_turn_budget(TurnBudget(conversation.id)) as budget:
+            prepared = await self._prepare(conversation, site, visitor_text)
+        if budget.tripped is None:
+            return prepared
+        # Over the ceiling (or the counter is down): stop spending and answer safely.
+        # The visitor-submit limiter fails closed on a Redis outage, so this does too.
+        if budget.tripped is RateLimitExceeded:
+            decision = ResponseDecision(
+                ResponseOutcome.KNOWLEDGE_GAP,
+                "rate_ceiling",
+                handoff_copy("rate_ceiling", human_enabled=site.human_enabled),
+                offer_handoff=site.human_enabled,
+                provider_status=ProviderStatus.TECH_FAIL,
+            )
+        else:
+            decision = _safe_technical_failure(
+                reason="rate_store_unavailable", human_enabled=site.human_enabled
+            )
+        return PreparedBotReply(decision, prepared.stage_timings)
+
+    async def _prepare(
         self,
         conversation: Conversation,
         site: Site,
@@ -121,7 +151,12 @@ class BotTurnService:
             return PreparedBotReply(source_followup_decision(citations), stage_timings)
         # A canned match is still an answer: the same hard-control checks come first.
         boundary = GroundedResponseEngine().boundary_decision(
-            TurnContext(visitor_text=visitor_text, evidence=[], site_name=site.name)
+            TurnContext(
+                visitor_text=visitor_text,
+                evidence=[],
+                site_name=site.name,
+                human_enabled=site.human_enabled,
+            )
         )
         if boundary is not None:
             return PreparedBotReply(boundary, stage_timings)
@@ -132,10 +167,8 @@ class BotTurnService:
             try:
                 resolved = await resolver(visitor_text, prior_messages)
             except Exception as exc:
+                # The resolver only sharpens the query; the visitor's own words still work.
                 record_trace("resolve_request", error_class=type(exc).__name__)
-                return PreparedBotReply(
-                    _safe_technical_failure(reason="intent_resolution"), stage_timings
-                )
             stage_timings["resolve_request"] = (time.perf_counter_ns() - started) // 1_000_000
         query = resolved.query if resolved is not None else visitor_text
         if resolved is not None and resolved.intent == "handoff" and not resolved.ambiguity:
@@ -163,6 +196,7 @@ class BotTurnService:
             prior_miss_count=conversation.fallback_count,
             prior_miss_reason=self._last_bot_reason(window, conversation.fallback_count),
             off_brand_blocklist=tuple(getattr(site, "off_brand_blocklist", None) or ()),
+            human_enabled=site.human_enabled,
         )
         if canned is not None:
             return PreparedBotReply(
@@ -265,7 +299,7 @@ class BotTurnService:
             assessment = await assessor(turn, decision)
         except Exception as exc:
             record_trace("assess_answer", error_class=type(exc).__name__)
-            return _safe_technical_failure(reason="answer_assessment")
+            return self._assessor_unavailable(turn, decision)
         finally:
             timings["assess_answer"] = (
                 timings.get("assess_answer", 0) + (time.perf_counter_ns() - started) // 1_000_000
@@ -289,7 +323,9 @@ class BotTurnService:
                 if repaired is not None:
                     return await self._assess_answer(turn, repaired, timings, allow_repair=False)
             return _safe_grounding_reject(
-                prior_miss_count=turn.prior_miss_count, request_id=decision.request_id
+                prior_miss_count=turn.prior_miss_count,
+                request_id=decision.request_id,
+                human_enabled=turn.human_enabled,
             )
         if assessment.status == "supported_next_step":
             return replace(
@@ -310,6 +346,33 @@ class BotTurnService:
         if assessment.status == "clarification":
             return replace(decision, outcome=ResponseOutcome.CLARIFICATION, reason_code=None)
         return decision
+
+    @classmethod
+    def _assessor_unavailable(cls, turn: TurnContext, decision: ResponseDecision):
+        if cls._may_release_unassessed(turn, decision):
+            record_trace("assess_answer", released_unassessed=True)
+            return decision
+        return _safe_technical_failure(reason="answer_assessment", human_enabled=turn.human_enabled)
+
+    @staticmethod
+    def _may_release_unassessed(turn: TurnContext, decision: ResponseDecision) -> bool:
+        """Whether an assessor outage may let an already-validated answer through.
+
+        The draft passed citation, numeric and commitment validation; the assessor
+        only adds the "right question" check. That check matters when the request
+        depends on earlier turns or is ambiguous, so those stay strict. A
+        standalone, unambiguous request with a cited answer is low risk. If the
+        resolver also failed there is no such request, so stay strict.
+        """
+        resolved = turn.resolved_request
+        return (
+            resolved is not None
+            and not resolved.ambiguity
+            and resolved.relation in {"standalone", "topic_change"}
+            and bool(decision.citations)
+            and decision.provider_status is ProviderStatus.OK
+            and decision.reason_code != "canned_reply"
+        )
 
     @staticmethod
     def _trim_relevance(
@@ -473,14 +536,15 @@ class BotTurnService:
         repair_draft = getattr(self._responder, "repair_grounded_draft", None)
         repair = None
         if repair_draft is not None and getattr(self._responder, "_complete", None) is None:
-            provider_deadline = time.monotonic() + get_settings().anthropic_timeout
 
             async def repair(turn, units, draft):
-                remaining = provider_deadline - time.monotonic()
-                if remaining <= 0:
+                # The budget starts now, not at engine build: a slow or retried draft must not
+                # starve the repair. The outer turn deadline bounds the whole turn.
+                budget = get_settings().anthropic_timeout
+                if budget <= 0:
                     record_trace("citation_repair", budget_exhausted=True)
                     return None
-                async with asyncio.timeout(remaining):
+                async with asyncio.timeout(budget):
                     return await repair_draft(turn, units, draft, stage_timings=stage_timings)
 
         return GroundedResponseEngine(complete=complete, repair=repair)

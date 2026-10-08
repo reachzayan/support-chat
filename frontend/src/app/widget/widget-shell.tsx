@@ -70,6 +70,10 @@ export type WidgetSize = {
 
 type WidgetShellProps = {
   name: string
+  /** True when the host shows the widget as a full-viewport sheet (phones). */
+  fullscreen?: boolean
+  /** Hide the generic footer when the screen already carries its own disclaimer. */
+  hideDisclaimer?: boolean
   onClose: () => void
   onResetCurrent: () => void
   onDeleteAll: () => void
@@ -78,10 +82,36 @@ type WidgetShellProps = {
 }
 
 const ICON_BUTTON =
-  "text-ink focus-visible:ring-steel flex size-10 cursor-pointer items-center justify-center rounded-full transition-transform duration-200 ease-out focus-visible:ring-2 focus-visible:outline-none active:scale-95"
+  "text-ink focus-visible:ring-steel flex size-11 cursor-pointer items-center justify-center rounded-full transition-transform duration-200 ease-out focus-visible:ring-2 focus-visible:outline-none active:scale-95"
+
+const SHELL_BASE =
+  "text-ink m-0 flex max-h-none w-full max-w-none flex-col overflow-hidden p-0 font-sans outline-none"
+const SHELL_PANEL = "h-dvh rounded-[30px] border border-white/70 bg-white/78 backdrop-blur-2xl"
+const SHELL_SHEET =
+  "h-dvh rounded-none border-0 bg-white pt-[env(safe-area-inset-top)] pr-[env(safe-area-inset-right)] pb-[env(safe-area-inset-bottom)] pl-[env(safe-area-inset-left)]"
+
+export const WidgetLoading = ({ fullscreen = false }: { fullscreen?: boolean }) => (
+  <output
+    aria-label="Loading chat"
+    className={`${SHELL_BASE} ${fullscreen ? SHELL_SHEET : SHELL_PANEL}`}
+  >
+    <div className="flex items-center gap-3 px-4 pt-4 pb-2" aria-hidden="true">
+      <div className="bg-navy size-9 shrink-0 rounded-full" />
+      <div className="skeleton-shimmer bg-ice-2 h-4 w-32 rounded-full" />
+    </div>
+    <div className="flex flex-1 flex-col gap-3 px-5 py-4" aria-hidden="true">
+      <div className="skeleton-shimmer bg-ice-2 h-11 rounded-lg" />
+      <div className="skeleton-shimmer bg-ice-2 h-11 w-4/5 rounded-lg" />
+      <div className="skeleton-shimmer bg-ice-2 h-11 w-3/5 rounded-lg" />
+    </div>
+    <span className="sr-only">Loading chat…</span>
+  </output>
+)
 
 export const WidgetShell = ({
   name,
+  fullscreen = false,
+  hideDisclaimer = false,
   onClose,
   onResetCurrent,
   onDeleteAll,
@@ -118,23 +148,27 @@ export const WidgetShell = ({
       aria-label={displayName}
       onKeyDown={handleKeyDown}
       onCancel={handleCancel}
-      className="widget-enter text-ink m-0 flex h-dvh max-h-none w-full max-w-none flex-col overflow-hidden rounded-[30px] border border-white/70 bg-white/78 p-0 font-sans backdrop-blur-2xl outline-none"
+      data-layout={fullscreen ? "sheet" : "panel"}
+      className={`widget-enter ${SHELL_BASE} ${fullscreen ? SHELL_SHEET : SHELL_PANEL}`}
     >
-      <header className="relative z-10 px-3 pt-3 pb-2">
+      <header className="relative z-10 px-3 pt-2 pb-2 sm:pt-3">
         <WidgetTopbar
           name={displayName}
           onClose={onClose}
           onResetCurrent={onResetCurrent}
           onDeleteAll={onDeleteAll}
-          onResize={onResize}
+          onResize={fullscreen ? undefined : onResize}
+          fullscreen={fullscreen}
         />
       </header>
       <main className="flex min-h-0 min-w-0 flex-1 flex-col">{children}</main>
-      <footer className="text-mute flex items-center justify-center px-4 pt-1 pb-3 text-center">
-        <p className="rounded-full bg-white/65 px-3 py-1 text-[11px] leading-4 backdrop-blur-lg">
-          AI responses may be incorrect. Do not share sensitive information.
-        </p>
-      </footer>
+      {hideDisclaimer ? null : (
+        <footer className="text-mute flex items-center justify-center px-4 pt-1 pb-2 text-center sm:pb-3">
+          <p className="rounded-full bg-white/65 px-3 py-1 text-[11px] leading-4 backdrop-blur-lg">
+            AI responses may be incorrect. Do not share sensitive information.
+          </p>
+        </footer>
+      )}
     </dialog>
   )
 }
@@ -145,12 +179,14 @@ const WidgetTopbar = ({
   onResetCurrent,
   onDeleteAll,
   onResize,
+  fullscreen,
 }: {
   name: string
   onClose: () => void
   onResetCurrent: () => void
   onDeleteAll: () => void
   onResize?: (size: WidgetSize) => void
+  fullscreen: boolean
 }) => {
   const reducedMotion = useReducedMotion()
 
@@ -158,17 +194,25 @@ const WidgetTopbar = ({
     <motion.div
       layout
       transition={reducedMotion ? { duration: 0 } : { type: "spring", stiffness: 360, damping: 32 }}
-      className="grid grid-cols-[2.5rem_minmax(0,1fr)_auto] items-start gap-2"
+      className={
+        fullscreen
+          ? "grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2"
+          : "grid grid-cols-[2.75rem_minmax(0,1fr)_auto] items-start gap-2"
+      }
     >
-      <div>{onResize ? <ResizeHandle onResize={onResize} /> : null}</div>
+      {fullscreen ? null : <div>{onResize ? <ResizeHandle onResize={onResize} /> : null}</div>}
       <motion.div
         layout="position"
         transition={
           reducedMotion ? { duration: 0 } : { type: "spring", stiffness: 360, damping: 32 }
         }
-        className="mx-auto max-w-[240px] min-w-0 rounded-[22px] bg-white/80 px-4 py-2 backdrop-blur-xl"
+        className={
+          fullscreen
+            ? "min-w-0 px-2 py-1"
+            : "mx-auto max-w-[240px] min-w-0 rounded-[22px] bg-white/80 px-4 py-2 backdrop-blur-xl"
+        }
       >
-        <div className="min-w-0 text-center">
+        <div className={fullscreen ? "min-w-0 text-left" : "min-w-0 text-center"}>
           <h1 className="heading truncate text-sm">{name}</h1>
           <p className="text-mute mt-0.5 text-[11px] font-medium whitespace-nowrap">
             Secure, assisted support
@@ -193,9 +237,9 @@ const WidgetTopbar = ({
 }
 
 const MENU_ITEM =
-  "text-ink data-highlighted:bg-ice flex min-h-10 cursor-pointer items-center gap-2.5 px-3 text-sm font-semibold outline-none data-highlighted:text-navy"
+  "text-ink data-highlighted:bg-ice flex min-h-11 cursor-pointer items-center gap-2.5 px-3 text-sm font-semibold outline-none data-highlighted:text-navy"
 const DIALOG_BUTTON =
-  "focus-visible:ring-steel min-h-10 px-4 text-sm font-bold leading-none focus-visible:ring-2 focus-visible:outline-none"
+  "focus-visible:ring-steel min-h-11 px-4 text-sm font-bold leading-none focus-visible:ring-2 focus-visible:outline-none"
 
 const ConversationMenu = ({
   onResetCurrent,

@@ -54,7 +54,7 @@ function DrawerOverlay({ className, ...props }: DrawerPrimitive.Backdrop.Props) 
     <DrawerPrimitive.Backdrop
       data-slot="drawer-overlay"
       className={cn(
-        "fixed inset-0 z-50 bg-navy/35 [opacity:calc(1-var(--drawer-swipe-progress,0))] transition-opacity duration-250 data-starting-style:opacity-0 data-ending-style:opacity-0 data-swiping:transition-none motion-reduce:transition-none",
+        "fixed inset-0 z-50 bg-navy/35 [opacity:calc(1-var(--drawer-swipe-progress,0))] transition-opacity duration-150 data-starting-style:opacity-0 data-ending-style:opacity-0 data-swiping:transition-none motion-reduce:transition-none",
         className,
       )}
       {...props}
@@ -92,7 +92,7 @@ function DrawerContent({
           data-slot="drawer-content"
           data-swipe-axis={axis}
           className={cn(
-            "group/drawer-popup bg-popover text-popover-foreground pointer-events-auto relative flex min-h-0 flex-col overflow-hidden rounded-lg border border-line bg-clip-padding text-sm shadow-xl outline-none [translate:calc(var(--drawer-swipe-movement-x,0px)+var(--drawer-enter-x,0px))_calc(var(--drawer-swipe-movement-y,0px)+var(--drawer-snap-point-offset,0px)+var(--drawer-enter-y,0px))] [transition:translate_calc(280ms*var(--drawer-swipe-strength,1))_cubic-bezier(0.22,1,0.36,1)] data-swiping:transition-none motion-reduce:transition-none",
+            "group/drawer-popup bg-popover text-popover-foreground pointer-events-auto relative flex min-h-0 flex-col overflow-hidden rounded-lg border border-line bg-clip-padding text-sm shadow-xl outline-none [translate:calc(var(--drawer-swipe-movement-x,0px)+var(--drawer-enter-x,0px))_calc(var(--drawer-swipe-movement-y,0px)+var(--drawer-snap-point-offset,0px)+var(--drawer-enter-y,0px))] [transition:translate_calc(200ms*var(--drawer-swipe-strength,1))_cubic-bezier(0.22,1,0.36,1)] data-swiping:transition-none motion-reduce:transition-none",
             DRAWER_SIDES[direction],
             className,
           )}

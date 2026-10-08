@@ -335,14 +335,18 @@ const AdminSidebarFooter = ({
   pathname: string
 }) => (
   <SidebarFooter className={cn("gap-2 p-3", collapsed && "items-center px-0 py-2")}>
-    <div className={cn("flex items-center", collapsed ? "justify-center" : "w-full px-0.5")}>
-      <ThemeToggle compact className="size-11 md:size-7" />
+    <div className={cn("flex items-center", collapsed ? "justify-center" : "w-full")}>
+      {collapsed ? (
+        <ThemeToggle compact className="size-11 md:size-7" />
+      ) : (
+        <ThemeToggle showLabel className="w-full" />
+      )}
     </div>
     <SignOutButton
       iconOnly={collapsed}
       className={cn(
         "text-white/70 hover:text-white",
-        collapsed ? "size-8 justify-center" : "w-full justify-start",
+        collapsed ? "size-8 justify-center" : "min-h-11 w-full justify-start md:min-h-8",
       )}
     />
     <SidebarMenu className={cn("w-full", collapsed && "w-auto items-center")}>
@@ -546,7 +550,7 @@ const WorkspaceToolbar = ({ userId }: { userId: string | undefined }) => {
         <Button
           variant="ghost"
           size="icon"
-          aria-label="Open navigation"
+          aria-label={openMobile ? "Close navigation" : "Open navigation"}
           aria-expanded={openMobile}
           className="size-11 text-white hover:text-white aria-expanded:text-white"
           onClick={toggleSidebar}

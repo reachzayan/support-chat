@@ -56,7 +56,7 @@ export default async function RootLayout({
   return (
     <html lang="en" className={htmlClassName(chrome.theme)} suppressHydrationWarning>
       <body
-        className={`flex h-full min-h-dvh flex-col overscroll-none font-sans${isWidget ? " bg-transparent" : ""}`}
+        className={`flex h-full min-h-dvh flex-col overscroll-none font-sans${isWidget ? " bg-transparent" : " staff-surface"}`}
       >
         {isWidget ? (
           children

@@ -1103,7 +1103,7 @@ class ConversationService:
             )
             await self._commit_sensitive_refusal(conversation, site, category)
             return None
-        if await self._handle_transfer_consent_reply(conversation, text):
+        if await self._handle_transfer_consent_reply(conversation, site, text):
             return None
         if is_escalate_request(text):
             conversation.active_generation_id = None
@@ -1131,7 +1131,9 @@ class ConversationService:
         conversation.generation_lease_expires_at = None
         return generation_id
 
-    async def _handle_transfer_consent_reply(self, conversation: Conversation, text: str) -> bool:
+    async def _handle_transfer_consent_reply(
+        self, conversation: Conversation, site: Site, text: str
+    ) -> bool:
         if not await self._awaiting_transfer_consent(conversation.id):
             return False
         if is_transfer_consent(text) or is_escalate_request(text):
@@ -1142,10 +1144,14 @@ class ConversationService:
                 original_question=await self._latest_offered_question(conversation.id),
             )
             return True
-        if is_transfer_decline(text) or is_chitchat(text):
+        if is_transfer_decline(text):
             conversation.active_generation_id = None
             conversation.fallback_count = 0
+            await self._insert_message(conversation, "system", keep_helping_line(site.name))
             return True
+        if is_chitchat(text):
+            # Fall through so the normal chitchat reply runs.
+            conversation.fallback_count = 0
         return False
 
     async def _awaiting_transfer_consent(self, conversation_id: UUID) -> bool:
@@ -1241,11 +1247,15 @@ class ConversationService:
             try:
                 conversation = await self._conversations.get_by_id(conversation_id)
                 if conversation is not None:
+                    site = await self._sites.get_by_id(conversation.site_id)
                     return await self._finalize_grounded_decision(
                         conversation_id,
                         generation_id,
                         conversation.site_id,
-                        _safe_technical_failure(reason="provider_exception"),
+                        _safe_technical_failure(
+                            reason="provider_exception",
+                            human_enabled=site is None or site.human_enabled,
+                        ),
                     )
             except Exception:
                 log.exception("bot_turn_fail_persist_failed", conversation_id=str(conversation_id))
@@ -1341,7 +1351,9 @@ class ConversationService:
             live = await self._reply_writer.citations_live(site.id, decision.citations)
             timings["liveness_check"] = (time.perf_counter_ns() - started) // 1_000_000
             if not live:
-                decision = _safe_technical_failure(reason="stale_source")
+                decision = _safe_technical_failure(
+                    reason="stale_source", human_enabled=site.human_enabled
+                )
         else:
             timings.setdefault("liveness_check", 0)
         conversation.active_generation_id = None

@@ -24,6 +24,18 @@ export const mergeInboxMessages = (...pages: InboxMessage[][]) =>
     (left, right) => left.id - right.id,
   )
 
+/** Keeps the first row per id so a repeated id can never reach React as a duplicate key. */
+export const uniqueById = <T extends { id: string }>(rows: T[]): T[] => {
+  const seen = new Set<string>()
+  return rows.filter((row) => {
+    if (seen.has(row.id)) {
+      return false
+    }
+    seen.add(row.id)
+    return true
+  })
+}
+
 export const fetchInboxList = async (
   filter: InboxFilter,
   cursor?: string | null,
@@ -50,7 +62,7 @@ export const fetchInboxList = async (
     sites?: InboxSite[]
   }
   return {
-    items: body.items,
+    items: uniqueById(body.items),
     next_cursor: body.next_cursor ?? null,
     counts: body.counts ?? EMPTY_INBOX_COUNTS,
     sites: body.sites ?? [],
@@ -70,14 +82,15 @@ export const fetchInboxDetailPage = async (conversationId: string, beforeId?: nu
   return detail
 }
 
+export const fetchCannedReplies = async (siteId: string) => {
+  const response = await staffGet(`/api/canned-replies?site_id=${siteId}`)
+  return response.ok ? ((await response.json()) as { items: CannedReply[] }).items : []
+}
+
 export const fetchInboxDetail = async (conversationId: string) => {
   const detail = await fetchInboxDetailPage(conversationId)
   if (detail === null) {
     return null
   }
-  const cannedResponse = await staffGet(`/api/canned-replies?site_id=${detail.site_id}`)
-  const canned = cannedResponse.ok
-    ? ((await cannedResponse.json()) as { items: CannedReply[] }).items
-    : []
-  return { detail, canned }
+  return { detail, canned: await fetchCannedReplies(detail.site_id) }
 }

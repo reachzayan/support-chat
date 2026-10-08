@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterator
+from contextlib import contextmanager
+from contextvars import ContextVar
 from uuid import UUID
 
 import structlog
@@ -43,3 +46,44 @@ class RateCeiling:
     async def hit_or_raise(self, conversation_id: UUID) -> None:
         if not await self.allow(conversation_id):
             raise RateLimitExceeded()
+
+
+class TurnBudget:
+    """Charges every Anthropic call of one bot turn to its conversation's ceiling.
+
+    Once the ceiling is hit or Redis is unavailable, the turn is `tripped` and no
+    further call is made, so the caller can answer with one safe decision.
+    """
+
+    def __init__(self, conversation_id: UUID, ceiling: RateCeiling | None = None) -> None:
+        self._conversation_id = conversation_id
+        self._ceiling = ceiling or RateCeiling()
+        self.tripped: type[Exception] | None = None
+
+    async def charge(self) -> None:
+        if self.tripped is not None:
+            raise self.tripped()
+        try:
+            await self._ceiling.hit_or_raise(self._conversation_id)
+        except (RateLimitExceeded, RateLimitUnavailable) as exc:
+            self.tripped = type(exc)
+            raise
+
+
+_current_budget: ContextVar[TurnBudget | None] = ContextVar("anthropic_turn_budget", default=None)
+
+
+@contextmanager
+def bind_turn_budget(budget: TurnBudget) -> Iterator[TurnBudget]:
+    token = _current_budget.set(budget)
+    try:
+        yield budget
+    finally:
+        _current_budget.reset(token)
+
+
+async def charge_anthropic_call() -> None:
+    """Count one Claude call against the bound turn budget (no-op outside a bot turn)."""
+    budget = _current_budget.get()
+    if budget is not None:
+        await budget.charge()

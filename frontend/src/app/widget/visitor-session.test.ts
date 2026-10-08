@@ -1,6 +1,11 @@
 import { describe, expect, test } from "vitest"
 
-import { applyConversationSnapshot, applyVisitorFrame, emptyChat } from "./visitor-session"
+import {
+  applyConversationSnapshot,
+  applySendError,
+  applyVisitorFrame,
+  emptyChat,
+} from "./visitor-session"
 
 const VISITOR_LINE = "How fast are results?"
 
@@ -141,5 +146,22 @@ describe("conversation snapshot", () => {
       },
     ])
     expect(view.lastEventId).toBe(11)
+  })
+})
+
+describe("send errors", () => {
+  test("records the error code and clears it on the next ack", () => {
+    const errored = applySendError(emptyChat(), { v: 1, type: "error", code: "assistant_busy" })
+    expect(errored.sendError).toBe("assistant_busy")
+    expect(applyVisitorFrame(errored, { v: 1, type: "ack" }).sendError).toBeUndefined()
+  })
+
+  test("a bare error frame does not set the send notice", () => {
+    const view = applyVisitorFrame(emptyChat(), { v: 1, type: "error", code: "invalid" })
+    expect(view.sendError).toBeUndefined()
+  })
+
+  test("applySendError ignores non-error frames", () => {
+    expect(applySendError(emptyChat(), { v: 1, type: "ack" }).sendError).toBeUndefined()
   })
 })

@@ -180,6 +180,9 @@ describe("data console table", () => {
     expect(within(table).getAllByText("New York, New York, United States")).toHaveLength(11)
     expect(within(table).getByText("Visitor 1")).toBeInTheDocument()
     expect(within(table).getAllByText("Needs Attention").length).toBeGreaterThan(0)
+    for (const badge of within(table).getAllByText("Needs Attention")) {
+      expect(badge.className).toContain("whitespace-nowrap")
+    }
     expect(within(table).getByText("Visitor 11")).toBeInTheDocument()
     expect(screen.getByText("11 of 11 loaded")).toBeInTheDocument()
     expect(screen.queryByRole("link", { name: /Go to page/ })).not.toBeInTheDocument()

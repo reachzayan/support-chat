@@ -28,7 +28,7 @@ const Fact = ({ label, children }: { label: string; children: ReactNode }) => {
       <dt className="text-mute pt-0.5 text-[10px] font-semibold tracking-[0.12em] uppercase">
         {label}
       </dt>
-      <dd className="text-ink min-w-0 text-sm leading-5 break-words">{children}</dd>
+      <dd className="text-ink min-w-0 text-sm leading-5 [overflow-wrap:anywhere]">{children}</dd>
     </div>
   )
 }
@@ -39,10 +39,15 @@ const UrlValue = ({ value }: { value: string | null }) => {
   }
   const href = safeHttpUrl(value)
   if (href === null) {
-    return <span>{value}</span>
+    return <span className="break-all">{value}</span>
   }
   return (
-    <a href={href} rel="noreferrer noopener" className="text-steel cursor-pointer underline">
+    <a
+      href={href}
+      rel="noreferrer noopener"
+      title={value}
+      className="text-steel focus-visible:ring-steel block cursor-pointer truncate underline focus-visible:ring-2 focus-visible:outline-none"
+    >
       {value}
     </a>
   )
@@ -143,7 +148,9 @@ const ContactSection = ({
   onUnblock: () => void
 }) => (
   <RailSection title="Contact">
-    <Fact label="Email">{orNone(detail.visitor.email)}</Fact>
+    <Fact label="Email">
+      <span className="break-all">{orNone(detail.visitor.email)}</span>
+    </Fact>
     <Fact label="Phone">{orNone(detail.visitor.phone)}</Fact>
     <Fact label="IP">
       <span className="font-mono text-xs">{orNone(detail.visitor.ip)}</span>

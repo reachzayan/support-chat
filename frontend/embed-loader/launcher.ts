@@ -9,7 +9,7 @@ export const mountLauncher = (
 ): HTMLButtonElement => {
   const style = doc.createElement("style")
   style.textContent =
-    "[data-supportchat-launcher]{transition:transform 180ms ease,box-shadow 180ms ease}[data-supportchat-launcher]:hover{transform:translateY(-2px);box-shadow:0 12px 28px rgba(11,35,71,0.28)}[data-supportchat-launcher]:active{transform:translateY(0) scale(.96)}[data-supportchat-launcher]:focus-visible{outline:2px solid #2456A0;outline-offset:2px}@media (prefers-reduced-motion: reduce){[data-supportchat-launcher]{transition:none}}"
+    '[data-supportchat-launcher]{transition:transform 180ms ease,box-shadow 180ms ease}[data-supportchat-launcher]:hover{transform:translateY(-2px);box-shadow:0 12px 28px rgba(11,35,71,0.28)}[data-supportchat-launcher]:active{transform:translateY(0) scale(.96)}[data-supportchat-launcher]:focus-visible{outline:2px solid #2456A0;outline-offset:2px}[data-supportchat-launcher]{right:max(24px,env(safe-area-inset-right))!important;bottom:max(24px,env(safe-area-inset-bottom))!important}@media (max-width: 640px){[data-supportchat-launcher]{right:max(16px,env(safe-area-inset-right))!important;bottom:max(16px,env(safe-area-inset-bottom))!important}}[data-supportchat-launcher][aria-busy=true]::after{content:"";position:absolute;inset:-4px;border-radius:50%;border:3px solid rgba(196,85,22,.25);border-top-color:#C45516;animation:chat365-spin .8s linear infinite;pointer-events:none}@keyframes chat365-spin{to{transform:rotate(360deg)}}@media (prefers-reduced-motion: reduce){[data-supportchat-launcher]{transition:none}[data-supportchat-launcher][aria-busy=true]::after{animation:none;border-color:#C45516}}'
   doc.head.appendChild(style)
 
   const button = doc.createElement("button")

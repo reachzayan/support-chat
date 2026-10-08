@@ -63,6 +63,7 @@ export type HostToWidget =
       identity: ReturningIdentity
       conversations: ConversationHistoryItem[]
     }
+  | { type: "host.layout"; fullscreen: boolean }
   | { type: "host.context"; page_url: string; page_title: string; referrer: string }
 
 export type WidgetToHost =
@@ -280,6 +281,11 @@ const parseContext = (value: Record<string, unknown>): HostToWidget | null => {
   }
 }
 
+const parseLayout = (value: Record<string, unknown>): HostToWidget | null =>
+  typeof value.fullscreen === "boolean"
+    ? { type: "host.layout", fullscreen: value.fullscreen }
+    : null
+
 export const parseHostToWidget = (value: unknown): HostToWidget | null => {
   if (!isRecord(value) || typeof value.type !== "string") {
     return null
@@ -288,6 +294,9 @@ export const parseHostToWidget = (value: unknown): HostToWidget | null => {
     return typeof value.enabled === "boolean"
       ? { type: "host.sound", enabled: value.enabled }
       : null
+  }
+  if (value.type === "host.layout") {
+    return parseLayout(value)
   }
   if (value.type === "host.bootstrap") {
     return parseBootstrap(value)

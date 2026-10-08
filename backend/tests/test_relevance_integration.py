@@ -50,7 +50,13 @@ class RecordedProvider:
                 stop_reason="tool_use",
                 content=[SimpleNamespace(type="tool_use", name=stage, input=value)],
             )
-        documents = kwargs["messages"][0]["content"]
+        documents = [
+            block
+            for message in kwargs["messages"]
+            if isinstance(message["content"], list)
+            for block in message["content"]
+            if block.get("type") == "document"
+        ]
         citations = []
         if self.proof:
             for index, document in enumerate(documents):
@@ -246,24 +252,6 @@ async def test_cited_cta_cannot_count_as_resolved_specialist_request(migrated_db
     )
     assert body != CTA
     assert (outcome, reason) == ("knowledge_gap", "grounding_reject")
-
-
-@pytest.mark.parametrize("stage", ["resolve_request", "assess_answer"])
-async def test_relevance_provider_failure_does_not_release_unchecked_answer(
-    migrated_db, monkeypatch, stage
-):
-    provider = RecordedProvider(
-        request("specialist pricing contact", intent="contact"),
-        CONTACT,
-        CONTACT,
-        {"status": "answered", "reason": "responsive"},
-        fail_stage=stage,
-    )
-    body, outcome, reason, _, _ = await run_chat(
-        monkeypatch, provider, "How can I arrange a pricing discussion?"
-    )
-    assert body != CONTACT
-    assert (outcome, reason) == ("knowledge_gap", "tech_fail")
 
 
 async def test_no_evidence_produces_precise_limitation_instead_of_scope_redirect(

@@ -1,12 +1,16 @@
 "use client"
 
+/* oxlint-disable react-perf/jsx-no-jsx-as-prop, react-perf/jsx-no-new-array-as-prop -- Card fields and actions are built per record. */
+
 import { Settings2 } from "lucide-react"
 import { useCallback, useMemo } from "react"
 
 import type { SiteRecord } from "@/components/admin/staff-api"
 import { Button } from "@/components/ui/button"
+import { RecordCard, RecordCardList, type RecordField } from "@/components/ui/record-cards"
 import { Spinner } from "@/components/ui/spinner"
 import { StateIcon } from "@/components/ui/state-icon"
+import { useIsMobile } from "@/hooks/use-mobile"
 
 import { CopyButton } from "./copy-button"
 import { useSitesColumnWidths } from "./sites-column-widths"
@@ -102,7 +106,7 @@ const InstalledCell = ({
           disabled={checking}
           aria-label={`Recheck install status for ${site.name}`}
           title="Recheck install status"
-          className="text-mute hover:text-steel focus-visible:ring-steel focus-visible:ring-2 focus-visible:outline-none"
+          className="text-mute hover:text-steel focus-visible:ring-steel focus-visible:ring-2 focus-visible:outline-none max-md:size-11"
         >
           {checking ? (
             <Spinner data-icon="inline-start" />
@@ -112,6 +116,84 @@ const InstalledCell = ({
         </Button>
       ) : null}
     </div>
+  )
+}
+
+const originCountLabel = (site: SiteRecord) =>
+  site.origins.length === 1 ? "1 origin" : `${site.origins.length} origins`
+
+const RoutingPills = ({ site }: { site: SiteRecord }) => (
+  <div className="flex flex-wrap gap-1">
+    {[
+      site.enabled !== false ? "Site on" : "Site off",
+      site.bot_enabled ? "Bot on" : "Bot off",
+      site.human_enabled ? "Human on" : "Human off",
+    ].map((text) => (
+      <span
+        key={text}
+        className="bg-ice text-navy rounded-[6px] px-1.5 py-0.5 text-[10px] font-bold"
+      >
+        {text}
+      </span>
+    ))}
+  </div>
+)
+
+const SiteCard = ({
+  site,
+  isAdmin,
+  onManage,
+  checking,
+  onCheckInstall,
+}: {
+  site: SiteRecord
+  isAdmin: boolean
+  onManage: (siteId: string) => void
+  checking: boolean
+  onCheckInstall: (siteId: string) => void
+}) => {
+  const handleManage = useCallback(() => onManage(site.id), [onManage, site.id])
+  const fields: RecordField[] = [
+    { label: "Site key", value: site.key, mono: true },
+    { label: "Origins", value: originCountLabel(site) },
+    {
+      label: "Public key",
+      value: (
+        <span
+          title={site.public_key}
+        >{`${site.public_key.slice(0, 6)}…${site.public_key.slice(-4)}`}</span>
+      ),
+      mono: true,
+      wide: true,
+    },
+    { label: "Routing", value: <RoutingPills site={site} />, wide: true },
+    {
+      label: "Installed",
+      value: (
+        <InstalledCell
+          site={site}
+          isAdmin={isAdmin}
+          checking={checking}
+          onCheckInstall={onCheckInstall}
+        />
+      ),
+      wide: true,
+    },
+  ]
+  return (
+    <RecordCard
+      title={site.name}
+      fields={fields}
+      actions={
+        <>
+          <CopyButton value={site.snippet} className="min-w-0" />
+          <Button type="button" variant="outline" onClick={handleManage}>
+            <Settings2 data-icon="inline-start" aria-hidden="true" />
+            Manage
+          </Button>
+        </>
+      }
+    />
   )
 }
 
@@ -129,30 +211,28 @@ const SiteRow = ({
   onCheckInstall: (siteId: string) => void
 }) => {
   const publicPreview = `${site.public_key.slice(0, 6)}…${site.public_key.slice(-4)}`
-  const originLabel = site.origins.length === 1 ? "1 origin" : `${site.origins.length} origins`
+  const originLabel = originCountLabel(site)
   const handleManage = useCallback(() => onManage(site.id), [onManage, site.id])
-  const siteOn = site.enabled !== false
 
   return (
     <tr className="border-line hover:bg-ice/60 border-b last:border-b-0">
-      <td className="text-navy truncate px-3 py-2.5 text-sm font-bold">{site.name}</td>
+      <td className="text-navy px-3 py-2.5 text-sm font-bold">
+        <button
+          type="button"
+          onClick={handleManage}
+          title={`Manage ${site.name}`}
+          className="focus-visible:ring-steel block max-w-full cursor-pointer truncate rounded-sm text-left font-bold hover:underline focus-visible:ring-2 focus-visible:outline-none"
+        >
+          {site.name}
+        </button>
+      </td>
       <td className="text-mute truncate px-3 py-2.5 font-mono text-xs">{site.key}</td>
       <td className="text-mute truncate px-3 py-2.5 font-mono text-xs" title={site.public_key}>
         {publicPreview}
       </td>
       <td className="text-mute truncate px-3 py-2.5 text-xs">{originLabel}</td>
       <td className="px-3 py-2.5" aria-label="Routing status">
-        <div className="flex flex-wrap gap-1">
-          <span className="bg-ice text-navy rounded-[6px] px-1.5 py-0.5 text-[10px] font-bold">
-            {siteOn ? "Site on" : "Site off"}
-          </span>
-          <span className="bg-ice text-navy rounded-[6px] px-1.5 py-0.5 text-[10px] font-bold">
-            {site.bot_enabled ? "Bot on" : "Bot off"}
-          </span>
-          <span className="bg-ice text-navy rounded-[6px] px-1.5 py-0.5 text-[10px] font-bold">
-            {site.human_enabled ? "Human on" : "Human off"}
-          </span>
-        </div>
+        <RoutingPills site={site} />
       </td>
       <td className="px-3 py-2.5" aria-label="Widget install status">
         <InstalledCell
@@ -181,6 +261,33 @@ const SiteRow = ({
   )
 }
 
+const SitesCards = ({
+  sites,
+  isAdmin,
+  onManage,
+  checkingIds,
+  onCheckInstall,
+}: {
+  sites: SiteRecord[]
+  isAdmin: boolean
+  onManage: (siteId: string) => void
+  checkingIds: string[]
+  onCheckInstall: (siteId: string) => void
+}) => (
+  <RecordCardList label="Sites">
+    {sites.map((site) => (
+      <SiteCard
+        key={site.id}
+        site={site}
+        isAdmin={isAdmin}
+        onManage={onManage}
+        checking={checkingIds.includes(site.id)}
+        onCheckInstall={onCheckInstall}
+      />
+    ))}
+  </RecordCardList>
+)
+
 export const SitesTable = ({
   sites,
   isAdmin,
@@ -194,6 +301,7 @@ export const SitesTable = ({
   checkingIds: string[]
   onCheckInstall: (siteId: string) => void
 }) => {
+  const isMobile = useIsMobile()
   const { widths, total, handleResizeStart, handleResizeKeyDown, handleResizeReset } =
     useSitesColumnWidths()
   const tableStyle = useMemo(() => ({ minWidth: `${total * 12}px` }), [total])
@@ -205,6 +313,18 @@ export const SitesTable = ({
       })),
     [total, widths],
   )
+
+  if (isMobile) {
+    return (
+      <SitesCards
+        sites={sites}
+        isAdmin={isAdmin}
+        onManage={onManage}
+        checkingIds={checkingIds}
+        onCheckInstall={onCheckInstall}
+      />
+    )
+  }
 
   return (
     <div className="min-w-0 overflow-x-scroll">

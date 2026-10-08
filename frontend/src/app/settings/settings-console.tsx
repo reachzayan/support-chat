@@ -22,7 +22,7 @@ export const SettingsConsole = ({ displayName, email, isAdmin }: SettingsConsole
         <StaffHeader title="Settings" description="Your specialist profile for this workspace." />
         <div
           id="main-content"
-          className="mx-auto flex min-h-0 w-full max-w-5xl flex-1 flex-col gap-5 overflow-y-auto px-5 py-6 lg:px-8 lg:py-8 [&>section]:shrink-0"
+          className="mx-auto flex min-h-0 w-full max-w-5xl flex-1 flex-col gap-5 overflow-y-auto px-4 py-4 sm:px-5 sm:py-6 lg:px-8 lg:py-8 [&>section]:shrink-0"
         >
           <ProfileCard displayName={displayName} email={email} isAdmin={isAdmin} />
           <Button

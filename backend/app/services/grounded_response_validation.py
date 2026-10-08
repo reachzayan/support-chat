@@ -20,6 +20,7 @@ from app.services.grounded_response_types import (
     TurnContext,
 )
 from app.services.pii_redactor import redact_evidence
+from app.settings import get_settings
 
 log = structlog.get_logger("grounded_response")
 
@@ -30,7 +31,6 @@ _NUMERIC_CLAIM_RE = re.compile(
     re.I,
 )
 _REGULATED_RE = re.compile(r"\b(?:DOT|USDOT|FMCSA|FCRA|HIPAA|49\s+CFR\s+Part\s+40)\b", re.I)
-_MAX_CHARS = 1500
 _KEEPABLE_GAPS = frozenset(
     {
         "yes",
@@ -49,7 +49,6 @@ _KEEPABLE_GAPS = frozenset(
         "and we also work with",
     }
 )
-_SOFT_WORD_CAP = 120
 _COURTESY_EDGE_RE = re.compile(
     r"^(?:"
     r"happy to help(?: you(?: today)?)?"
@@ -97,6 +96,24 @@ _NON_ASSERTED_GUARANTEE_RE = re.compile(
     r"|\b(?:ask|inquire|enquire) about\b[^,;.!?]{0,50})$",
     re.I,
 )
+
+
+_COMMITMENT_RE = re.compile(
+    r"\b(?:free|guarantee(?:d)?|unlimited|certified|accredited|licensed"
+    r"|at no (?:additional |extra )?(?:cost|charge))\b",
+    re.I,
+)
+_FREE_IDIOM_BEFORE_RE = re.compile(
+    r"(?:\bfeel\s+|\byou(?:['’]re|\s+are)\s+|\b(?!fee|cost|charge)\w+-)$", re.I
+)
+
+
+def _is_free_idiom(text: str, match: re.Match[str]) -> bool:
+    """'Feel free', 'you are free to', 'toll-free', 'drug-free' say nothing about price.
+
+    'Services are free to employers' stays a price claim.
+    """
+    return bool(_FREE_IDIOM_BEFORE_RE.search(text[: match.start()]))
 
 
 def sentence_spans(body: str) -> list[re.Match[str]]:
@@ -353,10 +370,11 @@ def validate_draft(  # noqa: C901
             return _reject("source_metadata_mismatch", draft)
         cited_parts.append(citation.cited_text)
 
-    if len(body) > _MAX_CHARS:
+    # Length is bounded by characters only; word counts are not a safe proxy
+    # (Spanish and cited contact detail run long).
+    max_chars = get_settings().max_bot_answer_chars
+    if len(body) > max_chars:
         return _reject("over_length", draft)
-    if len(body.split()) > _SOFT_WORD_CAP:
-        return _reject("over_words", draft)
     if _is_disallowed_source_copy(body, units, citations):
         return _reject("source_copy", draft)
     clarifying = _is_clarifying_only(body)
@@ -379,17 +397,15 @@ def validate_draft(  # noqa: C901
             # Citation text blocks may cover a clause, but attribution is
             # at the sentence level. Commitments still need literal backing.
             proof = " ".join(item.cited_text.casefold() for item in attached)
-            for match in re.finditer(
-                r"\b(?:free|guarantee(?:d)?|unlimited|certified|accredited|licensed)\b",
-                text,
-                re.I,
-            ):
-                term = match.group()
-                if term.casefold().startswith("guarantee") and _NON_ASSERTED_GUARANTEE_RE.search(
+            for match in _COMMITMENT_RE.finditer(text):
+                term = " ".join(match.group().casefold().split())
+                if term == "free" and _is_free_idiom(text, match):
+                    continue
+                if term.startswith("guarantee") and _NON_ASSERTED_GUARANTEE_RE.search(
                     text[: match.start()]
                 ):
                     continue
-                if not re.search(rf"\b{re.escape(term.casefold())}\b", proof):
+                if not re.search(rf"\b{re.escape(term)}\b", " ".join(proof.split())):
                     return _reject("unsupported_commitment", draft)
 
     # Inability to confirm a requested percentage or regulation is not a
@@ -413,7 +429,7 @@ def validate_draft(  # noqa: C901
         live_urls={unit.source_url for unit in units if unit.source_url},
         cited_answer_text=cited_text,
         off_brand_blocklist=list(turn.off_brand_blocklist),
-        max_chars=_MAX_CHARS,
+        max_chars=max_chars,
         curated_refusal=clarifying
         or visitor_recap
         or (

@@ -288,3 +288,35 @@ describe("status board table scroll", () => {
     expect(websites.closest(".overflow-x-auto")).toBeNull()
   })
 })
+
+describe("status board semantics", () => {
+  test("service health is spelled out in text, not only colour", async () => {
+    const snapshot = {
+      ...SNAPSHOT,
+      overall: "degraded",
+      headline: "API is down",
+      monitors: [
+        { ...monitor("api", "API"), state: "down" },
+        monitor("postgres", "Postgres", { availability_30d: POSTGRES_BARS }),
+        { ...monitor("redis", "Redis"), state: "silent" },
+        monitor("worker", "Background work", {
+          availability_30d: [...Array.from({ length: 29 }, () => "up"), "degraded"],
+        }),
+      ],
+    }
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse(snapshot)))
+    renderWithProviders(<StatusBoard />)
+
+    const api = within(await screen.findByRole("row", { name: /^Down API/ }))
+    expect(api.getByText("Down")).toBeVisible()
+    expect(
+      within(screen.getByRole("row", { name: /Postgres/ })).getByText("Operational"),
+    ).toBeVisible()
+    expect(screen.getByText("1 degraded day in 30d")).toBeVisible()
+    expect(within(screen.getByRole("row", { name: /Redis/ })).getByText("No signal")).toBeVisible()
+    expect(
+      within(screen.getByRole("row", { name: /Background work/ })).getByText("Degraded"),
+    ).toBeVisible()
+    expect(screen.getByRole("status")).toHaveTextContent("Degraded")
+  })
+})

@@ -461,10 +461,10 @@ const TranscriptMessage = ({
           variant={outgoing ? "steel" : "secondary"}
           align={align}
           className={
-            outgoing ? "max-w-[min(80%,20rem)] min-w-[5.5rem]" : "w-full max-w-[min(100%,24rem)]"
+            outgoing ? "max-w-[min(85%,20rem)] min-w-[5.5rem]" : "w-full max-w-[min(100%,24rem)]"
           }
         >
-          <BubbleContent id={messageId} className="whitespace-pre-wrap">
+          <BubbleContent id={messageId} className="[overflow-wrap:anywhere] whitespace-pre-wrap">
             {line.body}
           </BubbleContent>
           <TranscriptAttachments line={line} />
@@ -646,7 +646,7 @@ export const Transcript = ({
             aria-live="polite"
             aria-relevant="additions"
             aria-busy={typing || undefined}
-            className="gap-5 px-5 pt-5 pb-14"
+            className="gap-5 px-4 pt-4 pb-14 sm:px-5 sm:pt-5"
           >
             {feed.map((item) => (
               <TranscriptFeedItem

@@ -157,7 +157,7 @@ export const DataConsole = () => {
       </div>
       <div
         id="main-content"
-        className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden px-5 py-5 lg:px-8 lg:py-8"
+        className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden px-4 py-4 sm:px-5 sm:py-5 lg:px-8 lg:py-8"
       >
         {selectionError ? (
           <p role="alert" className="text-ember mb-3 text-sm">

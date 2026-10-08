@@ -1,13 +1,17 @@
 "use client"
 
+/* oxlint-disable react-perf/jsx-no-jsx-as-prop, react-perf/jsx-no-new-array-as-prop -- Card fields and actions are built per record. */
+
 import { cn } from "cn"
-import { AlertCircle, CheckCircle2 } from "lucide-react"
+import { AlertCircle, AlertTriangle, CheckCircle2, XCircle } from "lucide-react"
 import Link from "next/link"
 
 import { StaffPageSkeleton } from "@/components/admin/loading-skeleton"
 import { RetryError } from "@/components/admin/retry-error"
 import { StaffHeader } from "@/components/admin/staff-nav"
 import { Button } from "@/components/ui/button"
+import { RecordCard, RecordCardList } from "@/components/ui/record-cards"
+import { useIsMobile } from "@/hooks/use-mobile"
 
 import {
   assistantLabel,
@@ -18,17 +22,17 @@ import {
   knowledgeLabel,
   latencyLabel,
   latencySparkPath,
+  monitorHealth,
   SPARK_HEIGHT,
   SPARK_WIDTH,
-  serviceTone,
   specialistLine,
   unansweredLine,
   visitorLine,
   waitingLabel,
   widgetLabel,
   type AvailabilityTone,
+  type Health,
   type OverallState,
-  type ServiceState,
   type StatusIncident,
   type StatusMonitor,
   type StatusSite,
@@ -52,11 +56,30 @@ const PERIODS = [
 
 const TAPE_SLOTS = Array.from({ length: 30 }, (_, offset) => `d${offset + 1}`)
 
-const lampClass = (state: ServiceState) => {
-  if (state === "ok") {
-    return "bg-steel"
-  }
-  return "bg-ember"
+const HEALTH_STYLE: Record<Health, { pill: string; icon: typeof CheckCircle2 }> = {
+  ok: {
+    pill: "bg-[#E8F5EE] text-[#1E6B42] dark:bg-[#163627] dark:text-[#8DDEAE]",
+    icon: CheckCircle2,
+  },
+  degraded: { pill: "bg-ember/10 text-ember", icon: AlertTriangle },
+  down: { pill: "bg-destructive/10 text-destructive", icon: XCircle },
+}
+
+const HealthPill = ({ monitor }: { monitor: StatusMonitor }) => {
+  const { health, label } = monitorHealth(monitor)
+  const { pill, icon: Icon } = HEALTH_STYLE[health]
+  return (
+    <span
+      data-health={health}
+      className={cn(
+        "inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold whitespace-nowrap",
+        pill,
+      )}
+    >
+      <Icon aria-hidden="true" className="size-3.5 shrink-0" />
+      {label}
+    </span>
+  )
 }
 
 const bannerClass = (overall: OverallState) => {
@@ -91,12 +114,15 @@ const tapeClass = (tone: AvailabilityTone) => {
 }
 
 const AvailabilityTape = ({ days }: { days: AvailabilityTone[] }) => (
-  <figure aria-label={availabilityLabel(days)} className="m-0 flex h-8 items-end gap-px">
+  <figure
+    aria-label={availabilityLabel(days)}
+    className="m-0 flex h-8 w-full max-w-xs items-end gap-px"
+  >
     {TAPE_SLOTS.map((slot, offset) => (
       <span
         key={slot}
         aria-hidden="true"
-        className={cn("h-full w-1.5 rounded-[1px]", tapeClass(days[offset] ?? "empty"))}
+        className={cn("h-full min-w-0 flex-1 rounded-[1px]", tapeClass(days[offset] ?? "empty"))}
       />
     ))}
   </figure>
@@ -108,7 +134,7 @@ const LatencySpark = ({ hours }: { hours: (number | null)[] }) => {
     <figure aria-label={latencyLabel(hours)} className="m-0">
       <svg
         viewBox={`0 0 ${SPARK_WIDTH} ${SPARK_HEIGHT}`}
-        className="h-9 w-44 overflow-visible"
+        className="h-9 w-full max-w-44 overflow-visible"
         aria-hidden="true"
       >
         <line x1="0" y1="31" x2={SPARK_WIDTH} y2="31" stroke="#E5EAF2" strokeWidth="1" />
@@ -130,19 +156,28 @@ const LatencySpark = ({ hours }: { hours: (number | null)[] }) => {
   )
 }
 
+const OVERALL_LABEL: Record<OverallState, string> = {
+  ok: "Operational",
+  attention: "Needs attention",
+  degraded: "Degraded",
+}
+
 const OverallBanner = ({ snapshot }: { snapshot: StatusSnapshot }) => {
   const Icon = snapshot.overall === "ok" ? CheckCircle2 : AlertCircle
   return (
     <output
       className={cn(
-        "flex shrink-0 items-center gap-3 rounded-lg border px-4 py-3",
+        "flex shrink-0 flex-col gap-1 rounded-lg border px-4 py-3 sm:flex-row sm:items-center sm:gap-3",
         bannerClass(snapshot.overall),
       )}
     >
-      <Icon
-        aria-hidden="true"
-        className={cn("size-5 shrink-0", bannerIconClass(snapshot.overall))}
-      />
+      <span className="flex items-center gap-2 text-xs font-bold tracking-[0.08em] uppercase sm:min-w-36">
+        <Icon
+          aria-hidden="true"
+          className={cn("size-5 shrink-0", bannerIconClass(snapshot.overall))}
+        />
+        {OVERALL_LABEL[snapshot.overall]}
+      </span>
       <h2 className="heading text-base">{snapshot.headline}</h2>
     </output>
   )
@@ -155,9 +190,9 @@ const UptimeCards = ({ snapshot }: { snapshot: StatusSnapshot }) => (
         <article
           key={period.key}
           aria-labelledby={`status-uptime-${period.key}`}
-          className="bg-paper px-5 py-4"
+          className="bg-paper px-4 py-4 sm:px-5"
         >
-          <p className="text-navy font-mono text-3xl font-semibold tracking-tight">
+          <p className="text-navy font-mono text-2xl font-semibold tracking-tight sm:text-3xl">
             {formatUptime(snapshot.uptime[period.key])}
           </p>
           <h3 id={`status-uptime-${period.key}`} className="text-mute mt-1 text-xs font-medium">
@@ -169,26 +204,49 @@ const UptimeCards = ({ snapshot }: { snapshot: StatusSnapshot }) => (
   </section>
 )
 
-const ServiceRow = ({ monitor }: { monitor: StatusMonitor }) => (
-  <tr className="border-line border-b last:border-b-0">
-    <td className="px-5 py-3">
-      <span
-        aria-hidden="true"
-        className={cn("mt-1 block size-2.5 rounded-full", lampClass(monitor.state))}
-      />
-      <span className="sr-only">{serviceTone(monitor.state)}</span>
-    </td>
-    <th scope="row" className="text-navy px-5 py-3 text-left font-semibold">
-      {monitor.name}
-    </th>
-    <td className="px-5 py-3">
+const ServiceRow = ({ monitor }: { monitor: StatusMonitor }) => {
+  const { note } = monitorHealth(monitor)
+  return (
+    <tr className="border-line border-b last:border-b-0">
+      <td className="px-5 py-3">
+        <HealthPill monitor={monitor} />
+      </td>
+      <th scope="row" className="text-navy px-5 py-3 text-left font-semibold">
+        {monitor.name}
+        {note ? <span className="text-mute block text-xs font-normal">{note}</span> : null}
+      </th>
+      <td className="px-5 py-3">
+        <AvailabilityTape days={monitor.availability_30d} />
+      </td>
+      <td className="px-5 py-3">
+        <LatencySpark hours={monitor.latency_24h} />
+      </td>
+    </tr>
+  )
+}
+
+const ServiceCard = ({ monitor }: { monitor: StatusMonitor }) => {
+  const { note } = monitorHealth(monitor)
+  return (
+    <li className="px-4 py-4">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <p className="text-navy heading text-base">{monitor.name}</p>
+          {note ? <p className="text-mute text-xs">{note}</p> : null}
+        </div>
+        <HealthPill monitor={monitor} />
+      </div>
+      <p className="text-mute mt-3 mb-1 text-[11px] font-bold tracking-[0.12em] uppercase">
+        Availability, last 30d
+      </p>
       <AvailabilityTape days={monitor.availability_30d} />
-    </td>
-    <td className="px-5 py-3">
+      <p className="text-mute mt-3 mb-1 text-[11px] font-bold tracking-[0.12em] uppercase">
+        Median response, last 24h
+      </p>
       <LatencySpark hours={monitor.latency_24h} />
-    </td>
-  </tr>
-)
+    </li>
+  )
+}
 
 const ServiceTable = ({
   snapshot,
@@ -196,54 +254,86 @@ const ServiceTable = ({
 }: {
   snapshot: StatusSnapshot
   onRefresh: () => void
-}) => (
-  <section className="border-line bg-paper shrink-0 overflow-hidden rounded-lg border">
-    <div className="overflow-x-scroll">
-      <table className="w-full min-w-[40rem] text-left text-sm" aria-label="Services">
-        <thead className="bg-ice-2 border-line border-b">
-          <tr>
-            {(
-              ["Status", "Name", "Availability — last 30d", "Median response — last 24h"] as const
-            ).map((label) => (
-              <th
-                key={label}
-                className="text-mute px-5 py-2.5 text-[10px] font-semibold tracking-[0.12em] uppercase"
-              >
-                {label}
-              </th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
+}) => {
+  const isMobile = useIsMobile()
+  return (
+    <section className="border-line bg-paper shrink-0 overflow-hidden rounded-lg border">
+      {isMobile ? (
+        <ul aria-label="Services" className="divide-line m-0 list-none divide-y p-0">
           {snapshot.monitors.map((monitor) => (
-            <ServiceRow key={monitor.key} monitor={monitor} />
+            <ServiceCard key={monitor.key} monitor={monitor} />
           ))}
-        </tbody>
-      </table>
-    </div>
-    <div className="border-line flex flex-wrap items-center justify-between gap-3 border-t px-5 py-3">
-      <p className="text-mute flex flex-wrap gap-x-3 gap-y-1 text-xs">
-        <span>Last updated {formatCheckedAt(snapshot.checked_at)}</span>
-        <span aria-hidden="true">·</span>
-        <span>Next update in 15 seconds</span>
-      </p>
-      <Button type="button" variant="outline" size="lg" onClick={onRefresh}>
-        Refresh
-      </Button>
-    </div>
-  </section>
-)
+        </ul>
+      ) : (
+        <div className="overflow-x-scroll">
+          <table className="w-full min-w-[40rem] text-left text-sm" aria-label="Services">
+            <thead className="bg-ice-2 border-line border-b">
+              <tr>
+                {(
+                  [
+                    "Status",
+                    "Name",
+                    "Availability — last 30d",
+                    "Median response — last 24h",
+                  ] as const
+                ).map((label) => (
+                  <th
+                    key={label}
+                    className="text-mute px-5 py-2.5 text-[10px] font-semibold tracking-[0.12em] uppercase"
+                  >
+                    {label}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {snapshot.monitors.map((monitor) => (
+                <ServiceRow key={monitor.key} monitor={monitor} />
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+      <div className="border-line flex flex-wrap items-center justify-between gap-3 border-t px-4 py-3 sm:px-5">
+        <p className="text-mute flex flex-wrap gap-x-3 gap-y-1 text-xs">
+          <span>Last updated {formatCheckedAt(snapshot.checked_at)}</span>
+          <span aria-hidden="true">·</span>
+          <span>Next update in 15 seconds</span>
+        </p>
+        <Button
+          type="button"
+          variant="outline"
+          size="lg"
+          onClick={onRefresh}
+          className="max-md:min-h-11 max-md:w-full"
+        >
+          Refresh
+        </Button>
+      </div>
+    </section>
+  )
+}
 
 const IncidentList = ({ incidents }: { incidents: StatusIncident[] }) => (
   <section className="border-line bg-paper shrink-0 rounded-lg border">
     <h2 className="text-navy heading border-line border-b px-5 py-3 text-sm">Incidents</h2>
     <ol aria-label="Incidents" className="divide-line divide-y">
       {incidents.map((item) => (
-        <li key={item.date} className="flex items-baseline justify-between gap-4 px-5 py-3">
+        <li
+          key={item.date}
+          className="flex flex-col gap-0.5 px-4 py-3 sm:flex-row sm:items-baseline sm:justify-between sm:gap-4 sm:px-5"
+        >
           <time className="text-navy font-mono text-xs font-semibold" dateTime={item.date}>
             {item.date}
           </time>
-          <p className="text-mute text-sm">{item.summary}</p>
+          {item.summary === "No incidents" ? (
+            <p className="text-mute text-sm">{item.summary}</p>
+          ) : (
+            <p className="text-destructive inline-flex items-center gap-1.5 text-sm font-semibold">
+              <AlertTriangle aria-hidden="true" className="size-3.5 shrink-0" />
+              {item.summary}
+            </p>
+          )}
         </li>
       ))}
     </ol>
@@ -257,9 +347,9 @@ const LoadTape = ({ snapshot }: { snapshot: StatusSnapshot }) => (
         <article
           key={item.key}
           aria-labelledby={`status-load-${item.key}`}
-          className="bg-paper px-5 py-4"
+          className="bg-paper px-4 py-4 sm:px-5"
         >
-          <p className="text-navy font-mono text-3xl font-semibold tracking-tight">
+          <p className="text-navy font-mono text-2xl font-semibold tracking-tight sm:text-3xl">
             {snapshot.inbox[item.field]}
           </p>
           <h3 id={`status-load-${item.key}`} className="text-mute mt-1 text-xs font-medium">
@@ -283,50 +373,80 @@ const LoadTape = ({ snapshot }: { snapshot: StatusSnapshot }) => (
   </section>
 )
 
-const WebsiteTable = ({ sites }: { sites: StatusSite[] }) => (
-  <section className="border-line bg-paper shrink-0 overflow-hidden rounded-lg border">
-    <div className="border-line flex items-baseline justify-between gap-3 border-b px-5 py-3">
-      <h2 className="text-navy heading text-sm">Websites</h2>
-      <Link
-        href="/admin/sites"
-        className="text-steel hover:text-navy text-xs font-semibold no-underline"
-      >
-        Manage sites
-      </Link>
-    </div>
-    <div className="overflow-x-scroll">
-      <table className="w-full min-w-[36rem] text-left text-sm" aria-label="Websites">
-        <thead className="bg-ice-2 border-line border-b">
-          <tr>
-            {(["Website", "Widget", "Assistant", "Knowledge", "Waiting"] as const).map((label) => (
-              <th
-                key={label}
-                className="text-mute px-5 py-2.5 text-[10px] font-semibold tracking-[0.12em] uppercase"
-              >
-                {label}
-              </th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {sites.map((site) => (
-            <tr key={site.id} className="border-line border-b last:border-b-0">
-              <th scope="row" className="text-navy px-5 py-3 font-semibold">
-                {site.name}
-              </th>
-              <td className="text-ink px-5 py-3">{widgetLabel(site.widget_installed)}</td>
-              <td className="text-ink px-5 py-3">{assistantLabel(site.bot_enabled)}</td>
-              <td className={cn("px-5 py-3", knowledgeClass(site.knowledge))}>
-                {knowledgeLabel(site.knowledge)}
-              </td>
-              <td className="text-ink px-5 py-3">{waitingLabel(site.waiting)}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  </section>
+const WebsiteCards = ({ sites }: { sites: StatusSite[] }) => (
+  <RecordCardList label="Websites">
+    {sites.map((site) => (
+      <RecordCard
+        key={site.id}
+        title={site.name}
+        badge={
+          <span className={cn("text-xs", knowledgeClass(site.knowledge))}>
+            Knowledge: {knowledgeLabel(site.knowledge)}
+          </span>
+        }
+        fields={[
+          { label: "Widget", value: widgetLabel(site.widget_installed) },
+          { label: "Assistant", value: assistantLabel(site.bot_enabled) },
+          { label: "Waiting", value: waitingLabel(site.waiting), wide: true },
+        ]}
+      />
+    ))}
+  </RecordCardList>
 )
+
+const WebsiteTable = ({ sites }: { sites: StatusSite[] }) => {
+  const isMobile = useIsMobile()
+  return (
+    <section className="border-line bg-paper shrink-0 overflow-hidden rounded-lg border">
+      <div className="border-line flex items-baseline justify-between gap-3 border-b px-4 py-3 sm:px-5">
+        <h2 className="text-navy heading text-sm">Websites</h2>
+        <Link
+          href="/admin/sites"
+          className="text-steel hover:text-navy py-2 text-xs font-semibold no-underline"
+        >
+          Manage sites
+        </Link>
+      </div>
+      {isMobile ? (
+        <WebsiteCards sites={sites} />
+      ) : (
+        <div className="overflow-x-scroll">
+          <table className="w-full min-w-[36rem] text-left text-sm" aria-label="Websites">
+            <thead className="bg-ice-2 border-line border-b">
+              <tr>
+                {(["Website", "Widget", "Assistant", "Knowledge", "Waiting"] as const).map(
+                  (label) => (
+                    <th
+                      key={label}
+                      className="text-mute px-5 py-2.5 text-[10px] font-semibold tracking-[0.12em] uppercase"
+                    >
+                      {label}
+                    </th>
+                  ),
+                )}
+              </tr>
+            </thead>
+            <tbody>
+              {sites.map((site) => (
+                <tr key={site.id} className="border-line border-b last:border-b-0">
+                  <th scope="row" className="text-navy px-5 py-3 font-semibold">
+                    {site.name}
+                  </th>
+                  <td className="text-ink px-5 py-3">{widgetLabel(site.widget_installed)}</td>
+                  <td className="text-ink px-5 py-3">{assistantLabel(site.bot_enabled)}</td>
+                  <td className={cn("px-5 py-3", knowledgeClass(site.knowledge))}>
+                    {knowledgeLabel(site.knowledge)}
+                  </td>
+                  <td className="text-ink px-5 py-3">{waitingLabel(site.waiting)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </section>
+  )
+}
 
 const FailureList = ({ snapshot }: { snapshot: StatusSnapshot }) => (
   <section className="border-line bg-paper shrink-0 rounded-lg border">
@@ -369,7 +489,10 @@ const StatusBody = ({
   snapshot: StatusSnapshot
   onRefresh: () => void
 }) => (
-  <div id="main-content" className="mx-auto w-full max-w-5xl space-y-5 px-5 py-6 lg:px-8 lg:py-8">
+  <div
+    id="main-content"
+    className="mx-auto w-full max-w-5xl space-y-4 px-4 py-4 sm:space-y-5 sm:px-5 sm:py-6 lg:px-8 lg:py-8"
+  >
     <OverallBanner snapshot={snapshot} />
     <UptimeCards snapshot={snapshot} />
     <ServiceTable snapshot={snapshot} onRefresh={onRefresh} />

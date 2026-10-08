@@ -5,7 +5,7 @@ from uuid import UUID
 from app.llm.bot_responder import BotResponder
 from app.services.grounded_response import EvidenceUnit, TurnContext
 from app.services.kb_embedder import OpenAIEmbedder, configured_embedder_id
-from app.settings import Settings
+from app.settings import Settings, get_settings
 
 _SECRETS = {
     "database_url": "postgresql://chat:chat@127.0.0.1:55432/support_chat_test",
@@ -148,5 +148,5 @@ async def test_grounded_responder_uses_the_installed_sdk_request_contract(monkey
     assert draft.body == paraphrase
     assert draft.citations[0].source_title == evidence.source_title
     assert draft.citations[0].source_url == evidence.source_url
-    assert captured["max_tokens"] == 500
+    assert captured["max_tokens"] == get_settings().anthropic_max_tokens
     assert set(captured) == {"model", "max_tokens", "system", "messages"}

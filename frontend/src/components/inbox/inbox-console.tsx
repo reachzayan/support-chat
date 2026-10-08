@@ -166,7 +166,7 @@ const VisitorContext = ({
     >
       <DrawerContent
         className={
-          mobile ? "h-[55dvh] w-full max-w-none gap-0 rounded-3xl" : "w-full max-w-sm gap-0"
+          mobile ? "h-[85dvh] w-full max-w-none gap-0 rounded-t-3xl" : "w-full max-w-sm gap-0"
         }
       >
         <DrawerHeader className={mobile ? "min-h-0 pt-0 pb-3" : undefined}>
@@ -258,21 +258,47 @@ const EmptyTranscript = ({
         <RetryError text="Could not open conversation." onRetry={onRetry} />
       </section>
     )
+  if (loading) return <TranscriptSkeleton />
   return (
-    <section
-      className="bg-ice flex min-h-0 min-w-0 flex-1 flex-col items-center justify-center px-8"
-      aria-busy={loading}
-    >
-      <h1 className="text-navy heading text-base">
-        {loading ? "Opening conversation…" : "Select a conversation"}
-      </h1>
+    <section className="bg-ice flex min-h-0 min-w-0 flex-1 flex-col items-center justify-center px-8">
+      <h1 className="text-navy heading text-base">Select a conversation</h1>
       <p className="text-mute mt-2 max-w-xs text-center text-sm leading-6">
-        {loading
-          ? "Loading the latest transcript and visitor context."
-          : "Choose a chat from Needs Attention to review its transcript and visitor context."}
+        Choose a chat from Needs Attention to review its transcript and visitor context.
       </p>
     </section>
   )
 }
+
+const SKELETON_BUBBLES = [
+  "w-2/3 self-start",
+  "w-1/2 self-end",
+  "w-3/5 self-start",
+  "w-2/5 self-end",
+] as const
+
+const TranscriptSkeleton = () => (
+  <output
+    aria-label="Opening conversation"
+    aria-busy="true"
+    className="bg-paper flex min-h-0 min-w-0 flex-1 flex-col"
+  >
+    <div className="border-line flex min-h-16 shrink-0 items-center gap-3 border-b px-4 lg:px-5">
+      <span className="bg-ice-2 size-10 shrink-0 rounded-full motion-safe:animate-pulse" />
+      <div className="flex flex-1 flex-col gap-2">
+        <span className="bg-ice-2 h-3 w-32 rounded motion-safe:animate-pulse" />
+        <span className="bg-ice-2 h-2.5 w-20 rounded motion-safe:animate-pulse" />
+      </div>
+    </div>
+    <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-hidden p-5" aria-hidden="true">
+      {SKELETON_BUBBLES.map((width) => (
+        <span
+          key={width}
+          className={`bg-ice-2 h-12 rounded-2xl motion-safe:animate-pulse ${width}`}
+        />
+      ))}
+    </div>
+    <h1 className="text-navy heading px-5 pb-6 text-center text-sm">Opening conversation…</h1>
+  </output>
+)
 
 export type { InboxFilter, InboxListItem }

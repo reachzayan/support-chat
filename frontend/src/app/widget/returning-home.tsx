@@ -19,6 +19,8 @@ import {
 import { Button } from "@/components/ui/button"
 import type { ConversationHistoryItem, ReturningIdentity } from "@/lib/postmessage"
 
+import { CTA_BUTTON } from "./cta-button"
+
 const INQUIRY_LABELS: Record<string, string> = {
   sales: "Sales question",
   results: "Results question",
@@ -42,8 +44,7 @@ type ReturningHomeProps =
       onStartFresh: () => void
     }
 
-const PRIMARY =
-  "border-steel/15 bg-ice-2 text-navy hover:!bg-[#e6eefc] hover:!text-navy focus-visible:ring-steel/30 min-h-11 w-full border px-4 text-sm font-bold leading-none shadow-[0_8px_20px_rgba(36,86,160,0.12)] focus-visible:ring-4"
+const PRIMARY = CTA_BUTTON
 
 const QUIET =
   "text-steel hover:!bg-ice-2/80 hover:!text-navy focus-visible:ring-steel min-h-11 w-full cursor-pointer rounded-2xl text-sm font-bold focus-visible:ring-2 focus-visible:outline-none"
@@ -74,12 +75,7 @@ export const ReturningHome = (props: ReturningHomeProps) => {
           </p>
         </div>
         <div className="mt-auto space-y-2 pt-6">
-          <Button
-            type="button"
-            variant="secondary"
-            className={PRIMARY}
-            onClick={props.onShowHistory}
-          >
+          <Button type="button" variant="default" className={PRIMARY} onClick={props.onShowHistory}>
             Yes, show my chats
           </Button>
           <Button type="button" variant="ghost" className={QUIET} onClick={props.onStartFresh}>
@@ -178,7 +174,7 @@ const HistoryList = ({
       <div className="mt-3 space-y-1.5">
         <Button
           type="button"
-          variant="secondary"
+          variant="default"
           className={PRIMARY}
           disabled={!selected}
           onClick={openSelected}

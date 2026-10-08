@@ -97,6 +97,7 @@ const useKnowledgeSources = (siteId: string) => {
   const target = useSearchTarget()
   const [sources, setSources] = useState<KbSourceRecord[]>([])
   const [sourceId, setSourceId] = useState<string | null>(null)
+  const [loadedSiteId, setLoadedSiteId] = useState("")
   const siteIdRef = useRef(siteId)
   const searchSourceApplied = useRef(false)
 
@@ -106,7 +107,11 @@ const useKnowledgeSources = (siteId: string) => {
       return
     }
     const response = await staffRead(`/api/sites/${currentSiteId}/kb-sources`)
-    if (!response.ok || siteIdRef.current !== currentSiteId) {
+    if (siteIdRef.current !== currentSiteId) {
+      return
+    }
+    if (!response.ok) {
+      setLoadedSiteId(currentSiteId)
       return
     }
     const payload = (await response.json()) as { items: KbSourceRecord[] }
@@ -114,6 +119,7 @@ const useKnowledgeSources = (siteId: string) => {
       return
     }
     applySourceList(payload.items, setSources, setSourceId)
+    setLoadedSiteId(currentSiteId)
     if (!searchSourceApplied.current) {
       searchSourceApplied.current = true
       if (target.source && payload.items.some((source) => source.id === target.source))
@@ -145,7 +151,9 @@ const useKnowledgeSources = (siteId: string) => {
     setSourceId(null)
   }, [])
 
-  return { sources, sourceId, setSources, setSourceId, resetForSite }
+  const sourcesLoaded = siteId !== "" && loadedSiteId === siteId
+
+  return { sources, sourceId, sourcesLoaded, setSources, setSourceId, resetForSite }
 }
 
 const preferredKnowledgePage = (
@@ -232,7 +240,7 @@ const useKnowledgePages = (sources: KbSourceRecord[]) => {
 export const useKnowledgeCatalog = (isAdmin: boolean) => {
   const [urls, setUrls] = useState("")
   const { sites, siteId, handleSite: selectSite, loadError, handleRetryLoad } = useKnowledgeSites()
-  const { sources, sourceId, setSources, setSourceId } = useKnowledgeSources(siteId)
+  const { sources, sourceId, sourcesLoaded, setSources, setSourceId } = useKnowledgeSources(siteId)
   const { pages, pageDetail, setPages, setPageDetail } = useKnowledgePages(sources)
   const handleSite = useCallback(
     (nextSiteId: string) => {
@@ -261,6 +269,7 @@ export const useKnowledgeCatalog = (isAdmin: boolean) => {
     siteId,
     sources,
     sourceId,
+    sourcesLoaded,
     pages,
     pageDetail,
     urls,

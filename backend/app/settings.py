@@ -109,8 +109,12 @@ class Settings(BaseSettings):
     rate_login_failure_window: int = 900
     anthropic_model: str = "claude-haiku-4-5-20251001"
     anthropic_api_key: str | None = None
-    anthropic_max_tokens: int = 500
-    anthropic_timeout: float = 30.0
+    anthropic_max_tokens: int = 1024
+    anthropic_structured_max_tokens: int = 1024
+    # Per attempt. With anthropic_max_retries the worst case for one call is
+    # (retries + 1) * timeout, which must fit inside the turn deadline.
+    anthropic_timeout: float = 20.0
+    anthropic_max_retries: int = 2
     haiku_model: str = "claude-haiku-4-5-20251001"
     haiku_max_tokens: int = 350
     haiku_timeout: float = 10.0
@@ -125,7 +129,9 @@ class Settings(BaseSettings):
     openai_embed_max_tokens: int = 8000
     max_answer_chars: int = 20000
     max_bot_answer_chars: int = 1500
-    anthropic_calls_per_minute: int = 6
+    # A turn makes 3-6 calls (resolve, draft, repairs, assess); 30 allows ~5 full turns
+    # a minute, above the 20/min visitor submit limit's useful rate but still a wallet cap.
+    anthropic_calls_per_minute: int = 30
     full_context_max_tokens: int = 50_000
     fast_path_min_score: float = 0.15
     fast_path_margin_ratio: float = 1.5
@@ -230,6 +236,7 @@ class Settings(BaseSettings):
         "max_answer_chars",
         "max_bot_answer_chars",
         "anthropic_calls_per_minute",
+        "anthropic_structured_max_tokens",
         "full_context_max_tokens",
         "conversation_window_size",
         "message_replay_limit",
@@ -270,7 +277,7 @@ class Settings(BaseSettings):
             raise ValueError("must be zero or positive")
         return value
 
-    @field_validator("kb_ingest_host_delay_ms", "kb_ingest_retry_sleep")
+    @field_validator("kb_ingest_host_delay_ms", "kb_ingest_retry_sleep", "anthropic_max_retries")
     @classmethod
     def non_negative_int(cls, value: int) -> int:
         if value < 0:

@@ -1,5 +1,7 @@
 "use client"
 
+/* oxlint-disable react-perf/jsx-no-jsx-as-prop, react-perf/jsx-no-new-array-as-prop -- Card fields and actions are built per record. */
+
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react"
 
 import { LogTableSkeleton } from "@/components/admin/loading-skeleton"
@@ -7,7 +9,9 @@ import { staffRead } from "@/components/admin/staff-api"
 import { StaffHeader } from "@/components/admin/staff-nav"
 import { useSearchTarget } from "@/components/search/workspace-route"
 import { Button } from "@/components/ui/button"
+import { RecordCard, RecordCardList } from "@/components/ui/record-cards"
 import { Spinner } from "@/components/ui/spinner"
+import { useIsMobile } from "@/hooks/use-mobile"
 
 export type AppLogRow = {
   id: string
@@ -66,6 +70,59 @@ const DumpButton = ({ dumping, onDump }: { dumping: boolean; onDump: () => void 
   </Button>
 )
 
+const levelClass = (level: string) => {
+  const value = level.toLowerCase()
+  if (value === "error" || value === "critical") {
+    return "bg-ember/10 text-ember"
+  }
+  if (value === "warning" || value === "warn") {
+    return "bg-steel/10 text-steel"
+  }
+  return "bg-ice-2 text-mute"
+}
+
+const LogsCards = ({ items }: { items: AppLogRow[] }) => (
+  <div className="border-line bg-paper overflow-hidden rounded-[8px] border">
+    <RecordCardList label="Application logs">
+      {items.map((row) => {
+        const detail = formatDetail(row.detail)
+        return (
+          <RecordCard
+            key={row.id}
+            eyebrow={<span className="font-mono">{row.created_at}</span>}
+            title={row.event}
+            badge={
+              <span
+                className={`rounded-[6px] px-1.5 py-0.5 text-[10px] font-bold uppercase ${levelClass(row.level)}`}
+              >
+                {row.level}
+              </span>
+            }
+            fields={[
+              { label: "Source", value: row.source },
+              { label: "Message", value: row.message, wide: true },
+              ...(detail === "—"
+                ? []
+                : [
+                    {
+                      label: "Detail",
+                      value: (
+                        <span className="line-clamp-4" title={detail}>
+                          {detail}
+                        </span>
+                      ),
+                      mono: true,
+                      wide: true,
+                    },
+                  ]),
+            ]}
+          />
+        )
+      })}
+    </RecordCardList>
+  </div>
+)
+
 const LogsTable = ({ items }: { items: AppLogRow[] }) => (
   <div className="border-line bg-paper overflow-x-scroll rounded-[8px] border">
     <table className="w-full min-w-[960px] text-left text-sm" aria-label="Application logs">
@@ -117,16 +174,25 @@ const LogsBody = ({
   error: string | null
   loading: boolean
   items: AppLogRow[]
-}) => (
-  <div className="min-h-0 flex-1 overflow-y-auto px-5 py-5 lg:px-8">
-    {error ? <p className="text-ember mb-3 text-sm font-semibold">{error}</p> : null}
-    {loading ? <LogTableSkeleton /> : null}
-    {!loading && items.length === 0 && !error ? (
-      <p className="text-mute text-sm">No application logs in the last 7 days.</p>
-    ) : null}
-    {items.length > 0 ? <LogsTable items={items} /> : null}
-  </div>
-)
+}) => {
+  const isMobile = useIsMobile()
+  return (
+    <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4 sm:px-5 sm:py-5 lg:px-8">
+      {error ? <p className="text-ember mb-3 text-sm font-semibold">{error}</p> : null}
+      {loading ? <LogTableSkeleton /> : null}
+      {!loading && items.length === 0 && !error ? (
+        <p className="text-mute text-sm">No application logs in the last 7 days.</p>
+      ) : null}
+      {items.length > 0 ? (
+        isMobile ? (
+          <LogsCards items={items} />
+        ) : (
+          <LogsTable items={items} />
+        )
+      ) : null}
+    </div>
+  )
+}
 
 export const LogsConsole = ({ isAdmin, displayName }: LogsConsoleProps) => {
   const target = useSearchTarget()

@@ -33,6 +33,7 @@ export const KnowledgeConsole = ({ isAdmin, displayName: _displayName }: Knowled
     }
   }, [handleAdd])
   const handleOpenAddKnowledge = useCallback(() => setAddKnowledgeOpen(true), [])
+  const showsEmptyState = state.sourcesLoaded && state.sources.length === 0
   return (
     <div className="view-transition-enter bg-ice flex min-h-0 flex-1 flex-col overflow-hidden">
       <div className="shrink-0">
@@ -47,7 +48,7 @@ export const KnowledgeConsole = ({ isAdmin, displayName: _displayName }: Knowled
                 siteId={state.siteId}
                 onSite={state.handleSite}
               />
-              {isAdmin ? (
+              {isAdmin && !showsEmptyState ? (
                 <Button
                   type="button"
                   variant="default"
@@ -69,7 +70,7 @@ export const KnowledgeConsole = ({ isAdmin, displayName: _displayName }: Knowled
           </div>
         ) : null}
       </div>
-      <KnowledgeLoadedCatalog isAdmin={isAdmin} state={state} />
+      <KnowledgeLoadedCatalog isAdmin={isAdmin} state={state} onAdd={handleOpenAddKnowledge} />
       <SnapshotDiffSheet
         open={state.diffSource !== null}
         onOpenChange={state.handleDiffOpen}
@@ -97,15 +98,54 @@ export const KnowledgeConsole = ({ isAdmin, displayName: _displayName }: Knowled
   )
 }
 
+const KnowledgeEmptyState = ({
+  isAdmin,
+  onAdd,
+  disabled,
+}: {
+  isAdmin: boolean
+  onAdd: () => void
+  disabled: boolean
+}) => (
+  <div id="main-content" className="flex min-h-0 flex-1 items-center justify-center p-4 sm:p-6">
+    <section className="border-line bg-paper w-full max-w-md rounded-xl border p-6 text-center sm:p-8">
+      <h2 className="text-navy heading text-base">No knowledge sources yet</h2>
+      <p className="text-mute mt-2 text-sm">
+        Add a website or trusted text this site should answer from.
+      </p>
+      {isAdmin ? (
+        <Button
+          type="button"
+          variant="default"
+          size="lg"
+          onClick={onAdd}
+          disabled={disabled}
+          className="mt-5 font-bold max-md:min-h-11 max-md:w-full"
+        >
+          <Plus data-icon="inline-start" aria-hidden="true" />
+          Add knowledge
+        </Button>
+      ) : (
+        <p className="text-mute mt-4 text-xs">An administrator can add sources.</p>
+      )}
+    </section>
+  </div>
+)
+
 const KnowledgeLoadedCatalog = ({
   isAdmin,
   state,
+  onAdd,
 }: {
   isAdmin: boolean
   state: ReturnType<typeof useKnowledgeState>
+  onAdd: () => void
 }) => {
   if (state.loadError !== null && state.sites.length === 0) {
     return null
+  }
+  if (state.sourcesLoaded && state.sources.length === 0) {
+    return <KnowledgeEmptyState isAdmin={isAdmin} onAdd={onAdd} disabled={!state.siteId} />
   }
   return (
     <>

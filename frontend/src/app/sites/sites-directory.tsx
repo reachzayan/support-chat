@@ -25,7 +25,7 @@ export const SitesDirectory = ({
 }) => (
   <section className="border-line bg-paper min-w-0 overflow-hidden rounded-lg border">
     <div className="border-line flex flex-wrap items-center justify-between gap-3 border-b px-4 py-3 sm:px-5">
-      <div>
+      <div className="min-w-0">
         <p className={LABEL}>Directory</p>
         <p className="text-navy heading mt-0.5 text-sm">
           {sites.length === 1 ? "1 website" : `${sites.length} websites`}
@@ -37,7 +37,7 @@ export const SitesDirectory = ({
           variant="default"
           size="lg"
           onClick={onOpenAdd}
-          className="font-semibold"
+          className="font-semibold max-md:min-h-11 max-md:w-full"
         >
           <Plus data-icon="inline-start" aria-hidden="true" />
           Add new website

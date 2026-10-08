@@ -5,7 +5,7 @@
 import { cn } from "cn"
 import { Inbox as InboxIcon } from "lucide-react"
 import { AnimatePresence, LayoutGroup, motion, useReducedMotion } from "motion/react"
-import { useCallback, useDeferredValue, useMemo } from "react"
+import { useCallback, useDeferredValue, useEffect, useMemo, useRef, type ReactNode } from "react"
 
 import { ResizableListPane } from "@/components/admin/pane-resize-handle"
 import { RetryError } from "@/components/admin/retry-error"
@@ -34,6 +34,7 @@ import {
 } from "@/lib/pane-width"
 import { matchesSearchQuery } from "@/lib/search"
 
+import { uniqueById } from "./inbox-api"
 import {
   INBOX_FILTERS,
   type InboxCounts,
@@ -166,7 +167,7 @@ const SiteChip = ({ name, reducedMotion }: { name: string; reducedMotion: boolea
     animate={shownChip}
     exit={reducedMotion ? undefined : exitChip}
     transition={reducedMotion ? FILTER_SLIDER_INSTANT : ROW_FADE}
-    className="bg-ice-2 text-mute mt-0.5 inline-flex rounded px-1.5 py-0.5 text-[10px] font-semibold tracking-wide"
+    className="bg-ice-2 text-mute mt-0.5 inline-flex max-w-full rounded px-1.5 py-0.5 text-[10px] font-semibold tracking-wide"
   >
     {name}
   </motion.span>
@@ -214,7 +215,7 @@ const ConversationRowContent = ({
         onClick={handleSelect}
         aria-current={selected ? "true" : undefined}
         whileTap={{ scale: 0.99 }}
-        className={`relative flex h-auto w-full items-start gap-3 rounded-lg px-3 py-3 text-left transition-colors duration-150 ease-out ${rowBackground(
+        className={`focus-visible:ring-steel/60 relative flex h-auto min-h-16 w-full min-w-0 items-start gap-3 rounded-lg px-3 py-3 text-left whitespace-normal transition-colors duration-150 ease-out focus-visible:ring-2 ${rowBackground(
           selected,
           unread,
         )}`}
@@ -233,13 +234,13 @@ const ConversationRowContent = ({
         >
           {initialFor(item.visitor_display)}
         </span>
-        <span className="min-w-0 flex-1">
-          <span className="flex items-baseline justify-between gap-2">
+        <span className="block min-w-0 flex-1">
+          <span className="flex min-w-0 items-baseline justify-between gap-2">
             <span className="text-ink truncate text-sm font-semibold">{item.visitor_display}</span>
             <ConversationUnreadIndicator count={unread} />
             <time
               dateTime={item.last_message_at}
-              className="text-mute shrink-0 font-mono text-[10px]"
+              className="text-mute shrink-0 font-mono text-[10px] whitespace-nowrap"
             >
               {formatTime(item.last_message_at)}
             </time>
@@ -250,7 +251,7 @@ const ConversationRowContent = ({
             ) : null}
           </AnimatePresence>
           <span
-            className={`text-ink line-clamp-2 text-xs leading-5 ${unread > 0 ? "font-semibold" : ""}`}
+            className={`text-ink line-clamp-2 block text-xs leading-5 break-words whitespace-normal ${unread > 0 ? "font-semibold" : ""}`}
           >
             {item.preview}
           </span>
@@ -363,9 +364,13 @@ const ConversationListBody = ({
       <div className="border-line flex h-16 items-center border-b px-5">
         <h2 className="text-navy heading text-sm">Conversations</h2>
       </div>
-      <div className="mx-4 mt-4 mb-3 inline-flex w-fit max-w-full flex-col gap-3 self-start">
-        <InboxSiteNav sites={sites} siteId={siteId} onSite={onSite} />
-        <InboxFilterNav filter={filter} siteId={siteId} counts={counts} onFilter={onFilter} />
+      <div className="flex min-w-0 shrink-0 flex-col gap-3 px-4 pt-4 pb-3">
+        <InboxControl label="Website">
+          <InboxSiteNav sites={sites} siteId={siteId} onSite={onSite} />
+        </InboxControl>
+        <InboxControl label="Status">
+          <InboxFilterNav filter={filter} siteId={siteId} counts={counts} onFilter={onFilter} />
+        </InboxControl>
       </div>
       {loadError ? (
         <div className="px-4 pb-3">
@@ -377,6 +382,9 @@ const ConversationListBody = ({
           selectedId={selectedId}
           nextCursor={nextCursor}
           query={query}
+          filter={filter}
+          counts={counts}
+          onFilter={onFilter}
           showSite={siteId === null}
           onSelect={onSelect}
           onLoadMore={onLoadMore}
@@ -386,9 +394,25 @@ const ConversationListBody = ({
   )
 }
 
+const InboxControl = ({ label, children }: { label: string; children: ReactNode }) => (
+  <div className="flex min-w-0 flex-col gap-1.5">
+    <span className="text-mute text-[10px] font-bold tracking-[0.12em] uppercase">{label}</span>
+    {children}
+  </div>
+)
+
 const ALL_INBOXES = "all"
 
-const inboxOptionLabel = (name: string, count: number) => `${name} ${count}`
+const InboxOptionLabel = ({ name, count }: { name: string; count: number }) => (
+  <span className="flex min-w-0 items-center gap-2">
+    <span className="min-w-0 truncate">{name}</span>
+    {count > 0 ? (
+      <span className="bg-ember/10 text-ember inline-flex h-5 shrink-0 items-center rounded-[6px] px-1.5 text-[10px] font-bold whitespace-nowrap tabular-nums">
+        {count} need attention
+      </span>
+    ) : null}
+  </span>
+)
 
 const queuedElsewhere = (sites: InboxSite[], siteId: string | null) => {
   if (siteId === null) {
@@ -406,11 +430,11 @@ const orderInboxSites = (sites: InboxSite[]) =>
   })
 
 const inboxSelectItems = (sites: InboxSite[], siteId: string | null, queuedAll: number) => {
-  const next: Record<string, string> = {
-    [ALL_INBOXES]: inboxOptionLabel("All", queuedAll),
+  const next: Record<string, ReactNode> = {
+    [ALL_INBOXES]: <InboxOptionLabel name="All websites" count={queuedAll} />,
   }
   for (const site of sites) {
-    next[site.id] = inboxOptionLabel(site.name, site.queued)
+    next[site.id] = `${site.name} ${site.queued}`
   }
   if (siteId !== null && next[siteId] === undefined) {
     next[siteId] = "Inbox"
@@ -459,7 +483,8 @@ const InboxSiteNav = ({
       <Select value={siteId ?? ALL_INBOXES} onValueChange={handleSiteChange} items={items}>
         <SelectTrigger
           aria-label={triggerLabel}
-          className="border-line bg-paper text-navy hover:border-navy focus-visible:border-steel focus-visible:ring-steel/40 h-10 w-full min-w-0 rounded-[8px] border px-3 text-sm font-semibold shadow-none data-[size=default]:h-10"
+          title="Website inbox. The number is chats needing attention."
+          className="border-line bg-paper text-navy hover:border-navy focus-visible:border-steel focus-visible:ring-steel/40 h-10 w-full min-w-0 rounded-[8px] border px-3 text-sm font-semibold shadow-none data-[size=default]:h-10 max-xl:h-11 max-xl:data-[size=default]:h-11"
         >
           <SelectValue className="min-w-0 truncate font-semibold" />
           {elsewhere > 0 ? <InboxElsewhereBadge count={elsewhere} /> : null}
@@ -470,14 +495,16 @@ const InboxSiteNav = ({
           className="border-line bg-paper text-ink w-max min-w-(--anchor-width) rounded-[8px] border shadow-none ring-1 ring-[rgba(13,31,58,0.12)]"
         >
           <SelectGroup>
-            <SelectItem value={ALL_INBOXES}>{inboxOptionLabel("All", queuedAll)}</SelectItem>
+            <SelectItem value={ALL_INBOXES}>
+              <InboxOptionLabel name="All websites" count={queuedAll} />
+            </SelectItem>
             {orderedSites.map((site) => (
               <SelectItem
                 key={site.id}
                 value={site.id}
                 className={site.queued > 0 ? "font-semibold" : undefined}
               >
-                {inboxOptionLabel(site.name, site.queued)}
+                {`${site.name} ${site.queued}`}
               </SelectItem>
             ))}
           </SelectGroup>
@@ -503,14 +530,21 @@ const InboxFilterButton = ({
   sliderTransition: SliderTransition
 }) => {
   const handleClick = useCallback(() => onFilter(item.id), [item.id, onFilter])
+  const ref = useRef<HTMLButtonElement>(null)
+  useEffect(() => {
+    if (active) {
+      ref.current?.scrollIntoView?.({ block: "nearest", inline: "nearest" })
+    }
+  }, [active])
   return (
     <Button
+      ref={ref}
       type="button"
       variant="ghost"
       aria-label={unread > 0 ? `${item.label}, ${unread} unread` : item.label}
       aria-pressed={active}
       onClick={handleClick}
-      className={`relative flex h-8 shrink-0 items-center justify-center gap-1 rounded-full px-2 text-center text-[11px] leading-none font-bold whitespace-nowrap transition-colors duration-200 ease-out max-xl:min-h-11 ${
+      className={`focus-visible:ring-steel relative flex h-8 shrink-0 items-center justify-center gap-1 rounded-full px-2 text-center text-[11px] leading-none font-bold whitespace-nowrap transition-colors duration-200 ease-out max-xl:min-h-11 ${
         active ? "text-navy" : "text-mute hover:text-ink"
       }`}
     >
@@ -519,7 +553,7 @@ const InboxFilterButton = ({
           layoutId="inbox-filter-active"
           transition={sliderTransition}
           aria-hidden="true"
-          className="bg-paper absolute inset-0 rounded-full shadow-[0_1px_3px_rgba(13,31,58,0.10),0_0_0_1px_rgba(13,31,58,0.04)]"
+          className="bg-paper ring-navy/25 absolute inset-0 rounded-full shadow-[0_1px_3px_rgba(13,31,58,0.10)] ring-1"
         />
       ) : null}
       <span className={`relative size-1.5 shrink-0 rounded-full ${stateDotClass(item.id)}`} />
@@ -551,7 +585,7 @@ const InboxFilterNav = ({
     <LayoutGroup id="inbox-filters">
       <nav
         aria-label="Inbox filters"
-        className="border-line bg-ice-2/70 flex h-10 w-fit max-w-full [scrollbar-width:none] flex-nowrap items-center gap-0.5 overflow-x-auto rounded-full border p-1 max-xl:h-13"
+        className="border-line bg-ice-2/70 flex h-10 w-fit max-w-full [scrollbar-width:none] flex-nowrap items-center gap-0.5 overflow-x-auto overscroll-x-contain rounded-full border p-1 max-xl:h-13"
       >
         {INBOX_FILTERS.map((item) => (
           <InboxFilterButton
@@ -579,20 +613,71 @@ type RowsProps = {
   selectedId: string | null
   nextCursor: string | null
   query: string
+  filter: InboxFilter
+  counts: InboxCounts
+  onFilter: (filter: InboxFilter) => void
   showSite: boolean
   onSelect: (id: string) => void
   onLoadMore: () => void
 }
 
+const filterLabel = (filter: InboxFilter) =>
+  INBOX_FILTERS.find((item) => item.id === filter)?.label ?? filter
+
+const EmptyRows = ({
+  query,
+  filter,
+  counts,
+  onFilter,
+}: Pick<RowsProps, "query" | "filter" | "counts" | "onFilter">) => {
+  const handleShowQueued = useCallback(() => onFilter("queued"), [onFilter])
+  const elsewhere = filter === "queued" ? 0 : counts.queued
+  let title = "Inbox clear"
+  if (query) {
+    title = `No chats match “${query.trim()}”`
+  } else if (elsewhere > 0) {
+    title = `No ${filterLabel(filter).toLowerCase()} chats right now`
+  }
+  let hint = "New conversations will appear here when a visitor needs help."
+  if (query) {
+    hint = "Try a visitor name, site, or phrase."
+  }
+  return (
+    <li className="px-5 text-center">
+      <InboxIcon
+        aria-hidden="true"
+        className="text-mute/50 mx-auto mb-2 size-6"
+        strokeWidth={1.5}
+      />
+      <p className="text-ink heading text-sm">{title}</p>
+      <p className="text-mute mt-1 text-xs leading-5">{hint}</p>
+      {!query && elsewhere > 0 ? (
+        <Button
+          type="button"
+          variant="outline"
+          onClick={handleShowQueued}
+          className="border-line text-navy mt-3 min-h-11 px-4 text-xs font-bold"
+        >
+          Show {elsewhere} needing attention
+        </Button>
+      ) : null}
+    </li>
+  )
+}
+
 const ConversationRows = ({
-  items,
+  items: rawItems,
   selectedId,
   nextCursor,
   query,
+  filter,
+  counts,
+  onFilter,
   showSite,
   onSelect,
   onLoadMore,
 }: RowsProps) => {
+  const items = useMemo(() => uniqueById(rawItems), [rawItems])
   const isEmpty = items.length === 0
   return (
     <ul
@@ -600,21 +685,7 @@ const ConversationRows = ({
       className={cn("min-h-0 flex-1 overflow-y-auto", isEmpty && "flex flex-col justify-center")}
     >
       {isEmpty ? (
-        <li className="px-5 text-center">
-          <InboxIcon
-            aria-hidden="true"
-            className="text-mute/50 mx-auto mb-2 size-6"
-            strokeWidth={1.5}
-          />
-          <p className="text-ink heading text-sm">
-            {query ? `No chats match “${query.trim()}”` : "Inbox clear"}
-          </p>
-          <p className="text-mute mt-1 text-xs leading-5">
-            {query
-              ? "Try a visitor name, site, or phrase."
-              : "New conversations will appear here when a visitor needs help."}
-          </p>
-        </li>
+        <EmptyRows query={query} filter={filter} counts={counts} onFilter={onFilter} />
       ) : null}
       <AnimatePresence initial={false}>
         {items.map((item) => (

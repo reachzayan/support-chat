@@ -51,8 +51,18 @@ class _GroundedMessages:
                 stop_reason="tool_use",
                 content=[SimpleNamespace(type="tool_use", name=stage, input=value)],
             )
-        latest = str(kwargs["messages"][-1]["content"])
-        documents = kwargs["messages"][0]["content"]
+        latest = " ".join(
+            block["text"]
+            for block in kwargs["messages"][-1]["content"]
+            if block.get("type") == "text"
+        )
+        documents = [
+            block
+            for message in kwargs["messages"]
+            if isinstance(message["content"], list)
+            for block in message["content"]
+            if block.get("type") == "document"
+        ]
         if "VBANK" in latest:
             needle, answer = VBANK_FACT, VBANK_REPLY
         elif "simpl" in latest.casefold():

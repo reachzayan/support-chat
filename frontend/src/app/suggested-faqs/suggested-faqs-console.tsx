@@ -90,7 +90,7 @@ export const SuggestedFaqsConsole = () => {
   if (!state.hasLoaded) {
     return (
       <PageFrame queue={queue}>
-        <main className="flex flex-col gap-4 px-5 py-6 lg:px-8 lg:py-8">
+        <main className="flex flex-col gap-4 px-4 py-4 sm:px-5 sm:py-6 lg:px-8 lg:py-8">
           <Skeleton className="h-16 w-full rounded-xl" />
           <Skeleton className="h-32 w-full rounded-xl" />
         </main>
@@ -105,7 +105,7 @@ export const SuggestedFaqsConsole = () => {
     <PageFrame queue={queue}>
       <main
         id="main-content"
-        className="flex min-h-0 min-w-0 flex-1 flex-col gap-4 overflow-y-auto overscroll-none px-5 py-6 lg:px-8 lg:py-8"
+        className="flex min-h-0 min-w-0 flex-1 flex-col gap-4 overflow-y-auto overscroll-none px-4 py-4 sm:px-5 sm:py-6 lg:px-8 lg:py-8"
       >
         <ViewTabs view={state.view} onSelect={state.selectView} />
         <section className="border-line bg-paper shrink-0 rounded-xl border p-4 sm:p-5">

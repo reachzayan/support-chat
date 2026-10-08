@@ -9,6 +9,7 @@ import { createReconnectScheduler } from "@/lib/ws-reconnect"
 import { isTrustedHostFrame, postToParent } from "./host-bridge"
 import { isCenteredNotice, type TranscriptLine } from "./transcript"
 import {
+  applySendError,
   applyVisitorFrame,
   isAck,
   isErrorFrame,
@@ -38,6 +39,7 @@ export const useVisitorConnection = (
   setLoadingOlder: (value: boolean) => void,
   socketRef: SocketRef,
   viewRef: ViewRef,
+  sendingRef: { current: boolean },
 ) => {
   const disposedRef = useRef(false)
   const schedulerRef = useRef<ReturnType<typeof createReconnectScheduler> | null>(null)
@@ -88,12 +90,13 @@ export const useVisitorConnection = (
         setLoadingOlder,
         socketRef,
         viewRef,
+        sendingRef,
         schedulerRef,
       )
     }
     window.addEventListener("message", onMessage)
     return () => window.removeEventListener("message", onMessage)
-  }, [setReconnecting, setSending, setLoadingOlder, setView, socketRef, viewRef])
+  }, [setReconnecting, setSending, setLoadingOlder, setView, socketRef, viewRef, sendingRef])
 
   useEffect(() => {
     const socket = socketRef.current
@@ -112,6 +115,7 @@ const handleBootstrap = (
   setLoadingOlder: (value: boolean) => void,
   socketRef: SocketRef,
   viewRef: ViewRef,
+  sendingRef: { current: boolean },
   schedulerRef: SchedulerRef,
 ) => {
   if (!isTrustedHostFrame(event)) {
@@ -145,8 +149,14 @@ const handleBootstrap = (
     setLoadingOlder,
     socketRef,
     viewRef,
+    sendingRef,
     schedulerRef,
   )
+}
+
+const reduceFrame = (view: ChatView, frame: unknown, sendPending: boolean): ChatView => {
+  const applied = applyVisitorFrame(view, frame)
+  return sendPending ? applySendError(applied, frame) : applied
 }
 
 const openSocket = (
@@ -161,6 +171,7 @@ const openSocket = (
   setLoadingOlder: (value: boolean) => void,
   socketRef: SocketRef,
   viewRef: ViewRef,
+  sendingRef: { current: boolean },
   schedulerRef: SchedulerRef,
 ) => {
   const socket = createVisitorSocket({
@@ -173,7 +184,7 @@ const openSocket = (
       schedulerRef.current?.markAuthenticated()
       setReconnecting(false)
       const current = viewRef.current
-      const next = applyVisitorFrame(current, frame)
+      const next = reduceFrame(current, frame, sendingRef.current)
       viewRef.current = next
       setView(() => next)
       announceVisitorReply(current, next, frame, origin)

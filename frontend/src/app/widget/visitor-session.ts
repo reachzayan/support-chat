@@ -14,6 +14,7 @@ export type ChatView = {
   lastEventId: number
   hasOlder: boolean
   typing: boolean
+  sendError?: string
   waitPromptId?: number | null
 }
 
@@ -171,6 +172,24 @@ const applyMessage = (view: ChatView, frame: Record<string, unknown>): ChatView 
   return { ...view, lines, lastEventId: Math.max(view.lastEventId, frame.id) }
 }
 
+const applyTransientFrame = (view: ChatView, frame: Record<string, unknown>): ChatView => {
+  if (frame.type === "typing" && typeof frame.active === "boolean") {
+    return { ...view, typing: frame.active }
+  }
+  if (frame.type === "ack") {
+    return { ...view, sendError: undefined }
+  }
+  return view
+}
+
+// Error frames carry no send identity, so the caller applies this only while a send is pending.
+export const applySendError = (view: ChatView, frame: unknown): ChatView => {
+  if (!isRecord(frame) || frame.type !== "error") {
+    return view
+  }
+  return { ...view, sendError: typeof frame.code === "string" ? frame.code : "unknown" }
+}
+
 export const applyVisitorFrame = (view: ChatView, frame: unknown): ChatView => {
   if (!isRecord(frame) || typeof frame.type !== "string") {
     return view
@@ -185,10 +204,7 @@ export const applyVisitorFrame = (view: ChatView, frame: unknown): ChatView => {
     const merged = frame.messages.reduce<ChatView>(applyVisitorFrame, view)
     return { ...merged, hasOlder: frame.has_older === true }
   }
-  if (frame.type === "typing" && typeof frame.active === "boolean") {
-    return { ...view, typing: frame.active }
-  }
-  return view
+  return applyTransientFrame(view, frame)
 }
 
 export const isPrechatAccepted = (frame: unknown): boolean => {

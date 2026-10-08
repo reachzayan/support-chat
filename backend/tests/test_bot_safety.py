@@ -140,7 +140,7 @@ async def test_ssn_word_without_digits_is_refused_without_calling_the_model(
             visitor.id,
             HOST_ORIGIN,
             uuid.uuid4(),
-            "Can your platform keep a candidate SSN on file for our HR team?",
+            "Can your platform keep my SSN on file for our HR team?",
         )
         if result.generation_id is not None:
             await service.run_bot_turn(conversation.id, result.generation_id)

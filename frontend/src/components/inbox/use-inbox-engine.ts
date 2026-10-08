@@ -4,7 +4,13 @@ import { useCallback, useEffect, useRef, useState, type Dispatch, type SetStateA
 
 import { createReconnectScheduler } from "@/lib/ws-reconnect"
 
-import { fetchInboxDetail, fetchInboxList, mergeInboxMessages } from "./inbox-api"
+import {
+  fetchCannedReplies,
+  fetchInboxDetailPage,
+  fetchInboxList,
+  mergeInboxMessages,
+  uniqueById,
+} from "./inbox-api"
 import { maxMessageId, type InboxLive } from "./inbox-session"
 import { bindAgentSocket, resumeAgentSocket, type SocketApi } from "./inbox-socket"
 import {
@@ -18,7 +24,7 @@ import {
 } from "./types"
 import type { InboxRefs } from "./use-inbox-refs"
 
-type DetailBundle = NonNullable<Awaited<ReturnType<typeof fetchInboxDetail>>>
+type DetailBundle = { detail: ConversationDetail }
 
 const applyFetchedDetail = (
   conversationId: string,
@@ -27,7 +33,6 @@ const applyFetchedDetail = (
   lastIdRef: { current: number },
   liveRef: { current: InboxLive },
   socketRef: { current: SocketApi | null },
-  setCanned: (canned: CannedReply[]) => void,
   setLive: (live: InboxLive) => void,
 ) => {
   const assigned = next.detail.assigned_agent
@@ -53,7 +58,6 @@ const applyFetchedDetail = (
     lines,
   }
   liveRef.current = nextLive
-  setCanned(next.canned)
   lastIdRef.current = maxMessageId(lines)
   setLive(nextLive)
   socketRef.current?.subscribe(conversationId, lastIdRef.current)
@@ -182,11 +186,8 @@ const replaceInboxMergedPages = async (
     }
     return
   }
-  const unique = merged.items.filter(
-    (item, index, items) => items.findIndex((row) => row.id === item.id) === index,
-  )
   setLoadError(false)
-  setItems(unique)
+  setItems(uniqueById(merged.items))
   setNextCursor(merged.nextCursor)
   setCounts(merged.counts)
   setSites(merged.sites)
@@ -246,7 +247,9 @@ const loadInboxDetail = async (
   setDetailError: Dispatch<SetStateAction<boolean>>,
   onOpenDetail: (detail: ConversationDetail) => void,
 ) => {
-  const next = await fetchInboxDetail(conversationId).catch(() => null)
+  const next = await fetchInboxDetailPage(conversationId)
+    .then((detail) => (detail === null ? null : { detail }))
+    .catch(() => null)
   if (request !== detailRequestRef.current || refs.selectedRef.current !== conversationId) {
     return
   }
@@ -262,9 +265,17 @@ const loadInboxDetail = async (
     refs.lastIdRef,
     refs.liveRef,
     socketRef,
-    setCanned,
     setLive,
   )
+  // Canned replies are secondary; the transcript must not wait for them.
+  const canned = await fetchCannedReplies(next.detail.site_id).catch(() => null)
+  if (
+    canned !== null &&
+    request === detailRequestRef.current &&
+    refs.selectedRef.current === conversationId
+  ) {
+    setCanned(canned)
+  }
 }
 
 export const useInboxLoaders = (
@@ -378,7 +389,7 @@ const useInboxListFetch = (
         return
       }
       setLoadError(false)
-      setItems(next.items)
+      setItems(uniqueById(next.items))
       setNextCursor(next.next_cursor)
       setCounts(next.counts)
       setSites(next.sites)

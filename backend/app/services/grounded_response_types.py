@@ -67,6 +67,7 @@ class TurnContext:
     sensitive: bool = False
     off_brand_blocklist: tuple[str, ...] = ()
     resolved_request: ResolvedRequest | None = None
+    human_enabled: bool = True
 
 
 @dataclass(frozen=True)

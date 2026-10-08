@@ -16,6 +16,7 @@ from app.services.kb_tokens import GENERIC_NOISE, WEAK_OVERLAP, is_overview_quer
 from app.settings import get_settings
 
 CONVERSATION_CHAR_BUDGET = 12_000
+STAFF_MARKER = "[Staff member] "
 
 
 @dataclass(frozen=True)
@@ -53,6 +54,9 @@ def conversation_window_messages(rows: list[Message], *, limit: int | None = Non
         text = redact_window_body(row.body)
         if not text:
             continue
+        if row.role == "agent":
+            # Staff are not the bot: keep their words, but never as the bot's own claims.
+            text = f"{STAFF_MARKER}{text}"
         messages.append({"role": role, "content": text})
     total = sum(len(message["content"]) for message in messages)
     while messages and total > CONVERSATION_CHAR_BUDGET:

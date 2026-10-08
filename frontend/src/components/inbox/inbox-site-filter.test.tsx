@@ -49,7 +49,7 @@ describe("inbox site filter", () => {
     await openNeedsAttention()
     expect(screen.getByText("Ada Lopez")).toBeInTheDocument()
     expect(screen.getByText("Other Visitor")).toBeInTheDocument()
-    expect(inboxValue()).toHaveTextContent(/^All 2$/)
+    expect(inboxValue()).toHaveTextContent(/^All websites2 need attention$/)
   })
 
   test("SampleSite hides Sample Services rows", async () => {
@@ -83,7 +83,7 @@ describe("inbox site filter", () => {
   test("an unknown stored site id falls back to All", async () => {
     window.localStorage.setItem(SITE_KEY, "99999999-9999-4999-8999-999999999999")
     await openNeedsAttention()
-    expect(inboxValue()).toHaveTextContent(/^All 2$/)
+    expect(inboxValue()).toHaveTextContent(/^All websites2 need attention$/)
     expect(screen.getByText("Ada Lopez")).toBeInTheDocument()
     expect(screen.getByText("Other Visitor")).toBeInTheDocument()
   })
@@ -114,10 +114,12 @@ describe("inbox site chips and queued counts", () => {
   test("inbox picker is a dropdown with All 2, SampleSite 1, and Sample Services 1", async () => {
     const user = userEvent.setup()
     renderWithProviders(<InboxConsole user={ALEX} />)
-    await waitFor(() => expect(inboxValue()).toHaveTextContent(/^All 2$/))
+    await waitFor(() => expect(inboxValue()).toHaveTextContent(/^All websites2 need attention$/))
     expect(screen.queryByRole("navigation", { name: "Site filter" })).not.toBeInTheDocument()
     await user.click(inboxPicker())
-    expect(await screen.findByRole("option", { name: "All 2" })).toBeInTheDocument()
+    expect(
+      await screen.findByRole("option", { name: /^All websites\s*2 need attention$/ }),
+    ).toBeInTheDocument()
     expect(screen.getByRole("option", { name: "SampleSite 1" })).toBeInTheDocument()
     expect(screen.getByRole("option", { name: "Sample Services 1" })).toBeInTheDocument()
   })
@@ -131,7 +133,7 @@ describe("inbox site chips and queued counts", () => {
     setListSites(manyInboxes)
     const user = userEvent.setup()
     renderWithProviders(<InboxConsole user={ALEX} />)
-    await waitFor(() => expect(inboxValue()).toHaveTextContent(/^All 0$/))
+    await waitFor(() => expect(inboxValue()).toHaveTextContent(/^All websites$/))
     await user.click(inboxPicker())
     expect(await screen.findByRole("option", { name: "Inbox 1 0" })).toBeInTheDocument()
     expect(screen.getByRole("option", { name: "Inbox 20 0" })).toBeInTheDocument()
@@ -173,7 +175,7 @@ describe("inbox elsewhere queued signal", () => {
 
   test("All does not show an elsewhere badge", async () => {
     await openNeedsAttention()
-    expect(inboxValue()).toHaveTextContent(/^All 2$/)
+    expect(inboxValue()).toHaveTextContent(/^All websites2 need attention$/)
     expect(screen.queryByLabelText(/needs attention in other inboxes/)).not.toBeInTheDocument()
   })
 
@@ -190,7 +192,7 @@ describe("inbox elsewhere queued signal", () => {
 
   test("inbox picker trigger uses a solid border hover instead of a wash shadow", async () => {
     renderWithProviders(<InboxConsole user={ALEX} />)
-    await waitFor(() => expect(inboxValue()).toHaveTextContent(/^All 2$/))
+    await waitFor(() => expect(inboxValue()).toHaveTextContent(/^All websites2 need attention$/))
     const trigger = inboxPicker()
     expect(trigger.className).toMatch(/hover:border-navy/)
     expect(trigger.className).not.toMatch(/shadow-\[/)
@@ -199,7 +201,7 @@ describe("inbox elsewhere queued signal", () => {
 
   test("keeps inbox and state filters while shell owns search", async () => {
     renderWithProviders(<InboxConsole user={ALEX} />)
-    await waitFor(() => expect(inboxValue()).toHaveTextContent(/^All 2$/))
+    await waitFor(() => expect(inboxValue()).toHaveTextContent(/^All websites2 need attention$/))
     expect(inboxPicker()).toBeInTheDocument()
     expect(screen.getByRole("navigation", { name: "Inbox filters" })).toBeInTheDocument()
     expect(screen.queryByRole("searchbox")).not.toBeInTheDocument()

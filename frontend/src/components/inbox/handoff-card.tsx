@@ -7,7 +7,7 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 
 import { HandoffCardDialog } from "./handoff-card-dialog"
-import { handoffRouteLabel, REASON_STYLES } from "./handoff-utils"
+import { handoffReasonLabel, handoffRouteLabel, REASON_STYLES } from "./handoff-utils"
 
 type HandoffCardProps = {
   conversationId: string
@@ -17,9 +17,9 @@ type HandoffCardProps = {
 const HandoffLabel = ({ reason, resolved }: { reason: string; resolved: boolean }) => (
   <>
     <Badge
-      className={`${REASON_STYLES[reason] ?? "bg-ice-2 text-ink"} pointer-events-none hidden sm:inline-flex`}
+      className={`${REASON_STYLES[reason] ?? "bg-ice-2 text-ink"} pointer-events-none hidden tracking-normal normal-case sm:inline-flex`}
     >
-      {reason}
+      {handoffReasonLabel(reason)}
     </Badge>
     <span className="sm:hidden">Handoff</span>
     <span className="hidden sm:inline">

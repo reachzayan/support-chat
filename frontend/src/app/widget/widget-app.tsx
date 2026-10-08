@@ -29,13 +29,21 @@ import {
   type ConversationState,
 } from "./visitor-session"
 import { WidgetBody } from "./widget-body"
-import { WidgetShell } from "./widget-shell"
+import { WidgetLoading, WidgetShell } from "./widget-shell"
 
 const useTransparentDocument = () => {
   useEffect(() => {
     document.documentElement.style.backgroundColor = "transparent"
     document.body.style.backgroundColor = "transparent"
   }, [])
+}
+
+const readInitialFullscreen = () => {
+  try {
+    return new URLSearchParams(window.location.search).get("layout") === "sheet"
+  } catch {
+    return false
+  }
 }
 
 const usePaintedSignal = (
@@ -172,10 +180,17 @@ export const WidgetApp = () => {
   const [page, setPage] = useState({ page_url: "", page_title: "", referrer: "" })
   const [view, setView] = useState<ChatView>(emptyChat)
   const [reconnecting, setReconnecting] = useState(false)
-  const [sending, setSending] = useState(false)
+  const [sending, setSendingState] = useState(false)
+  // Mirrors `sending` synchronously so the socket handler knows whether an error answers a send.
+  const sendingRef = useRef(false)
+  const setSending = useCallback((value: boolean) => {
+    sendingRef.current = value
+    setSendingState(value)
+  }, [])
   const [loadingOlder, setLoadingOlder] = useState(false)
   const [privacyVisible, setPrivacyVisible] = useState(true)
   const [returning, setReturning] = useState<ReturningView>(null)
+  const [fullscreen, setFullscreen] = useState(readInitialFullscreen)
   const socketRef = useRef<SocketApi | null>(null)
   const viewRef = useRef(view)
   const parentRef = useRef(parentOrigin)
@@ -190,6 +205,13 @@ export const WidgetApp = () => {
 
   const handleHostMessage = useCallback(
     (event: MessageEvent) => {
+      if (isTrustedHostFrame(event)) {
+        const layout = parseHostToWidget(event.data)
+        if (layout?.type === "host.layout") {
+          setFullscreen(layout.fullscreen)
+          return
+        }
+      }
       applyHostBootstrap(
         event,
         parentRef,
@@ -221,6 +243,7 @@ export const WidgetApp = () => {
     setLoadingOlder,
     socketRef,
     viewRef,
+    sendingRef,
   )
 
   const loadOlder = useCallback(() => {
@@ -233,10 +256,12 @@ export const WidgetApp = () => {
   }, [view.lines, view.hasOlder, loadingOlder])
 
   if (config === null) {
-    return <div className="bg-paper h-dvh" />
+    return <WidgetLoading fullscreen={fullscreen} />
   }
   return (
     <WidgetShell
+      fullscreen={fullscreen}
+      hideDisclaimer={!returning && view.conversation === "prechat"}
       name={config.name}
       onClose={actions.handleClose}
       onResetCurrent={actions.handleResetCurrent}

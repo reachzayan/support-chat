@@ -491,3 +491,28 @@ async def test_courtesy_is_preserved_with_cited_sentence() -> None:
     assert decision.outcome is ResponseOutcome.SYNTHESIZED_ANSWER
     assert decision.body == body
     assert decision.reason_code is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("kwargs", "reason"),
+    [
+        ({"visitor_text": "My SSN is on file", "sensitive": True}, "policy_sensitive"),
+        ({"visitor_text": "this is useless"}, "frustration"),
+    ],
+)
+async def test_boundary_copy_does_not_promise_a_specialist_when_staff_are_off(
+    kwargs, reason
+) -> None:
+    off = await GroundedResponseEngine(complete=None).respond(
+        TurnContext(evidence=[], human_enabled=False, **kwargs)
+    )
+    assert off.reason_code == reason
+    assert "specialist" not in off.body.casefold()
+    assert off.offer_handoff is False
+
+    on = await GroundedResponseEngine(complete=None).respond(
+        TurnContext(evidence=[], human_enabled=True, **kwargs)
+    )
+    assert "specialist" in on.body.casefold()
+    assert on.offer_handoff is True

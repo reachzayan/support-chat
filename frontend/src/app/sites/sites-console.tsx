@@ -37,7 +37,7 @@ export const SitesConsole = ({ isAdmin, displayName: _displayName }: SitesConsol
       />
       <div
         id="main-content"
-        className="flex w-full min-w-0 flex-col gap-4 px-5 py-6 lg:px-8 lg:py-8"
+        className="flex w-full min-w-0 flex-col gap-4 px-4 py-4 sm:px-5 sm:py-6 lg:px-8 lg:py-8"
       >
         {error === "Sites could not be loaded" ? (
           <RetryError text={error} onRetry={handleRetry} />
