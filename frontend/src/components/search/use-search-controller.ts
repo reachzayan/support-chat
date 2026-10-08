@@ -1,9 +1,55 @@
 "use client"
 import { usePathname, useRouter } from "next/navigation"
-import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent } from "react"
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type MouseEvent,
+  type RefObject,
+} from "react"
 
 import { searchScreen, screenLabel, type SearchItem } from "./search-destinations"
 import { useWorkspaceSearch } from "./use-workspace-search"
+
+export const useSearchDismiss = (
+  open: boolean,
+  close: (next: boolean) => void,
+  inputRef: RefObject<HTMLInputElement | null>,
+) => {
+  const containerRef = useRef<HTMLElement>(null)
+  useEffect(() => {
+    if (!open) return
+    const dismiss = (event: Event) => {
+      if (event.target instanceof Node && !containerRef.current?.contains(event.target)) {
+        close(false)
+      }
+    }
+    const escape = (event: KeyboardEvent) => {
+      if (
+        event.key === "Escape" &&
+        !event.isComposing &&
+        event.keyCode !== 229 &&
+        event.target instanceof Node &&
+        containerRef.current?.contains(event.target)
+      ) {
+        event.preventDefault()
+        close(false)
+        inputRef.current?.focus()
+      }
+    }
+    document.addEventListener("pointerdown", dismiss)
+    document.addEventListener("focusin", dismiss)
+    document.addEventListener("keydown", escape)
+    return () => {
+      document.removeEventListener("pointerdown", dismiss)
+      document.removeEventListener("focusin", dismiss)
+      document.removeEventListener("keydown", escape)
+    }
+  }, [open, close, inputRef])
+  return containerRef
+}
 
 export const useSearchController = (isAdmin: boolean) => {
   const currentScreen = searchScreen(usePathname())
@@ -36,6 +82,7 @@ export const useSearchController = (isAdmin: boolean) => {
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
         event.preventDefault()
         onOpenChange(!open)
+        if (!open) inputRef.current?.focus()
       }
     }
     document.addEventListener("keydown", shortcut)
