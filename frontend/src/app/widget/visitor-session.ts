@@ -1,9 +1,12 @@
+import type { VisitorProfile } from "@/lib/postmessage"
+
 import type { SourceCitation } from "./source-hovercard"
 import type { TranscriptLine } from "./transcript"
 
 export type ConversationState = "prechat" | "bot" | "queued" | "human" | "closed"
 
 export type ChatView = {
+  visitorProfile?: VisitorProfile
   conversationId: string | null
   conversation: ConversationState | null
   assignedName: string | null
@@ -32,6 +35,7 @@ export const applyConversationSnapshot = (
     assigned_agent: { id: string; display_name: string } | null
     messages: unknown[]
     has_older?: boolean
+    visitor_profile?: VisitorProfile
   },
 ): ChatView => {
   let next = view
@@ -47,6 +51,7 @@ export const applyConversationSnapshot = (
     ...updated,
     conversationId: snapshot.id ?? null,
     hasOlder: snapshot.has_older === true,
+    visitorProfile: snapshot.visitor_profile,
   }
 }
 

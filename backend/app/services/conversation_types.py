@@ -45,6 +45,7 @@ class VisitorConversationSummary:
     last_message_at: datetime
     assigned_agent: dict | None
     is_current: bool
+    preview: str | None = None
 
 
 @dataclass
@@ -65,6 +66,7 @@ class BootstrapResult:
     conversation_state: str | None = None
     assigned_agent: dict | None = None
     messages: list[Message] | None = None
+    visitor_profile: dict[str, str] | None = None
     messages_has_older: bool = False
     identity: ReturningIdentity | None = None
     conversations: list[VisitorConversationSummary] | None = None

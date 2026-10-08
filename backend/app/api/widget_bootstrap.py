@@ -106,6 +106,8 @@ def _bootstrap_response_body(result: BootstrapResult) -> dict[str, Any]:
             "messages": [message_frame(message) for message in (result.messages or [])],
             "has_older": result.messages_has_older,
         }
+        if result.visitor_profile is not None:
+            conversation["visitor_profile"] = result.visitor_profile
         if result.conversation_id is not None:
             conversation["id"] = str(result.conversation_id)
         body["conversation"] = conversation
@@ -126,6 +128,7 @@ def _bootstrap_response_body(result: BootstrapResult) -> dict[str, Any]:
                 "last_message_at": conversation.last_message_at.isoformat(),
                 "assigned_agent": conversation.assigned_agent,
                 "is_current": conversation.is_current,
+                "preview": conversation.preview,
             }
             for conversation in result.conversations
         ]

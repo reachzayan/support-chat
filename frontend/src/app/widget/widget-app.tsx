@@ -7,6 +7,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState, type RefObje
 import {
   parseHostToWidget,
   type ConversationHistoryItem,
+  type VisitorProfile,
   type PublicWidgetConfig,
   type ReturningIdentity,
 } from "@/lib/postmessage"
@@ -97,6 +98,7 @@ const applyBootstrapConversation = (
     assigned_agent: { id: string; display_name: string } | null
     messages: unknown[]
     has_older?: boolean
+    visitor_profile?: VisitorProfile
   },
   viewRef: RefObject<ChatView>,
   setView: (updater: (current: ChatView) => ChatView) => void,

@@ -97,6 +97,11 @@
     }
     return { id: value.id, display_name: value.display_name };
   };
+  var parseVisitorProfile = (value) => {
+    if (!isRecord(value) || typeof value.name !== "string" || typeof value.email !== "string" || typeof value.phone !== "string")
+      return void 0;
+    return { name: value.name, email: value.email, phone: value.phone };
+  };
   var parseConversationSnapshot = (value) => {
     if (!isRecord(value) || typeof value.state !== "string" || !SNAPSHOT_STATES.has(value.state)) {
       return void 0;
@@ -113,7 +118,8 @@
       state: value.state,
       assigned_agent: assigned,
       messages: value.messages.filter(isRecord),
-      has_older: value.has_older === true
+      has_older: value.has_older === true,
+      visitor_profile: parseVisitorProfile(value.visitor_profile)
     };
   };
   var parseIdentity = (value) => {
@@ -142,7 +148,8 @@
       created_at: value.created_at,
       last_message_at: value.last_message_at,
       assigned_agent: assigned,
-      is_current: value.is_current
+      is_current: value.is_current,
+      preview: typeof value.preview === "string" ? value.preview.slice(0, 180) : null
     };
   };
   var parseReturningFrame = (value) => {

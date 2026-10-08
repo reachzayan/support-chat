@@ -14,6 +14,7 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { Textarea } from "@/components/ui/textarea"
+import type { VisitorProfile } from "@/lib/postmessage"
 import { emailError, phoneError, requiredError } from "@/lib/validation"
 
 import { openUrlOnHost } from "./host-bridge"
@@ -27,6 +28,7 @@ export type PrechatFields = {
 }
 
 type PrechatFormProps = {
+  visitorProfile?: VisitorProfile
   name: string
   privacyUrl: string
   onSubmit: (fields: PrechatFields) => void
@@ -59,7 +61,7 @@ const readFields = (form: HTMLFormElement): PrechatFields => {
   }
 }
 
-export const PrechatForm = ({ name, privacyUrl, onSubmit }: PrechatFormProps) => {
+export const PrechatForm = ({ name, privacyUrl, onSubmit, visitorProfile }: PrechatFormProps) => {
   const [errors, setErrors] = useState<Record<string, string>>({})
   const displayName = name
     .replace(/\bdemo\b/gi, "")
@@ -123,6 +125,7 @@ export const PrechatForm = ({ name, privacyUrl, onSubmit }: PrechatFormProps) =>
       className="widget-enter flex min-h-0 flex-1 flex-col bg-transparent"
     >
       <PrechatFields
+        visitorProfile={visitorProfile}
         displayName={displayName}
         errors={errors}
         onBlur={handleBlur}
@@ -133,11 +136,13 @@ export const PrechatForm = ({ name, privacyUrl, onSubmit }: PrechatFormProps) =>
 }
 
 const PrechatFields = ({
+  visitorProfile,
   displayName,
   errors,
   onBlur,
   onPrivacy,
 }: {
+  visitorProfile?: VisitorProfile
   displayName: string
   errors: Record<string, string>
   onBlur: (event: FocusEvent<HTMLInputElement>) => void
@@ -155,6 +160,7 @@ const PrechatFields = ({
       <Field
         label="Full name"
         name="name"
+        defaultValue={visitorProfile?.name}
         autoComplete="name"
         required
         error={errors.name}
@@ -163,6 +169,7 @@ const PrechatFields = ({
       <Field
         label="Email"
         name="email"
+        defaultValue={visitorProfile?.email}
         type="email"
         autoComplete="email"
         required
@@ -173,6 +180,7 @@ const PrechatFields = ({
       <Field
         label="Phone"
         name="phone"
+        defaultValue={visitorProfile?.phone}
         type="tel"
         autoComplete="tel"
         error={errors.phone}
@@ -205,6 +213,7 @@ const PrechatFields = ({
 )
 
 type FieldProps = {
+  defaultValue?: string
   label: string
   name: string
   type?: string
@@ -216,6 +225,7 @@ type FieldProps = {
 }
 
 const Field = ({
+  defaultValue,
   label,
   name,
   type = "text",
@@ -230,6 +240,7 @@ const Field = ({
     <div className="text-ink flex flex-col gap-1 text-sm font-medium">
       <label htmlFor={name}>{label}</label>
       <Input
+        defaultValue={defaultValue}
         id={name}
         type={type}
         name={name}

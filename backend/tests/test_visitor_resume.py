@@ -6,6 +6,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import select
 
 from app.models.conversation import Conversation
+from app.models.message import Message
 from app.models.visitor import Visitor
 from app.services.conversation_input import hash_resume_token
 from tests.ws_helpers import (
@@ -119,6 +120,20 @@ def test_confirmed_history_is_metadata_only_and_scoped_to_the_token_owner(
     resume_a, _, conversation_a = _activate(client)
     _, _, conversation_b = _activate(client, name="Ben Ortiz", email="ben@example.com", phone="")
 
+    session = next(sync_session())
+    try:
+        session.add(
+            Message(
+                conversation_id=uuid.UUID(conversation_a),
+                role="visitor",
+                body="What records are included in a screening?",
+                client_message_id=uuid.uuid4(),
+            )
+        )
+        session.commit()
+    finally:
+        session.close()
+
     response = _request(client, resume_a, "history")
 
     assert response.status_code == 200
@@ -128,6 +143,7 @@ def test_confirmed_history_is_metadata_only_and_scoped_to_the_token_owner(
     assert body["conversations"][0]["state"] == "bot"
     assert body["conversations"][0]["inquiry_type"] == "results"
     assert body["conversations"][0]["is_current"] is True
+    assert body["conversations"][0]["preview"] == "What records are included in a screening?"
     assert "messages" not in body["conversations"][0]
     assert conversation_b not in json.dumps(body)
 
@@ -181,12 +197,18 @@ def test_reopen_after_reset_shows_saved_chats_instead_of_the_blank_form(
     client: TestClient,
 ) -> None:
     seed_demo_world()
-    resume, _, conversation_id = _activate(client)
+    resume, visitor_id, conversation_id = _activate(client)
     reset = _request(client, resume, "reset")
     assert reset.status_code == 200
+    assert decode_widget_token(reset.json()["bootstrap_token"])["visitor_id"] == visitor_id
     assert reset.json()["mode"] == "conversation"
     assert reset.json()["conversation"]["state"] == "prechat"
     assert "id" not in reset.json()["conversation"]
+    assert reset.json()["conversation"]["visitor_profile"] == {
+        "name": "Ada Lopez",
+        "email": "ada.lopez@example.com",
+        "phone": "+1 202 555 0198",
+    }
 
     reopened = post_bootstrap(client, bootstrap_payload(resume_token=resume))
 

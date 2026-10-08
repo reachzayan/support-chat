@@ -254,7 +254,9 @@ class ConversationService:
             )
         if action == "reset":
             await self._reset_current_conversation(site.id, visitor.id)
-            return self._pending_prechat_bootstrap(site, visitor, parent_origin, None)
+            return self._pending_prechat_bootstrap(
+                site, visitor, parent_origin, None, reuse_profile=True
+            )
         if action != "identify":
             raise CommandError("invalid")
 
@@ -335,6 +337,8 @@ class ConversationService:
         visitor: Visitor,
         parent_origin: str,
         resume_token: str | None,
+        *,
+        reuse_profile: bool = False,
     ) -> BootstrapResult:
         return self._bootstrap_result(
             site,
@@ -346,6 +350,15 @@ class ConversationService:
             assigned_agent=None,
             messages=[],
             messages_has_older=False,
+            visitor_profile=(
+                {
+                    "name": visitor.name or "",
+                    "email": visitor.email or "",
+                    "phone": visitor.phone or "",
+                }
+                if reuse_profile
+                else None
+            ),
         )
 
     async def _history_bootstrap(
@@ -368,8 +381,9 @@ class ConversationService:
                     else None
                 ),
                 is_current=conversation.state != "closed",
+                preview=preview,
             )
-            for conversation, agent in rows
+            for conversation, agent, preview in rows
         ]
         return self._bootstrap_result(
             site,

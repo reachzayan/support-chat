@@ -40,6 +40,7 @@ const dispatchBootstrap = (conversation?: {
   state: string
   assigned_agent: { id: string; display_name: string } | null
   messages: unknown[]
+  visitor_profile?: { name: string; email: string; phone: string }
 }) => {
   window.dispatchEvent(
     new MessageEvent("message", {
@@ -117,6 +118,7 @@ const dispatchHistory = () => {
             id: "10000000-0000-4000-8000-000000000002",
             state: "closed",
             inquiry_type: "compliance",
+            preview: "What records are included in a screening?",
             created_at: "2026-09-18T12:00:00Z",
             last_message_at: "2026-09-18T12:10:00Z",
             assigned_agent: { id: "agent-1", display_name: "Alex Morgan" },
@@ -179,7 +181,7 @@ describe("widget first paint", () => {
   })
 })
 
-describe("returning visitor flow", () => {
+describe("returning visitor identity", () => {
   beforeEach(() => {
     FakeSocket.instances = []
     vi.stubGlobal("WebSocket", FakeSocket)
@@ -206,6 +208,59 @@ describe("returning visitor flow", () => {
     await user.click(screen.getByRole("button", { name: "Yes, show my chats" }))
     expect(postMessage).toHaveBeenCalledWith({ type: "widget.show_history" }, PARENT)
   })
+})
+
+describe("returning visitor history", () => {
+  beforeEach(() => {
+    FakeSocket.instances = []
+    vi.stubGlobal("WebSocket", FakeSocket)
+    vi.stubGlobal("fetch", vi.fn())
+  })
+
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  test("starts a new chat with the confirmed visitor's contact details", async () => {
+    const user = userEvent.setup()
+    const postMessage = vi.spyOn(window.parent, "postMessage")
+    renderWithProviders(<WidgetApp />)
+    dispatchHistory()
+    await user.click(await screen.findByRole("button", { name: "Start a new chat" }))
+    await user.click(screen.getByRole("button", { name: "Start new chat" }))
+    expect(postMessage).toHaveBeenCalledWith({ type: "widget.reset_current" }, PARENT)
+    expect(postMessage).not.toHaveBeenCalledWith({ type: "widget.delete_all" }, PARENT)
+
+    dispatchBootstrap({
+      state: "prechat",
+      assigned_agent: null,
+      messages: [],
+      visitor_profile: {
+        name: "Ada Lopez",
+        email: "ada.lopez@example.com",
+        phone: "+1 202 555 0198",
+      },
+    })
+    await screen.findByLabelText("Full name")
+    FakeSocket.instances.at(-1)!.onmessage?.(
+      new MessageEvent("message", {
+        data: JSON.stringify({ type: "state", state: "prechat", assigned_agent: null }),
+      }),
+    )
+    await waitFor(() => expect(screen.getByLabelText("Full name")).toHaveValue("Ada Lopez"))
+    expect(screen.getByLabelText("Email")).toHaveValue("ada.lopez@example.com")
+    expect(screen.getByLabelText("Phone")).toHaveValue("+1 202 555 0198")
+    expect(screen.getByLabelText("Message")).toHaveValue("")
+    await user.type(screen.getByLabelText("Message"), "A new screening question")
+    await user.click(screen.getByRole("button", { name: "Start the chat" }))
+    const submissions = FakeSocket.instances.at(-1)!.sent.map((frame) => JSON.parse(frame))
+    expect(submissions.find((frame) => frame.type === "prechat")).toMatchObject({
+      name: "Ada Lopez",
+      email: "ada.lopez@example.com",
+      phone: "+1 202 555 0198",
+      message: "A new screening question",
+    })
+  })
 
   test("lists compact chat metadata and confirms replacing an active chat", async () => {
     const user = userEvent.setup()
@@ -216,7 +271,8 @@ describe("returning visitor flow", () => {
     await waitFor(() => expect(screen.getByRole("heading", { name: "Your chats" })).toBeVisible())
     expect(screen.getByRole("button", { name: /Results question.*Current chat/i })).toBeVisible()
     expect(screen.getByRole("button", { name: /Compliance question.*Past chat/i })).toBeVisible()
-    expect(screen.queryByText(VISITOR_LINE)).not.toBeInTheDocument()
+    expect(screen.getByText("What records are included in a screening?")).toBeVisible()
+    expect(screen.queryByText("Same browser history")).not.toBeInTheDocument()
 
     await user.click(screen.getByRole("button", { name: /Compliance question.*Past chat/i }))
     await user.click(screen.getByRole("button", { name: "Resume chat" }))

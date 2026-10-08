@@ -16,7 +16,10 @@ export type PublicWidgetConfig = {
   human_enabled: boolean
 }
 
+export type VisitorProfile = { name: string; email: string; phone: string }
+
 export type ConversationSnapshot = {
+  visitor_profile?: VisitorProfile
   id?: string
   state: "prechat" | "bot" | "queued" | "human" | "closed"
   assigned_agent: { id: string; display_name: string } | null
@@ -32,6 +35,7 @@ export type ReturningIdentity = {
 }
 
 export type ConversationHistoryItem = {
+  preview?: string | null
   id: string
   state: ConversationSnapshot["state"]
   inquiry_type: string | null
@@ -123,6 +127,17 @@ const parseAssignedAgent = (value: unknown): ConversationSnapshot["assigned_agen
   return { id: value.id, display_name: value.display_name }
 }
 
+const parseVisitorProfile = (value: unknown): VisitorProfile | undefined => {
+  if (
+    !isRecord(value) ||
+    typeof value.name !== "string" ||
+    typeof value.email !== "string" ||
+    typeof value.phone !== "string"
+  )
+    return undefined
+  return { name: value.name, email: value.email, phone: value.phone }
+}
+
 export const parseConversationSnapshot = (value: unknown): ConversationSnapshot | undefined => {
   if (!isRecord(value) || typeof value.state !== "string" || !SNAPSHOT_STATES.has(value.state)) {
     return undefined
@@ -141,6 +156,7 @@ export const parseConversationSnapshot = (value: unknown): ConversationSnapshot 
     assigned_agent: assigned,
     messages: value.messages.filter(isRecord),
     has_older: value.has_older === true,
+    visitor_profile: parseVisitorProfile(value.visitor_profile),
   }
 }
 
@@ -194,6 +210,7 @@ const parseHistoryItem = (value: unknown): ConversationHistoryItem | null => {
     last_message_at: value.last_message_at,
     assigned_agent: assigned,
     is_current: value.is_current,
+    preview: typeof value.preview === "string" ? value.preview.slice(0, 180) : null,
   }
 }
 

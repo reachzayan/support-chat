@@ -259,6 +259,7 @@ export const WidgetBody = (props: WidgetBodyProps) => {
   if (state === "prechat") {
     return (
       <PrechatForm
+        visitorProfile={props.view.visitorProfile}
         name={props.config.name}
         privacyUrl={props.config.privacy_url}
         onSubmit={props.onPrechat}

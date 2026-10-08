@@ -4,7 +4,7 @@
 /* oxlint-disable react-perf/jsx-no-new-function-as-prop -- callbacks are scoped to a tiny list */
 /* oxlint-disable max-lines-per-function -- the compact history surface is one cohesive state */
 
-import { CalendarDays, Check, History, ShieldCheck } from "lucide-react"
+import { CalendarDays, Check, ShieldCheck } from "lucide-react"
 import { useMemo, useState } from "react"
 
 import {
@@ -98,19 +98,26 @@ const HistoryList = ({
   onStartFresh,
 }: Extract<ReturningHomeProps, { mode: "history" }>) => {
   const [selectedId, setSelectedId] = useState(conversations[0]?.id ?? "")
-  const [confirmReplace, setConfirmReplace] = useState(false)
+  const [confirmation, setConfirmation] = useState<"resume" | "new" | null>(null)
   const selected = conversations.find((item) => item.id === selectedId) ?? conversations[0]
   const hasDifferentCurrent = conversations.some(
     (item) => item.is_current && item.id !== selected?.id,
   )
   const formatter = useMemo(
-    () => new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric", year: "numeric" }),
+    () =>
+      new Intl.DateTimeFormat(undefined, {
+        month: "short",
+        day: "numeric",
+        year: "numeric",
+        hour: "numeric",
+        minute: "2-digit",
+      }),
     [],
   )
   const openSelected = () => {
     if (!selected) return
     if (!selected.is_current && hasDifferentCurrent) {
-      setConfirmReplace(true)
+      setConfirmation("resume")
       return
     }
     onOpen(selected.id, false)
@@ -119,12 +126,8 @@ const HistoryList = ({
   return (
     <section className="widget-enter flex min-h-0 flex-1 flex-col px-4 pt-3 pb-4">
       <div className="px-1">
-        <div className="text-steel mb-2 flex items-center gap-2 text-xs font-bold tracking-[0.16em] uppercase">
-          <History aria-hidden="true" className="size-4" />
-          Same browser history
-        </div>
         <h2 className="heading text-navy text-2xl">Your chats</h2>
-        <p className="text-mute mt-1 text-sm">Choose a conversation to continue.</p>
+        <p className="text-mute mt-1 text-sm">Continue a conversation or start a new chat.</p>
       </div>
       <ul className="mt-4 min-h-0 flex-1 space-y-2 overflow-y-auto pr-1">
         {conversations.map((conversation) => {
@@ -136,10 +139,10 @@ const HistoryList = ({
               <Button
                 type="button"
                 variant="ghost"
-                aria-label={`${label}, ${status}, ${formatter.format(new Date(conversation.last_message_at))}`}
+                aria-label={`${label}, ${status}, ${formatter.format(new Date(conversation.last_message_at))}${conversation.preview ? `, ${conversation.preview}` : ""}`}
                 aria-pressed={selectedRow}
                 onClick={() => setSelectedId(conversation.id)}
-                className={`focus-visible:ring-steel flex min-h-[72px] w-full cursor-pointer items-center gap-3 rounded-2xl border p-3 text-left focus-visible:ring-2 focus-visible:outline-none ${
+                className={`focus-visible:ring-steel flex !h-auto min-h-[72px] w-full cursor-pointer items-start gap-3 rounded-2xl border p-3 text-left !whitespace-normal focus-visible:ring-2 focus-visible:outline-none ${
                   selectedRow
                     ? "border-steel bg-ice shadow-[0_8px_20px_rgba(36,86,160,0.10)]"
                     : "border-line hover:bg-ice/60 bg-white"
@@ -150,9 +153,19 @@ const HistoryList = ({
                 </span>
                 <span className="min-w-0 flex-1">
                   <span className="heading text-ink block truncate text-sm">{label}</span>
-                  <span className="text-mute mt-1 block text-xs">
+                  {conversation.preview ? (
+                    <span className="text-ink mt-1 line-clamp-2 text-sm leading-5 break-words">
+                      {conversation.preview}
+                    </span>
+                  ) : null}
+                  <span className="text-mute mt-1.5 block text-xs leading-5">
                     {status} · {formatter.format(new Date(conversation.last_message_at))}
                   </span>
+                  {conversation.assigned_agent ? (
+                    <span className="text-mute block truncate text-xs leading-5">
+                      With {conversation.assigned_agent.display_name}
+                    </span>
+                  ) : null}
                 </span>
                 {selectedRow ? (
                   <Check aria-hidden="true" className="text-steel size-5 shrink-0" />
@@ -175,18 +188,29 @@ const HistoryList = ({
         <Button
           type="button"
           variant="ghost"
-          className="text-steel hover:!bg-ice-2/80 hover:!text-navy focus-visible:ring-steel min-h-10 w-full cursor-pointer rounded-xl text-xs font-bold focus-visible:ring-2 focus-visible:outline-none"
-          onClick={onStartFresh}
+          className={QUIET}
+          onClick={() =>
+            conversations.some((item) => item.is_current) ? setConfirmation("new") : onStartFresh()
+          }
         >
-          Start fresh instead
+          Start a new chat
         </Button>
       </div>
-      <AlertDialog open={confirmReplace} onOpenChange={setConfirmReplace}>
+      <AlertDialog
+        open={confirmation !== null}
+        onOpenChange={(open) => {
+          if (!open) setConfirmation(null)
+        }}
+      >
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Resume this chat instead?</AlertDialogTitle>
+            <AlertDialogTitle>
+              {confirmation === "new" ? "Start a new chat?" : "Resume this chat instead?"}
+            </AlertDialogTitle>
             <AlertDialogDescription className="text-mute mt-2 text-sm leading-5">
-              Your current chat will close and stay in history. The selected chat will reopen.
+              {confirmation === "new"
+                ? "Your current chat will close and stay in history. Your contact details will carry over to the new chat."
+                : "Your current chat will close and stay in history. The selected chat will reopen."}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -197,9 +221,11 @@ const HistoryList = ({
             </AlertDialogClose>
             <AlertDialogClose
               render={<Button variant="default" className="min-h-10 px-4 font-bold" />}
-              onClick={() => selected && onOpen(selected.id, true)}
+              onClick={() =>
+                confirmation === "new" ? onStartFresh() : selected && onOpen(selected.id, true)
+              }
             >
-              Resume chat
+              {confirmation === "new" ? "Start new chat" : "Resume chat"}
             </AlertDialogClose>
           </AlertDialogFooter>
         </AlertDialogContent>

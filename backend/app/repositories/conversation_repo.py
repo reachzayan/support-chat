@@ -140,9 +140,17 @@ class ConversationRepository:
 
     async def list_for_visitor_history(
         self, site_id: UUID, visitor_id: UUID, *, limit: int
-    ) -> list[tuple[Conversation, User | None]]:
+    ) -> list[tuple[Conversation, User | None, str | None]]:
+        opening_message = (
+            select(func.left(Message.body, 180))
+            .where(Message.conversation_id == Conversation.id, Message.role == "visitor")
+            .order_by(Message.id)
+            .limit(1)
+            .correlate(Conversation)
+            .scalar_subquery()
+        )
         result = await self._session.execute(
-            select(Conversation, User)
+            select(Conversation, User, opening_message)
             .outerjoin(User, User.id == Conversation.assigned_agent_id)
             .where(
                 Conversation.site_id == site_id,
@@ -156,7 +164,7 @@ class ConversationRepository:
             )
             .limit(limit)
         )
-        return [(conversation, agent) for conversation, agent in result.all()]
+        return [(conversation, agent, preview) for conversation, agent, preview in result.all()]
 
     async def count_for_visitor_history(self, site_id: UUID, visitor_id: UUID) -> int:
         result = await self._session.execute(
