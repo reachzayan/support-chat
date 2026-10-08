@@ -183,5 +183,5 @@ export const proxy = async (request: NextRequest) => {
 }
 
 export const config = {
-  matcher: ["/((?!_next/static|_next/image|favicon.ico|supportchat.js|fonts/).*)"],
+  matcher: ["/((?!_next/static|_next/image|favicon.ico|supportchat.js|fonts/|icons/|sounds/).*)"],
 }

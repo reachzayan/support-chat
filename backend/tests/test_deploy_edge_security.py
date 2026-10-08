@@ -20,6 +20,13 @@ def _location_block(config: str, header: str) -> str:
     return config[start : config.index("}", start)]
 
 
+def _widget_server(config: str) -> str:
+    marker = "server_name __WIDGET_HOST__;"
+    start = config.rindex("server {", 0, config.index(marker))
+    nxt = config.find("\nserver {", config.index(marker))
+    return config[start:] if nxt == -1 else config[start:nxt]
+
+
 def test_websocket_locations_forward_the_public_host() -> None:
     config = NGINX_CONFIG.read_text(encoding="utf-8")
 
@@ -39,3 +46,13 @@ def test_nginx_rate_limits_login_and_widget_bootstrap() -> None:
     widget_bootstrap = config[widget_start : config.index("}", widget_start)]
     assert "limit_req zone=bootstrap burst=20 nodelay;" in widget_bootstrap
     assert "proxy_pass http://127.0.0.1:8000;" in widget_bootstrap
+
+
+def test_widget_host_proxies_phosphor_icons_and_message_tone() -> None:
+    widget = _widget_server(NGINX_CONFIG.read_text(encoding="utf-8"))
+    icons = _location_block(widget, "location ^~ /icons/")
+    sounds = _location_block(widget, "location ^~ /sounds/")
+    catch_all = _location_block(widget, "location / {")
+    assert "proxy_pass http://127.0.0.1:3000;" in icons
+    assert "proxy_pass http://127.0.0.1:3000;" in sounds
+    assert "return 404;" in catch_all

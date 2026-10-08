@@ -4,7 +4,7 @@ import { join } from "node:path"
 import { NextRequest } from "next/server"
 import { afterEach, describe, expect, test, vi } from "vitest"
 
-import { proxy, STAFF_PREFIXES } from "./proxy"
+import { config, proxy, STAFF_PREFIXES } from "./proxy"
 
 const PUBLIC_PAGE_PATHS = new Set(["/", "/widget", "/demo"])
 
@@ -103,6 +103,13 @@ describe("host surface routing", () => {
       requestFor("http://widget.localhost:3000/admin/data", "widget.localhost:3000"),
     )
     expect(data.status).toBe(404)
+  })
+
+  test("widget icon sprite and message tone skip the host proxy", () => {
+    const matcher = new RegExp(`^${config.matcher[0]}$`)
+    expect(matcher.test("/icons/phosphor.svg")).toBe(false)
+    expect(matcher.test("/sounds/message.wav")).toBe(false)
+    expect(matcher.test("/widget")).toBe(true)
   })
 
   test("staff and marketing hosts cannot serve widget-only surfaces", async () => {
