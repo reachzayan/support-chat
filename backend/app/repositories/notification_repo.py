@@ -158,19 +158,29 @@ class NotificationRepository:
         )
         unread_rows = (
             await self.session.execute(
-                select(Notification.conversation_id, func.count())
+                select(
+                    Notification.conversation_id,
+                    Conversation.site_id,
+                    Conversation.state,
+                    func.count(),
+                )
+                .join(Conversation, Conversation.id == Notification.conversation_id)
                 .where(
                     *visible,
                     Notification.read_at.is_(None),
                 )
-                .group_by(Notification.conversation_id)
+                .group_by(Notification.conversation_id, Conversation.site_id, Conversation.state)
             )
         ).all()
         return {
             "latest_id": await self.session.scalar(
                 select(func.max(Notification.id)).where(Notification.user_id == user_id)
             ),
-            "unread_conversations": {str(chat_id): count for chat_id, count in unread_rows},
+            "unread_conversations": {str(chat_id): count for chat_id, _, _, count in unread_rows},
+            "unread_conversation_context": {
+                str(chat_id): {"site_id": site_id, "state": state}
+                for chat_id, site_id, state, _ in unread_rows
+            },
             "items": [
                 {
                     "id": row.id,

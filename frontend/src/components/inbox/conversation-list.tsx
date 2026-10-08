@@ -9,7 +9,10 @@ import { useCallback, useDeferredValue, useMemo } from "react"
 
 import { ResizableListPane } from "@/components/admin/pane-resize-handle"
 import { RetryError } from "@/components/admin/retry-error"
-import { useUnreadConversations } from "@/components/notifications/notifications-context"
+import {
+  useUnreadConversations,
+  useUnreadConversationContext,
+} from "@/components/notifications/notifications-context"
 import { UnreadBadge } from "@/components/notifications/unread-badge"
 import { useSearchTarget } from "@/components/search/workspace-route"
 import { Button } from "@/components/ui/button"
@@ -362,7 +365,7 @@ const ConversationListBody = ({
       </div>
       <div className="mx-4 mt-4 mb-3 inline-flex w-fit max-w-full flex-col gap-3 self-start">
         <InboxSiteNav sites={sites} siteId={siteId} onSite={onSite} />
-        <InboxFilterNav filter={filter} counts={counts} onFilter={onFilter} />
+        <InboxFilterNav filter={filter} siteId={siteId} counts={counts} onFilter={onFilter} />
       </div>
       {loadError ? (
         <div className="px-4 pb-3">
@@ -488,12 +491,14 @@ const InboxFilterButton = ({
   item,
   active,
   count,
+  unread,
   onFilter,
   sliderTransition,
 }: {
   item: (typeof INBOX_FILTERS)[number]
   active: boolean
   count: number
+  unread: number
   onFilter: (filter: InboxFilter) => void
   sliderTransition: SliderTransition
 }) => {
@@ -502,7 +507,7 @@ const InboxFilterButton = ({
     <Button
       type="button"
       variant="ghost"
-      aria-label={item.label}
+      aria-label={unread > 0 ? `${item.label}, ${unread} unread` : item.label}
       aria-pressed={active}
       onClick={handleClick}
       className={`relative flex h-8 shrink-0 items-center justify-center gap-1 rounded-full px-2 text-center text-[11px] leading-none font-bold whitespace-nowrap transition-colors duration-200 ease-out max-xl:min-h-11 ${
@@ -522,20 +527,25 @@ const InboxFilterButton = ({
         {item.label}
         <span className="text-mute font-mono text-[10px] tabular-nums"> {count}</span>
       </span>
+      <UnreadBadge count={unread} className="relative h-4 min-w-4 text-[9px]" />
     </Button>
   )
 }
 
 const InboxFilterNav = ({
   filter,
+  siteId,
   counts,
   onFilter,
 }: {
   filter: InboxFilter
+  siteId: string | null
   counts: InboxCounts
   onFilter: (filter: InboxFilter) => void
 }) => {
   const reducedMotion = useReducedMotion()
+  const unread = useUnreadConversations()
+  const context = useUnreadConversationContext()
   const sliderTransition = reducedMotion ? FILTER_SLIDER_INSTANT : FILTER_SLIDER_SPRING
   return (
     <LayoutGroup id="inbox-filters">
@@ -549,6 +559,12 @@ const InboxFilterNav = ({
             item={item}
             active={filter === item.id}
             count={counts[item.id]}
+            unread={Object.entries(unread ?? {}).reduce((sum, [chatId, count]) => {
+              const chat = context?.[chatId]
+              return chat?.state === item.id && (siteId === null || chat.site_id === siteId)
+                ? sum + count
+                : sum
+            }, 0)}
             onFilter={onFilter}
             sliderTransition={sliderTransition}
           />

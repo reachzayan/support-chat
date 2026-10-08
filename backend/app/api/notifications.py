@@ -23,10 +23,16 @@ class NotificationOut(BaseModel):
     read_at: datetime | None
 
 
+class UnreadConversationContext(BaseModel):
+    site_id: UUID
+    state: Literal["prechat", "bot", "queued", "human", "closed"]
+
+
 class FeedOut(BaseModel):
     items: list[NotificationOut]
     unread_count: int
     unread_conversations: dict[UUID, int]
+    unread_conversation_context: dict[UUID, UnreadConversationContext]
     next_cursor: int | None
     latest_id: int | None
 

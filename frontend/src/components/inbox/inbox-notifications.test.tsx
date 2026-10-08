@@ -10,6 +10,8 @@ import { InboxConsole } from "./inbox-console"
 import {
   ALEX,
   CONVO_ID,
+  EASY_SITE,
+  BG_SITE,
   OTHER_CONVO,
   resetInboxHarness,
   setDetails,
@@ -28,7 +30,7 @@ const notificationFeed = () => {
         conversation_id: OTHER_CONVO,
         scenario: "needs_attention",
         read_at: readB ? "2026-10-06T12:01:00Z" : null,
-        site_id: "bg",
+        site_id: BG_SITE,
         site_name: "Sample Services",
         created_at: "2026-10-06T12:00:00Z",
       },
@@ -37,7 +39,7 @@ const notificationFeed = () => {
         conversation_id: CONVO_ID,
         scenario: "visitor_message",
         read_at: readA ? "2026-10-06T12:01:00Z" : null,
-        site_id: "easy",
+        site_id: EASY_SITE,
         site_name: "SampleSite",
         created_at: "2026-10-06T12:00:00Z",
       },
@@ -46,7 +48,7 @@ const notificationFeed = () => {
         conversation_id: CONVO_ID,
         scenario: "needs_attention",
         read_at: readA ? "2026-10-06T12:01:00Z" : null,
-        site_id: "easy",
+        site_id: EASY_SITE,
         site_name: "SampleSite",
         created_at: "2026-10-06T12:00:00Z",
       },
@@ -55,6 +57,10 @@ const notificationFeed = () => {
     unread_conversations: {
       ...(readA ? {} : { [CONVO_ID]: 2 }),
       ...(readB ? {} : { [OTHER_CONVO]: 1 }),
+    },
+    unread_conversation_context: {
+      [CONVO_ID]: { site_id: EASY_SITE, state: "queued" },
+      [OTHER_CONVO]: { site_id: BG_SITE, state: "queued" },
     },
     next_cursor: null,
   })
@@ -85,6 +91,27 @@ const renderInbox = () =>
       <InboxConsole user={ALEX} />
     </NotificationsProvider>,
   )
+
+test("Needs Attention shows unread activity while Live is selected and updates after opening a chat", async () => {
+  const user = userEvent.setup()
+  renderInbox()
+  const queued = await screen.findByRole("button", { name: "Needs Attention, 3 unread" })
+  expect(screen.getByRole("button", { name: "Live" })).toHaveAttribute("aria-pressed", "true")
+  expect(within(queued).getByText("3", { selector: '[aria-hidden="true"]' })).toBeVisible()
+  await user.click(queued)
+  await user.click(await screen.findByRole("button", { name: /Ada Lopez.*2 unread notifications/ }))
+  await screen.findByRole("button", { name: "Needs Attention, 1 unread" })
+})
+
+test("filter unread counts follow the website selection without reading other websites", async () => {
+  const user = userEvent.setup()
+  renderInbox()
+  await screen.findByRole("button", { name: "Needs Attention, 3 unread" })
+  await user.click(screen.getByRole("combobox", { name: "Inbox" }))
+  await user.click(screen.getByRole("option", { name: "SampleSite 1" }))
+  expect(screen.getByRole("button", { name: "Needs Attention, 2 unread" })).toBeInTheDocument()
+  expect(screen.getByRole("button", { name: "Notifications, 3 unread" })).toBeInTheDocument()
+})
 
 test("conversation rows show unread activity and opening Ada clears Ada's entire count only", async () => {
   const user = userEvent.setup()

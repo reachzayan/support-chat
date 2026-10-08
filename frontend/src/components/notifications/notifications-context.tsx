@@ -70,6 +70,9 @@ export const useConversationNotifications = (conversationId: string | null) => {
 export const useUnreadConversations = () =>
   useContext(NotificationsContext)?.feed?.unread_conversations
 
+export const useUnreadConversationContext = () =>
+  useContext(NotificationsContext)?.feed?.unread_conversation_context
+
 const usePushUpdates = (
   enabled: boolean,
   silent: boolean,

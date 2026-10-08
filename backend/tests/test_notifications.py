@@ -95,6 +95,7 @@ def test_empty_notification_feed(client):
         "items": [],
         "unread_count": 0,
         "unread_conversations": {},
+        "unread_conversation_context": {},
         "next_cursor": None,
         "latest_id": None,
     }
@@ -383,6 +384,31 @@ def test_feed_paginates_without_duplicates_and_read_all_leaves_new_events_unread
     unread = client.get("/api/notifications?unread=true", headers=headers).json()
     assert unread["unread_count"] == 1
     assert len(unread["items"]) == 1
+
+
+def test_unread_context_uses_current_state_and_includes_chats_outside_the_feed_page(client):
+    alex, headers = auth(client)
+    easy = insert_site("easy", "SampleSite", "easy-key")
+    bg = insert_site("background", "Sample Services", "bg-key")
+    queued, _ = client.portal.call(make_chat, easy, "queued")
+    live, _ = client.portal.call(make_chat, bg)
+    client.portal.call(emit_batch, queued, 1)
+    client.portal.call(emit_batch, live, 32)
+
+    async def join():
+        from app.models.user import User
+
+        async with session_maker()() as session:
+            await ConversationService(session).join(live, await session.get(User, alex))
+
+    client.portal.call(join)
+    feed = client.get("/api/notifications", headers=headers).json()
+    assert {row["conversation_id"] for row in feed["items"]} == {str(live)}
+    assert feed["unread_conversation_context"] == {
+        str(queued): {"site_id": str(easy), "state": "queued"},
+        str(live): {"site_id": str(bg), "state": "human"},
+    }
+    assert feed["unread_conversations"] == {str(queued): 1, str(live): 32}
 
 
 async def close_callback(chat_id, user_id):
