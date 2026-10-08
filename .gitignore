@@ -64,3 +64,6 @@ frontend/docs/
 **/.agents/
 **/plans/
 backend/eval_artifacts/
+
+# Keep repository documentation tracked.
+!/README.md
