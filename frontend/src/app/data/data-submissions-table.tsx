@@ -467,7 +467,7 @@ const SubmissionsTableGrid = ({
   }, [hasMore, loadMoreError, loadingMore, onLoadMore])
 
   return (
-    <div ref={scrollRef} className="min-h-0 flex-1 overflow-x-auto overflow-y-auto">
+    <div ref={scrollRef} className="min-h-0 flex-1 overflow-x-scroll overflow-y-auto">
       <Table
         aria-label="Form submissions"
         className="table-fixed border-collapse text-left"

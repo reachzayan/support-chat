@@ -174,7 +174,7 @@ export const CannedResponsesConsole = () => {
         ) : (
           <section className="border-line bg-paper flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-xl border">
             <CannedScrollPane
-              className="hidden min-h-0 flex-1 overflow-x-auto overflow-y-auto overscroll-none md:block"
+              className="hidden min-h-0 flex-1 overflow-x-scroll overflow-y-auto overscroll-none md:block"
               hasMore={state.hasMore}
               loadedCount={state.visible.length}
               onLoadMore={state.loadMore}

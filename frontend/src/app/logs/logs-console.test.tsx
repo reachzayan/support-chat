@@ -62,6 +62,8 @@ describe("logs console", () => {
     expect(within(table).getByText("backend")).toBeInTheDocument()
     expect(within(table).getByText(/2026-09-11/)).toBeInTheDocument()
     expect(within(table).getByText(/TimeoutError/)).toBeInTheDocument()
+    expect(table.closest(".overflow-x-scroll")).not.toBeNull()
+    expect(table.closest(".overflow-x-auto")).toBeNull()
 
     await userEvent.setup().click(screen.getByRole("button", { name: "Dump last 7 days" }))
 

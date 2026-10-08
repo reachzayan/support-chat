@@ -198,7 +198,7 @@ const ServiceTable = ({
   onRefresh: () => void
 }) => (
   <section className="border-line bg-paper shrink-0 overflow-hidden rounded-lg border">
-    <div className="overflow-x-auto">
+    <div className="overflow-x-scroll">
       <table className="w-full min-w-[40rem] text-left text-sm" aria-label="Services">
         <thead className="bg-ice-2 border-line border-b">
           <tr>
@@ -294,7 +294,7 @@ const WebsiteTable = ({ sites }: { sites: StatusSite[] }) => (
         Manage sites
       </Link>
     </div>
-    <div className="overflow-x-auto">
+    <div className="overflow-x-scroll">
       <table className="w-full min-w-[36rem] text-left text-sm" aria-label="Websites">
         <thead className="bg-ice-2 border-line border-b">
           <tr>

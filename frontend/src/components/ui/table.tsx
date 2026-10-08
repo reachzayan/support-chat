@@ -3,7 +3,7 @@ import * as React from "react"
 
 const Table = React.forwardRef<HTMLTableElement, React.ComponentProps<"table">>(
   ({ className, ...props }, ref) => (
-    <div className="relative w-full overflow-auto">
+    <div className="relative w-full overflow-visible">
       <table
         ref={ref}
         data-slot="table"

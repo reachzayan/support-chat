@@ -83,6 +83,22 @@ body {
   line-height: 1.15;
 }
 
+/* Overlay scrollbars hide until you start scrolling, so mouse users cannot grab them. */
+.overflow-x-scroll {
+  scrollbar-width: auto;
+  scrollbar-color: var(--mute) var(--ice-2);
+}
+.overflow-x-scroll::-webkit-scrollbar {
+  height: 12px;
+}
+.overflow-x-scroll::-webkit-scrollbar-track {
+  background: var(--ice-2);
+}
+.overflow-x-scroll::-webkit-scrollbar-thumb {
+  background: var(--mute);
+  border-radius: 8px;
+}
+
 @keyframes widget-enter {
   from {
     opacity: 0;

@@ -67,7 +67,7 @@ const DumpButton = ({ dumping, onDump }: { dumping: boolean; onDump: () => void 
 )
 
 const LogsTable = ({ items }: { items: AppLogRow[] }) => (
-  <div className="border-line bg-paper overflow-x-auto rounded-[8px] border">
+  <div className="border-line bg-paper overflow-x-scroll rounded-[8px] border">
     <table className="w-full min-w-[960px] text-left text-sm" aria-label="Application logs">
       <thead className="bg-ice-2 border-line border-b">
         <tr>

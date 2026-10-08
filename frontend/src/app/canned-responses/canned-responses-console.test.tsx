@@ -125,6 +125,8 @@ describe("canned responses console scrolling", () => {
     expect(shell?.className).toMatch(/\boverflow-hidden\b/)
     expect(shell?.className).not.toMatch(/\boverflow-y-auto\b/)
     expect(tableScroll).not.toBeNull()
+    expect(tableScroll?.className).toMatch(/\boverflow-x-scroll\b/)
+    expect(tableScroll?.className).not.toMatch(/\boverflow-x-auto\b/)
     expect(tableScroll?.className).toMatch(/\boverscroll-none\b/)
     expect(tableScroll?.contains(heading)).toBe(false)
     expect(tableScroll?.contains(scope)).toBe(false)

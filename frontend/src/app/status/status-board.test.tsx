@@ -275,3 +275,16 @@ describe("status board uptime", () => {
     )
   })
 })
+
+describe("status board table scroll", () => {
+  test("service and website tables keep a permanent horizontal scrollbar", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse(SNAPSHOT)))
+    renderWithProviders(<StatusBoard />)
+    const services = await screen.findByRole("table", { name: "Services" })
+    const websites = screen.getByRole("table", { name: "Websites" })
+    expect(services.closest(".overflow-x-scroll")).not.toBeNull()
+    expect(services.closest(".overflow-x-auto")).toBeNull()
+    expect(websites.closest(".overflow-x-scroll")).not.toBeNull()
+    expect(websites.closest(".overflow-x-auto")).toBeNull()
+  })
+})

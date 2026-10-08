@@ -184,6 +184,14 @@ describe("data console table", () => {
     expect(screen.getByText("11 of 11 loaded")).toBeInTheDocument()
     expect(screen.queryByRole("link", { name: /Go to page/ })).not.toBeInTheDocument()
   })
+
+  test("the submissions table keeps a permanent horizontal scrollbar", async () => {
+    stubSubmissions(buildPagedRows(2))
+    renderWithProviders(<DataConsole />)
+    const table = await screen.findByRole("table", { name: "Form submissions" })
+    expect(table.closest(".overflow-x-scroll")).not.toBeNull()
+    expect(table.closest(".overflow-x-auto")).toBeNull()
+  })
 })
 
 describe("data console filters", () => {
