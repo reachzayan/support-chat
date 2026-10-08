@@ -60,12 +60,21 @@ test.each([320, 390, 820, 1100])(
   },
 )
 
-test("notification deep link opens its chat even outside the current list filter", async () => {
+test.each([
+  ["queued", "Needs Attention"],
+  ["bot", "Bot"],
+  ["human", "Live"],
+  ["closed", "Closed"],
+])("notification opens a %s chat and selects %s in the slider", async (state, label) => {
+  setDetails({ [CONVO_ID]: { ...structuredClone(adaDetail), state } })
+  const user = userEvent.setup()
   renderWithProviders(<InboxConsole user={ALEX} initialConversationId={CONVO_ID} />)
   expect(await screen.findByRole("log", { name: "Transcript" })).toHaveTextContent(
     "How fast are DOT results?",
   )
   expect(screen.queryByRole("list", { name: "Conversations" })).not.toBeInTheDocument()
+  await user.click(screen.getByRole("button", { name: "Back to conversations" }))
+  expect(screen.getByRole("button", { name: label })).toHaveAttribute("aria-pressed", "true")
 })
 
 test("failed conversation load can be retried or left", async () => {
