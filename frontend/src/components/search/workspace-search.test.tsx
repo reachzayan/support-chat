@@ -34,31 +34,50 @@ afterEach(() => vi.unstubAllGlobals())
 const open = async (isAdmin = true) => {
   renderWithProviders(<WorkspaceSearch isAdmin={isAdmin} />)
   const user = userEvent.setup()
-  await user.click(screen.getByRole("button", { name: "Search workspace" }))
+  await user.click(screen.getByRole("combobox", { name: "Search workspace records" }))
   return { user, input: screen.getByRole("combobox", { name: "Search workspace records" }) }
 }
 
-test("shell and shortcut focus input; Escape closes and restores focus", async () => {
-  const { user, input } = await open()
+test("the toolbar input stays the only input when its results dropdown opens", async () => {
+  renderWithProviders(<WorkspaceSearch isAdmin />)
+  const user = userEvent.setup()
+  const input = screen.getByRole("combobox", { name: "Search workspace records" })
+  expect(screen.queryByRole("listbox")).not.toBeInTheDocument()
+  await user.click(input)
+  const results = await screen.findByRole("listbox", { name: "Workspace results" })
+  expect(screen.getAllByRole("combobox")).toHaveLength(1)
+  expect(results).not.toContainElement(input)
   expect(input).toHaveFocus()
+  expect(input).toHaveAttribute("aria-expanded", "true")
+  expect(input).toHaveAttribute("aria-controls", results.id)
   await user.keyboard("{Escape}")
-  await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument())
-  expect(screen.getByRole("button", { name: "Search workspace" })).toHaveFocus()
-  fireEvent.keyDown(document, { key: "k", ctrlKey: true })
-  expect(await screen.findByRole("dialog")).toBeInTheDocument()
+  await waitFor(() => expect(screen.queryByRole("listbox")).not.toBeInTheDocument())
+  expect(input).toHaveFocus()
+  expect(input).toHaveAttribute("aria-expanded", "false")
 })
 
-test("the shortcut opens an anchored search before the trigger has ever been clicked", async () => {
+test("the shortcut opens and focuses the toolbar input before it has ever been clicked", async () => {
   renderWithProviders(<WorkspaceSearch isAdmin />)
+  const input = screen.getByRole("combobox", { name: "Search workspace records" })
   fireEvent.keyDown(document, { key: "k", metaKey: true })
-  const popup = await screen.findByRole("dialog", { name: "Search workspace" })
-  const trigger = screen.getByRole("button", { name: "Search workspace" })
-  await waitFor(() => expect(trigger).toHaveAttribute("aria-expanded", "true"))
-  expect(trigger).toHaveAttribute("aria-controls", popup.id)
-  expect(screen.getByRole("combobox")).toHaveFocus()
+  expect(await screen.findByRole("listbox", { name: "Workspace results" })).toBeInTheDocument()
+  await waitFor(() => expect(input).toHaveFocus())
   await userEvent.setup().keyboard("{Escape}")
-  await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument())
-  expect(trigger).toHaveFocus()
+  await waitFor(() => expect(screen.queryByRole("listbox")).not.toBeInTheDocument())
+  expect(input).toHaveFocus()
+  fireEvent.keyDown(document, { key: "k", ctrlKey: true })
+  expect(await screen.findByRole("listbox", { name: "Workspace results" })).toBeInTheDocument()
+  expect(input).toHaveFocus()
+})
+
+test("navigation rows show each destination once without a repeated generic description", async () => {
+  await open()
+  expect(screen.getByRole("option", { name: "Inbox" })).toHaveTextContent(/^Inbox$/)
+  expect(screen.getByRole("option", { name: "Sites" })).toHaveTextContent(/^Sites$/)
+  expect(screen.getByRole("option", { name: "Knowledge base" })).toHaveTextContent(
+    /^Knowledge base$/,
+  )
+  expect(screen.queryByText("Open workspace view")).not.toBeInTheDocument()
 })
 
 test("groups current records first, then navigation and other matches; Enter opens exact chat", async () => {
@@ -100,7 +119,7 @@ test("arrow keys select site destination, pointer opens it too", async () => {
   await screen.findByRole("option", { name: /SampleSite · Site settings/ })
   await user.keyboard("{ArrowDown}{Enter}")
   expect(push).toHaveBeenCalledWith("/admin/sites?site=other")
-  await user.click(screen.getByRole("button", { name: "Search workspace" }))
+  await user.click(screen.getByRole("combobox", { name: "Search workspace records" }))
   await user.type(screen.getByRole("combobox"), "site")
   await user.click(await screen.findByRole("option", { name: /SampleSite · Site settings/ }))
   expect(push).toHaveBeenLastCalledWith("/admin/sites?site=easy")
@@ -160,6 +179,8 @@ test("clear restores destinations; short queries do not request records; literal
   expect(staffRequest).not.toHaveBeenCalled()
   await user.click(screen.getByRole("button", { name: "Clear search" }))
   expect(input).toHaveValue("")
+  expect(screen.getByRole("option", { name: "Inbox" })).toBeInTheDocument()
+  expect(input).toHaveFocus()
   fireEvent.change(input, { target: { value: "[<script>%_" } })
   await screen.findByText(/No matches across/)
   expect(JSON.parse(String(vi.mocked(staffRequest).mock.calls.at(-1)?.[1]?.body)).query).toBe(
@@ -202,9 +223,9 @@ test.each([320, 390, 768])(
     await waitFor(() => expect(screen.getByRole("combobox")).toHaveFocus())
     await user.click(screen.getByRole("option", { name: "Notification settings" }))
     expect(push).toHaveBeenCalledWith("/admin/notifications")
-    await user.click(screen.getByRole("button", { name: "Search workspace" }))
+    await user.click(screen.getByRole("combobox", { name: "Search workspace records" }))
     await user.click(screen.getByRole("button", { name: "Close search" }))
-    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument())
+    await waitFor(() => expect(screen.queryByRole("listbox")).not.toBeInTheDocument())
     vi.unstubAllGlobals()
   },
 )
@@ -225,17 +246,43 @@ test("search opens without a modal or context strip, and outside controls remain
     </>,
   )
   const user = userEvent.setup()
-  const trigger = screen.getByRole("button", { name: "Search workspace" })
+  const trigger = screen.getByRole("combobox", { name: "Search workspace records" })
   await user.click(trigger)
-  const popup = await screen.findByRole("dialog", { name: "Search workspace" })
+  const popup = await screen.findByRole("listbox", { name: "Workspace results" })
   expect(popup).not.toHaveAttribute("aria-modal", "true")
   expect(screen.queryByText(/Searching in/)).not.toBeInTheDocument()
   expect(screen.getByRole("combobox")).toHaveFocus()
   await user.click(screen.getByRole("button", { name: "Workspace action" }))
   expect(outsideAction).toHaveBeenCalledTimes(1)
-  await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument())
+  await waitFor(() => expect(screen.queryByRole("listbox")).not.toBeInTheDocument())
   await user.click(trigger)
   await user.keyboard("{Escape}")
-  await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument())
+  await waitFor(() => expect(screen.queryByRole("listbox")).not.toBeInTheDocument())
   expect(trigger).toHaveFocus()
+})
+
+test("tabbing out closes results and leaves focus on the next workspace control", async () => {
+  renderWithProviders(
+    <>
+      <WorkspaceSearch isAdmin />
+      <button>Workspace action</button>
+    </>,
+  )
+  const user = userEvent.setup()
+  await user.click(screen.getByRole("combobox", { name: "Search workspace records" }))
+  await screen.findByRole("listbox", { name: "Workspace results" })
+  await user.tab()
+  expect(screen.getByRole("button", { name: "Close search" })).toHaveFocus()
+  await user.tab()
+  expect(screen.getByRole("button", { name: "Workspace action" })).toHaveFocus()
+  expect(screen.queryByRole("listbox")).not.toBeInTheDocument()
+})
+
+test("Escape from a search control closes results and returns focus to the toolbar input", async () => {
+  const { user, input } = await open()
+  await user.tab()
+  expect(screen.getByRole("button", { name: "Close search" })).toHaveFocus()
+  await user.keyboard("{Escape}")
+  expect(screen.queryByRole("listbox")).not.toBeInTheDocument()
+  expect(input).toHaveFocus()
 })

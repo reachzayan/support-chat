@@ -10,6 +10,7 @@ import { bindAgentSocket, resumeAgentSocket, type SocketApi } from "./inbox-sock
 import {
   INBOX_LIST_POLL_MS,
   type CannedReply,
+  type ConversationDetail,
   type InboxCounts,
   type InboxFilter,
   type InboxListItem,
@@ -243,6 +244,7 @@ const loadInboxDetail = async (
   setCanned: Dispatch<SetStateAction<CannedReply[]>>,
   setLive: Dispatch<SetStateAction<InboxLive>>,
   setDetailError: Dispatch<SetStateAction<boolean>>,
+  onOpenDetail: (detail: ConversationDetail) => void,
 ) => {
   const next = await fetchInboxDetail(conversationId).catch(() => null)
   if (request !== detailRequestRef.current || refs.selectedRef.current !== conversationId) {
@@ -250,6 +252,9 @@ const loadInboxDetail = async (
   }
   setDetailError(next === null)
   if (next === null) return
+  if (refs.liveRef.current.detail === null) {
+    onOpenDetail(next.detail)
+  }
   applyFetchedDetail(
     conversationId,
     next,
@@ -273,6 +278,7 @@ export const useInboxLoaders = (
   setSites: Dispatch<SetStateAction<InboxSite[]>>,
   setLoadError: Dispatch<SetStateAction<boolean>>,
   onUnknownSite: () => void,
+  onOpenDetail: (detail: ConversationDetail) => void,
 ) => {
   const extraCursorsRef = useRef<string[]>([])
   const loadedCursorsRef = useRef<Set<string>>(new Set())
@@ -330,9 +336,10 @@ export const useInboxLoaders = (
         setCanned,
         setLive,
         setDetailError,
+        onOpenDetail,
       )
     },
-    [refs, setCanned, setLive, socketRef],
+    [onOpenDetail, refs, setCanned, setLive, socketRef],
   )
 
   return { reloadList, reloadDetail, clearLoadedCursors, detailError }

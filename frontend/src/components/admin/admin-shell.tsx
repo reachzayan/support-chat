@@ -511,7 +511,7 @@ export const AdminShell = ({ children }: { children: ReactNode }) => {
             displayName={user?.display_name ?? "Loading workspace"}
             isAdmin={user?.is_admin ?? false}
           />
-          <SidebarInset className="flex h-dvh min-h-0 min-w-0 flex-col overflow-hidden overscroll-none bg-[#14161b] p-0 md:px-2 md:pb-2">
+          <SidebarInset className="isolate flex h-dvh min-h-0 min-w-0 flex-col overflow-hidden overscroll-none bg-[#14161b] p-0 md:px-2 md:pb-2">
             <AdminUserContext.Provider value={user}>
               <WorkspaceToolbar userId={user?.id} />
               <div className="bg-ice flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden overscroll-none md:rounded-lg">

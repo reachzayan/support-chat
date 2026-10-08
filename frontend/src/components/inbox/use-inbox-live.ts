@@ -11,7 +11,9 @@ import { emptyLive, type InboxLive } from "./inbox-session"
 import type { SocketApi } from "./inbox-socket"
 import {
   EMPTY_INBOX_COUNTS,
+  INBOX_FILTERS,
   type CannedReply,
+  type ConversationDetail,
   type InboxFilter,
   type InboxListItem,
   type InboxSite,
@@ -108,7 +110,17 @@ const useInboxQueryHandlers = (
     refs.markSiteId(null)
     setSiteId(null)
   }, [refs, setSiteId])
-  return { handleFilter, handleSite, handleUnknownSite, clearOpenChat }
+  const handleOpenDetail = useCallback(
+    (detail: ConversationDetail) => {
+      const nextFilter = INBOX_FILTERS.find(({ id }) => id === detail.state)?.id
+      if (nextFilter) {
+        refs.markFilter(nextFilter)
+        setFilter(nextFilter)
+      }
+    },
+    [refs, setFilter],
+  )
+  return { handleFilter, handleSite, handleUnknownSite, handleOpenDetail, clearOpenChat }
 }
 
 export const useInboxLive = (userId: string) => {
@@ -146,6 +158,7 @@ export const useInboxLive = (userId: string) => {
     setSites,
     setLoadError,
     query.handleUnknownSite,
+    query.handleOpenDetail,
   )
   useInboxSideEffects(
     filter,

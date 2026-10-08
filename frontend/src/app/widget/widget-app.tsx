@@ -178,9 +178,8 @@ export const WidgetApp = () => {
   const viewRef = useRef(view)
   const parentRef = useRef(parentOrigin)
   const paintedRef = useRef(false)
-  useEffect(() => {
-    viewRef.current = view
-  }, [view])
+  // Bootstrap and socket handlers update this ref before scheduling a render.
+  // A committed render may lag behind newer frames, so it must not overwrite it.
   useEffect(() => {
     parentRef.current = parentOrigin
   }, [parentOrigin])

@@ -36,6 +36,7 @@ export type NotificationFeed = {
   items: NotificationItem[]
   unread_count: number
   unread_conversations?: Record<string, number>
+  unread_conversation_context?: Record<string, { site_id: string; state: string }>
   next_cursor: number | null
   latest_id?: number | null
 }

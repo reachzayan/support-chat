@@ -1,5 +1,6 @@
 import { screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
+import { Profiler, useCallback, useRef } from "react"
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest"
 
 import { renderWithProviders } from "@/test/render"
@@ -685,6 +686,60 @@ test("handoff and busy messages appear in the transcript and announce new widget
     { type: "widget.message", conversation_id: chatId, message_id: 11 },
     { type: "widget.message", conversation_id: chatId, message_id: 12 },
   ])
+})
+
+// Inject frames at commit boundaries to reproduce an older render racing newer socket state.
+const HandoffCommitRace = () => {
+  const delivered = useRef(false)
+  const repeatedState = useRef(false)
+  const onRender = useCallback(() => {
+    const hasHandoff = screen
+      .queryByRole("log")
+      ?.textContent?.includes("A specialist will join this chat shortly.")
+    if (delivered.current && !repeatedState.current && hasHandoff) {
+      repeatedState.current = true
+      emit(FakeSocket.instances[0], { type: "state", state: "queued", assigned_agent: null })
+      return
+    }
+    if (delivered.current || !screen.queryByText("I want to talk to a human")) return
+    delivered.current = true
+    emit(FakeSocket.instances[0], {
+      type: "message",
+      id: 12,
+      role: "system",
+      system_reason: "visitor_request",
+      body: "A specialist will join this chat shortly.",
+    })
+    emit(FakeSocket.instances[0], { type: "state", state: "queued", assigned_agent: null })
+  }, [])
+  return (
+    <Profiler id="visitor-chat" onRender={onRender}>
+      <WidgetApp />
+    </Profiler>
+  )
+}
+
+test("a handoff arriving during a visitor-message commit survives the following state frame", async () => {
+  FakeSocket.instances = []
+  vi.stubGlobal("WebSocket", FakeSocket)
+  renderWithProviders(<HandoffCommitRace />)
+  dispatchBootstrap({
+    id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+    state: "bot",
+    assigned_agent: null,
+    messages: [{ type: "message", id: 10, role: "system", body: "Welcome" }],
+  })
+  await screen.findByText("Welcome")
+  emit(FakeSocket.instances[0], {
+    type: "message",
+    id: 11,
+    role: "visitor",
+    body: "I want to talk to a human",
+  })
+  await waitFor(() =>
+    expect(screen.queryByRole("button", { name: "Send" })).not.toBeInTheDocument(),
+  )
+  expect(screen.getByRole("log")).toHaveTextContent("A specialist will join this chat shortly.")
 })
 
 test.each([

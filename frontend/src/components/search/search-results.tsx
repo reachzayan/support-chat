@@ -2,7 +2,6 @@
 /* oxlint-disable react-perf/jsx-no-jsx-as-prop, react-perf/jsx-no-new-function-as-prop -- Each Base UI option links to its own destination. */
 import { Autocomplete } from "@base-ui/react/autocomplete"
 import {
-  ArrowUpRight,
   CornerDownLeft,
   MessageSquare,
   Globe,
@@ -32,7 +31,7 @@ const resultIcons = {
   settings: Settings,
 }
 const ResultIcon = ({ item }: { item: SearchItem }) => {
-  const Icon = item.kind === "navigation" ? ArrowUpRight : resultIcons[item.screen]
+  const Icon = resultIcons[item.screen]
   return <Icon className="size-4" aria-hidden="true" />
 }
 
@@ -61,24 +60,29 @@ const Highlight = ({ text, query }: { text: string; query: string }) => {
 const SearchOption = ({ item, state }: { item: SearchItem; state: SearchController }) => (
   <Autocomplete.Item
     value={item}
+    tabIndex={-1}
     render={<a href={item.href} aria-label={item.title} />}
     onClick={(event) => state.navigate(item, event)}
-    className="group text-ink data-highlighted:bg-ice-2 flex cursor-pointer items-center gap-3 rounded-xl px-3 py-3 outline-none"
+    className="group text-ink hover:bg-ice data-highlighted:bg-ice-2 focus-visible:ring-steel flex min-h-11 cursor-pointer items-center gap-3 rounded-md px-3 py-2 no-underline outline-none focus-visible:ring-2 sm:min-h-10"
   >
-    <span className="border-line bg-paper text-steel flex size-9 shrink-0 items-center justify-center rounded-lg border">
+    <span className="text-steel flex size-7 shrink-0 items-center justify-center">
       <ResultIcon item={item} />
     </span>
     <span className="min-w-0 flex-1">
       <span className="block truncate text-sm font-medium">
         <Highlight text={item.title} query={state.query} />
       </span>
-      <span className="text-mute mt-0.5 line-clamp-2 text-xs leading-5">
-        <Highlight text={item.description} query={state.query} />
+      {item.kind !== "navigation" && item.description ? (
+        <span className="text-mute mt-0.5 line-clamp-2 text-xs leading-5">
+          <Highlight text={item.description} query={state.query} />
+        </span>
+      ) : null}
+    </span>
+    {item.kind !== "navigation" && item.screen !== state.currentScreen ? (
+      <span className="text-mute hidden shrink-0 text-[10px] sm:block">
+        {screenLabel(item.screen)}
       </span>
-    </span>
-    <span className="text-mute hidden shrink-0 text-[10px] sm:block">
-      {screenLabel(item.screen)}
-    </span>
+    ) : null}
     <CornerDownLeft
       className="text-mute hidden size-3.5 shrink-0 opacity-0 group-data-highlighted:opacity-100 sm:block"
       aria-hidden="true"
